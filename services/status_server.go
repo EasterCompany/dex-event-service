@@ -84,9 +84,11 @@ func (ss *StatusServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 // handleHealth returns simple health check
 func (ss *StatusServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status": "OK",
-	})
+	}); err != nil {
+		log.Printf("[STATUS] Error encoding health check: %v", err)
+	}
 }
 
 // IncrementEventsReceived increments the events received counter
