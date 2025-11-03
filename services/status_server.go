@@ -37,8 +37,8 @@ func (ss *StatusServer) Start() error {
 	mux.HandleFunc("/status", ss.handleStatus)
 	mux.HandleFunc("/health", ss.handleHealth)
 
-	addr := fmt.Sprintf("127.0.0.1:%d", ss.port)
-	log.Printf("[STATUS] Starting status server on http://%s", addr)
+	addr := fmt.Sprintf(":%d", ss.port)
+	log.Printf("[STATUS] Starting status server on 0.0.0.0:%d", ss.port)
 
 	go func() {
 		if err := http.ListenAndServe(addr, mux); err != nil {
