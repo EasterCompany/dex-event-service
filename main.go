@@ -1,41 +1,19 @@
 package main
 
 import (
+	"fmt"
 	"log"
-	"os"
-	"os/signal"
-	"syscall"
+	"net/http"
 
-	"github.com/EasterCompany/dex-event-service/services"
-)
-
-const (
-	ServicePort    = 8100
-	ServiceVersion = "1.0.0"
-)
-
-var (
-	statusServer *services.StatusServer
+	"github.com/EasterCompany/dex-event-service/endpoints"
 )
 
 func main() {
-	log.Printf("[MAIN] Starting dex-event-service v%s", ServiceVersion)
+	http.HandleFunc("/service", endpoints.ServiceHandler)
 
-	// Initialize status server
-	statusServer = services.NewStatusServer(ServicePort, ServiceVersion)
-	if err := statusServer.Start(); err != nil {
-		log.Fatalf("[MAIN] Failed to start status server: %v", err)
+	port := 8080
+	fmt.Printf("Starting dex-event-service on :%d\n", port)
+	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
 	}
-
-	log.Printf("[MAIN] dex-event-service is running on http://127.0.0.1:%d", ServicePort)
-	log.Printf("[MAIN] Status endpoint: http://127.0.0.1:%d/status", ServicePort)
-	log.Printf("[MAIN] Health endpoint: http://127.0.0.1:%d/health", ServicePort)
-
-	// Wait for shutdown signal
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	<-sigCh
-
-	log.Printf("[MAIN] Shutting down dex-event-service...")
-	log.Printf("[MAIN] Shutdown complete")
 }
