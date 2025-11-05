@@ -11,9 +11,8 @@ type ServiceReport struct {
 
 // Version holds all version-related information for a service.
 type Version struct {
-	ShortStr string         `json:"short_str"`
-	FullStr  string         `json:"full_str"`
-	Obj      VersionDetails `json:"obj"`
+	Str string         `json:"str"`
+	Obj VersionDetails `json:"obj"`
 }
 
 // VersionDetails breaks down the version string into its components.
