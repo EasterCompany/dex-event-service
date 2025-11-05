@@ -12,7 +12,7 @@ func GetHealth() Health {
 	// For now, we'll just return a healthy status.
 	uptime := time.Since(startTime).String()
 	return Health{
-		Status: "OK",
+		Status: "healthy",
 		Uptime: uptime,
 	}
 }
