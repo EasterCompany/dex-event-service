@@ -48,7 +48,7 @@ func ServiceHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Check health status to set the correct HTTP status code
-	if report.Health.Status == "healthy" {
+	if report.Health.Status == "OK" {
 		w.WriteHeader(http.StatusOK)
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
