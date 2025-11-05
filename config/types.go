@@ -1,5 +1,13 @@
 package config
 
+// GetSanitized returns a sanitized version of the config.
+func (c *ServiceMapConfig) GetSanitized() map[string]interface{} {
+	sanitized := make(map[string]interface{})
+	sanitized["service_types"] = c.ServiceTypes
+	sanitized["services"] = c.Services
+	return sanitized
+}
+
 // ServiceMapConfig represents the structure of service-map.json
 type ServiceMapConfig struct {
 	ServiceTypes []ServiceType             `json:"service_types"`

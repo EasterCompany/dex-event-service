@@ -1,20 +1,63 @@
 package endpoints
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
+	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/utils"
 )
 
-// ServiceHandler provides a simple health check endpoint.
+// ServiceHandler provides a comprehensive status report for the service.
 func ServiceHandler(w http.ResponseWriter, r *http.Request) {
-	health := utils.GetHealth()
-	if health.Status == "healthy" {
+	cfg, err := config.LoadServiceMap()
+	if err != nil {
+		// If config fails to load, we can't be sure of the service's state.
+		http.Error(w, "Failed to load service configuration", http.StatusInternalServerError)
+		return
+	}
+
+	systemCfg, err := config.LoadSystem()
+	if err != nil {
+		http.Error(w, "Failed to load system configuration", http.StatusInternalServerError)
+		return
+	}
+
+	// Omit sensitive fields from the config report
+	safeConfig := make(map[string]interface{})
+	for key, val := range cfg.GetSanitized() {
+		safeConfig[key] = val
+	}
+
+	logs, err := utils.GetSystemdLogs(systemCfg.Packages[0].Name, 10)
+	if err != nil {
+		// If logs can't be fetched, we can still return a report.
+		// We'll add a note to the logs field about the error.
+		logs = []string{fmt.Sprintf("Failed to fetch systemd logs: %v", err)}
+	}
+
+	report := utils.ServiceReport{
+		Version: utils.GetVersion(),
+		Health:  utils.GetHealth(),
+		Metrics: utils.Metrics{}, // Placeholder for future implementation
+		Logs:    logs,
+		Config:  safeConfig,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check health status to set the correct HTTP status code
+	if report.Health.Status == "healthy" {
 		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintln(w, "OK")
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = fmt.Fprintln(w, "BAD")
+	}
+
+	// Encode the full report as JSON
+	if err := json.NewEncoder(w).Encode(report); err != nil {
+		// This is an internal error, the response is likely already partially sent.
+		// We can't send a new http.Error, but we can log it.
+		utils.LogError("Failed to encode service report: %v", err)
 	}
 }

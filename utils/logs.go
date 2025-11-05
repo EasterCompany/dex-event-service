@@ -2,9 +2,17 @@ package utils
 
 import (
 	"bufio"
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
+
+// LogError prints an error message to stderr.
+func LogError(format string, v ...interface{}) {
+	// A simple implementation for now. In a real service, you'd use a structured logger.
+	fmt.Fprintf(os.Stderr, "ERROR: "+format+"\n", v...)
+}
 
 // GetSystemdLogs fetches the most recent logs for a given systemd service.
 func GetSystemdLogs(serviceName string, lineCount int) ([]string, error) {
