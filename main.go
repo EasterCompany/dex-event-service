@@ -8,11 +8,25 @@ import (
 
 	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/endpoints"
+	"github.com/EasterCompany/dex-event-service/utils"
 )
 
 const ServiceName = "dex-event-service"
 
+var (
+	version   string
+	branch    string
+	commit    string
+	buildDate string
+	buildYear string
+	buildHash string
+	arch      string
+)
+
 func main() {
+	// Set the version for the service.
+	utils.SetVersion(version, branch, commit, buildDate, buildYear, buildHash, arch)
+
 	// Load the service map and find our own configuration.
 	serviceMap, err := config.LoadServiceMap()
 	if err != nil {

@@ -2,53 +2,42 @@ package utils
 
 import (
 	"fmt"
-	"runtime"
+	"strings"
 )
 
-// These should be set at build time using -ldflags
-var (
-	VersionMajor = "0"
-	VersionMinor = "0"
-	VersionPatch = "1"
-	Branch       = "main"
-	Commit       = "dev"
-	BuildDate    = "unknown"
-	BuildHash    = "unknown"
-)
+var currentVersion Version
+
+// SetVersion populates the package-level version variables.
+func SetVersion(versionStr, branchStr, commitStr, buildDateStr, buildYearStr, buildHashStr, archStr string) {
+	// Format the architecture: linux/amd64 -> linux-amd64
+	formattedArch := strings.ReplaceAll(archStr, "/", "-")
+
+	// Parse major, minor, patch from the full version string
+	vParts := strings.Split(strings.TrimPrefix(versionStr, "v"), ".")
+	major, minor, patch := "0", "0", "0"
+	if len(vParts) >= 3 {
+		major = vParts[0]
+		minor = vParts[1]
+		patch = vParts[2]
+	}
+
+	currentVersion = Version{
+		Str: fmt.Sprintf("%s.%s.%s.%s.%s.%s.%s.%s",
+			major, minor, patch, branchStr, commitStr, buildDateStr, formattedArch, buildHashStr),
+		Obj: VersionDetails{
+			Major:     major,
+			Minor:     minor,
+			Patch:     patch,
+			Branch:    branchStr,
+			Commit:    commitStr,
+			BuildDate: buildDateStr,
+			Arch:      formattedArch,
+			BuildHash: buildHashStr,
+		},
+	}
+}
 
 // GetVersion constructs and returns the version information for the service.
 func GetVersion() Version {
-	// In a real scenario, these values would be dynamically populated.
-	// For now, we use the build-time variables and some placeholders.
-	commitShort := Commit
-	if len(Commit) > 7 {
-		commitShort = Commit[:7]
-	}
-
-	vObj := VersionObject{
-		Major:     VersionMajor,
-		Minor:     VersionMinor,
-		Patch:     VersionPatch,
-		Branch:    Branch,
-		Commit:    commitShort,
-		BuildDate: BuildDate,
-		Arch:      fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
-		BuildHash: BuildHash,
-	}
-
-	tag := fmt.Sprintf("%s.%s.%s", vObj.Major, vObj.Minor, vObj.Patch)
-	str := fmt.Sprintf("%s-%s+%s.%s.%s.%s",
-		tag,
-		vObj.Branch,
-		vObj.Commit,
-		vObj.BuildDate,
-		vObj.Arch,
-		vObj.BuildHash,
-	)
-
-	return Version{
-		Tag: tag,
-		Str: str,
-		Obj: vObj,
-	}
+	return currentVersion
 }

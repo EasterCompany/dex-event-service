@@ -1,22 +1,22 @@
 package utils
 
-// ServiceReport is the unified response from the /service endpoint.
+// ServiceReport defines the structure for the /service endpoint response.
 type ServiceReport struct {
-	Version Version  `json:"version"`
-	Status  string   `json:"status"`
-	Health  Health   `json:"health"`
-	Logs    []string `json:"logs"`
+	Version Version                `json:"version"`
+	Health  Health                 `json:"health"`
+	Metrics Metrics                `json:"metrics"`
+	Logs    []string               `json:"logs"`
+	Config  map[string]interface{} `json:"config"`
 }
 
-// Version holds the detailed version information for the service.
+// Version holds all version-related information for a service.
 type Version struct {
-	Tag string        `json:"tag"`
-	Str string        `json:"str"`
-	Obj VersionObject `json:"obj"`
+	Str string         `json:"str"`
+	Obj VersionDetails `json:"obj"`
 }
 
-// VersionObject contains the granular components of the version string.
-type VersionObject struct {
+// VersionDetails breaks down the version string into its components.
+type VersionDetails struct {
 	Major     string `json:"major"`
 	Minor     string `json:"minor"`
 	Patch     string `json:"patch"`
@@ -27,17 +27,15 @@ type VersionObject struct {
 	BuildHash string `json:"build_hash"`
 }
 
-// Health holds detailed performance metrics from a service.
+// Health represents the health status of the service.
 type Health struct {
-	Timestamp int64   `json:"timestamp"`
-	Uptime    float64 `json:"uptime"`
-	Metrics   Metrics `json:"metrics"`
+	Status  string `json:"status"`
+	Uptime  string `json:"uptime"`
+	Message string `json:"message,omitempty"`
 }
 
-// Metrics holds specific performance counters.
+// Metrics holds basic performance metrics.
 type Metrics struct {
-	Goroutines      int     `json:"goroutines"`
-	MemoryAllocMB   float64 `json:"memory_alloc_mb"`
-	EventsReceived  uint64  `json:"events_received,omitempty"`
-	EventsProcessed uint64  `json:"events_processed,omitempty"`
+	CPU    string `json:"cpu"`
+	Memory string `json:"memory"`
 }

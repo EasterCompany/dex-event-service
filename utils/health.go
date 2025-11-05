@@ -1,25 +1,18 @@
 package utils
 
 import (
-	"runtime"
 	"time"
 )
 
 var startTime = time.Now()
 
-// GetHealth constructs and returns the current health metrics for the service.
+// GetHealth returns the current health status of the service.
 func GetHealth() Health {
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-
+	// In a real-world scenario, you'd check database connections, etc.
+	// For now, we'll just return a healthy status.
+	uptime := time.Since(startTime).String()
 	return Health{
-		Timestamp: time.Now().Unix(),
-		Uptime:    time.Since(startTime).Seconds(),
-		Metrics: Metrics{
-			Goroutines:      runtime.NumGoroutine(),
-			MemoryAllocMB:   float64(memStats.Alloc) / 1024 / 1024,
-			EventsReceived:  0, // Placeholder
-			EventsProcessed: 0, // Placeholder
-		},
+		Status: "healthy",
+		Uptime: uptime,
 	}
 }
