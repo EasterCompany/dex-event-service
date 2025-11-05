@@ -2,7 +2,7 @@ package utils
 
 // ServiceReport defines the structure for the /service endpoint response.
 type ServiceReport struct {
-	Version DisplayVersion         `json:"version"`
+	Version Version                `json:"version"`
 	Health  Health                 `json:"health"`
 	Metrics Metrics                `json:"metrics"`
 	Logs    []string               `json:"logs"`
@@ -11,13 +11,7 @@ type ServiceReport struct {
 
 // Version holds all version-related information for a service.
 type Version struct {
-	FullStr string         `json:"full_str"`
-	Obj     VersionDetails `json:"obj"`
-}
-
-// DisplayVersion holds the version information formatted for display.
-type DisplayVersion struct {
-	ShortStr string         `json:"str"`
+	ShortStr string         `json:"short_str"`
 	FullStr  string         `json:"full_str"`
 	Obj      VersionDetails `json:"obj"`
 }
