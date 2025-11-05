@@ -22,8 +22,8 @@ func SetVersion(versionStr, branchStr, commitStr, buildDateStr, buildYearStr, bu
 	}
 
 	currentVersion = Version{
-		Str: fmt.Sprintf("%s.%s.%s.%s.%s.%s.%s.%s",
-			major, minor, patch, branchStr, commitStr, buildDateStr, formattedArch, buildHashStr),
+		Str: fmt.Sprintf("%s.%s.%s",
+			major, minor, patch),
 		Obj: VersionDetails{
 			Major:     major,
 			Minor:     minor,
