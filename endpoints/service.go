@@ -37,8 +37,17 @@ func ServiceHandler(w http.ResponseWriter, r *http.Request) {
 		logs = []string{fmt.Sprintf("Failed to fetch systemd logs: %v", err)}
 	}
 
+	// Get the full version information.
+	version := utils.GetVersion()
+
+	// Create a display version with a shortened string for the report.
+	displayVersion := utils.Version{
+		Str: fmt.Sprintf("%s.%s.%s", version.Obj.Major, version.Obj.Minor, version.Obj.Patch),
+		Obj: version.Obj,
+	}
+
 	report := utils.ServiceReport{
-		Version: utils.GetVersion(),
+		Version: displayVersion,
 		Health:  utils.GetHealth(),
 		Metrics: utils.Metrics{}, // Placeholder for future implementation
 		Logs:    logs,
