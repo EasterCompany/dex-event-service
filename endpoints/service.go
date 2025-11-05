@@ -43,6 +43,7 @@ func ServiceHandler(w http.ResponseWriter, r *http.Request) {
 	// Create a display version with a shortened string for the report.
 	displayVersion := utils.DisplayVersion{
 		ShortStr: fmt.Sprintf("%s.%s.%s", version.Obj.Major, version.Obj.Minor, version.Obj.Patch),
+		FullStr:  version.FullStr,
 		Obj:      version.Obj,
 	}
 

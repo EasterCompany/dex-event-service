@@ -17,7 +17,8 @@ type Version struct {
 
 // DisplayVersion holds the version information formatted for display.
 type DisplayVersion struct {
-	ShortStr string         `json:"str"`
+	ShortStr string         `json:"short_str"`
+	FullStr  string         `json:"str"`
 	Obj      VersionDetails `json:"obj"`
 }
 
