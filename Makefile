@@ -10,9 +10,9 @@ GOFMT=$(GOCMD) fmt
 GOLINT=golangci-lint
 
 # Paths
-BIN_DIR := /home/owen/Dexter/bin
+BIN_DIR := ~/Dexter/bin
 SERVICE_NAME := dex-event-service
-HANDLER_TEST := event-test-handler
+TEST_HANDLER := event-test-handler
 
 # Build information
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
@@ -61,28 +61,28 @@ handlers: test-handler
 
 # Build test handler
 test-handler:
-	@echo "Building $(HANDLER_TEST)..."
-	@$(GOBUILD) $(GOFLAGS) -o $(HANDLER_TEST) ./handlers/test
-	@echo "✓ $(HANDLER_TEST) built successfully"
+	@echo "Building $(TEST_HANDLER)..."
+	@$(GOBUILD) $(GOFLAGS) -o $(TEST_HANDLER) ./handlers/test
+	@echo "✓ $(TEST_HANDLER) built successfully"
 
 # Install binaries to Dexter bin directory
 install: all
 	@echo "Installing binaries to $(BIN_DIR)..."
 	@mkdir -p $(BIN_DIR)
 	@cp $(SERVICE_NAME) $(BIN_DIR)/$(SERVICE_NAME)
-	@cp $(HANDLER_TEST) $(BIN_DIR)/$(HANDLER_TEST)
+	@cp $(TEST_HANDLER) $(BIN_DIR)/$(TEST_HANDLER)
 	@chmod +x $(BIN_DIR)/$(SERVICE_NAME)
-	@chmod +x $(BIN_DIR)/$(HANDLER_TEST)
+	@chmod +x $(BIN_DIR)/$(TEST_HANDLER)
 	@echo "✓ Installed $(SERVICE_NAME) to $(BIN_DIR)"
-	@echo "✓ Installed $(HANDLER_TEST) to $(BIN_DIR)"
+	@echo "✓ Installed $(TEST_HANDLER) to $(BIN_DIR)"
 
 # Clean build artifacts
 clean:
 	@echo "Cleaning build artifacts..."
 	@rm -f $(SERVICE_NAME)
-	@rm -f $(HANDLER_TEST)
+	@rm -f $(TEST_HANDLER)
 	@rm -f $(BIN_DIR)/$(SERVICE_NAME)
-	@rm -f $(BIN_DIR)/$(HANDLER_TEST)
+	@rm -f $(BIN_DIR)/$(TEST_HANDLER)
 	@echo "✓ Clean complete"
 
 # Build and install in one step

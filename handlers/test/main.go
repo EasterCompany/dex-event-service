@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"golang.org/x/term"
 )
 
 type HandlerInput struct {
@@ -85,7 +87,39 @@ func testLanguageFormat(lang string) (bool, string) {
 	return false, fmt.Sprintf("✗ lang=%s failed", lang)
 }
 
+func printHelp() {
+	fmt.Println("Event Test Handler")
+	fmt.Println()
+	fmt.Println("This handler is designed to be invoked by the dex-event-service.")
+	fmt.Println("It reads event data from stdin and outputs results to stdout.")
+	fmt.Println()
+	fmt.Println("Example usage:")
+	fmt.Println("  echo '{\"event_id\":\"test-123\",\"service\":\"dex-cli\",\"event_type\":\"test.trigger\",\"event_data\":{\"message\":\"test\"},\"timestamp\":1234567890}' | event-test-handler")
+	fmt.Println()
+	fmt.Println("Input format (JSON via stdin):")
+	fmt.Println("  {")
+	fmt.Println("    \"event_id\": \"unique-event-id\",")
+	fmt.Println("    \"service\": \"source-service-name\",")
+	fmt.Println("    \"event_type\": \"event.type\",")
+	fmt.Println("    \"event_data\": {\"message\": \"trigger message\"},")
+	fmt.Println("    \"timestamp\": 1234567890")
+	fmt.Println("  }")
+	fmt.Println()
+	fmt.Println("Output format (JSON to stdout):")
+	fmt.Println("  {")
+	fmt.Println("    \"success\": true,")
+	fmt.Println("    \"error\": \"optional error message\",")
+	fmt.Println("    \"events\": [{\"type\": \"event_type\", \"data\": {...}}]")
+	fmt.Println("  }")
+}
+
 func main() {
+	// Check if stdin is a terminal (interactive mode)
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		printHelp()
+		os.Exit(0)
+	}
+
 	var output HandlerOutput
 
 	// Read input event from stdin
@@ -96,6 +130,12 @@ func main() {
 		}))
 		_ = json.NewEncoder(os.Stdout).Encode(output)
 		return
+	}
+
+	// If stdin is empty, show help
+	if len(inputData) == 0 {
+		printHelp()
+		os.Exit(0)
 	}
 
 	var input HandlerInput
