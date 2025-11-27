@@ -24,6 +24,13 @@ func ServiceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.URL.Query().Get("format") == "version" {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(utils.GetVersion().Str))
+		return
+	}
+
 	// Omit sensitive fields from the config report
 	safeConfig := make(map[string]interface{})
 	for key, val := range cfg.GetSanitized() {
