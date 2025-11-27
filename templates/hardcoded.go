@@ -1,0 +1,330 @@
+package templates
+
+// GetTemplates returns all available event templates
+// All templates are hardcoded and versioned with the application
+func GetTemplates() map[string]EventTemplate {
+	return map[string]EventTemplate{
+		"message_received": {
+			Description: "A message received from a chat platform (Discord, Slack, etc.)",
+			Format:      "{user} posted in {channel}: {message}",
+			Formats: map[string]string{
+				// MVP Languages (v1.0.0 - Production Ready)
+				"ru": "{user} опубликовал в {channel}: {message}",      // Russian
+				"uk": "{user} опублікував у {channel}: {message}",      // Ukrainian
+				"da": "{user} postede i {channel}: {message}",          // Danish
+				"de": "{user} hat in {channel} gepostet: {message}",    // German
+				"lt": "{user} paskelbė {channel}: {message}",           // Lithuanian
+				"sr": "{user} je objavio u {channel}: {message}",       // Serbian
+				"el": "{user} ανάρτησε στο {channel}: {message}",       // Greek
+				"tr": "{user} {channel} kanalında paylaştı: {message}", // Turkish
+				"ro": "{user} a postat în {channel}: {message}",        // Romanian
+
+				// Future expansion placeholders (resolver + fallback already configured)
+				// "fr": "{user} a posté dans {channel}: {message}",     // French
+				// "es": "{user} publicó en {channel}: {message}",       // Spanish
+				// "it": "{user} ha pubblicato in {channel}: {message}", // Italian
+				// "pt": "{user} postou em {channel}: {message}",        // Portuguese
+				// "nl": "{user} plaatste in {channel}: {message}",      // Dutch
+				// "no": "{user} postet i {channel}: {message}",         // Norwegian
+				// "sv": "{user} postade i {channel}: {message}",        // Swedish
+				// "pl": "{user} opublikował w {channel}: {message}",    // Polish
+				// "cs": "{user} zveřejnil v {channel}: {message}",      // Czech
+				// "sk": "{user} uverejnil v {channel}: {message}",      // Slovak
+				// "hr": "{user} je objavio u {channel}: {message}",     // Croatian
+				// "bs": "{user} je objavio u {channel}: {message}",     // Bosnian
+				// "sl": "{user} je objavil v {channel}: {message}",     // Slovenian
+				// "mk": "{user} објави во {channel}: {message}",        // Macedonian
+				// "bg": "{user} публикува в {channel}: {message}",      // Bulgarian
+				// "lv": "{user} publicēja {channel}: {message}",        // Latvian
+				// "et": "{user} postitas {channel}: {message}",         // Estonian
+				// "fi": "{user} julkaisi kanavalla {channel}: {message}", // Finnish
+				// "sq": "{user} postoi në {channel}: {message}",        // Albanian
+				// "hu": "{user} közzétette a(z) {channel} csatornán: {message}", // Hungarian
+			},
+			Fields: map[string]FieldSpec{
+				"user": {
+					Type:        "string",
+					Required:    true,
+					Description: "Username or user ID who sent the message",
+				},
+				"user_id": {
+					Type:        "string",
+					Required:    false,
+					Description: "Unique user identifier",
+				},
+				"message": {
+					Type:        "string",
+					Required:    true,
+					Description: "The message content",
+				},
+				"channel": {
+					Type:        "string",
+					Required:    true,
+					Description: "Channel name or ID where message was sent",
+				},
+				"channel_id": {
+					Type:        "string",
+					Required:    false,
+					Description: "Unique channel identifier",
+				},
+				"server": {
+					Type:        "string",
+					Required:    false,
+					Description: "Server/guild name",
+				},
+				"server_id": {
+					Type:        "string",
+					Required:    false,
+					Description: "Unique server/guild identifier",
+				},
+				"attachments": {
+					Type:        "array",
+					Required:    false,
+					Description: "List of attached files or media",
+				},
+				"reply_to": {
+					Type:        "string",
+					Required:    false,
+					Description: "Message ID this is replying to",
+				},
+			},
+		},
+
+		"action_performed": {
+			Description: "A user or system action was performed",
+			Format:      "{actor} {action} {target}",
+			Formats:     map[string]string{
+				// All languages use same format (field values determine language)
+			},
+			Fields: map[string]FieldSpec{
+				"actor": {
+					Type:        "string",
+					Required:    true,
+					Description: "Who performed the action (user, system, service)",
+				},
+				"action": {
+					Type:        "string",
+					Required:    true,
+					Description: "The action performed (created, updated, deleted, etc.)",
+				},
+				"target": {
+					Type:        "string",
+					Required:    true,
+					Description: "What was acted upon (resource type/ID)",
+				},
+				"target_id": {
+					Type:        "string",
+					Required:    false,
+					Description: "Unique identifier of the target",
+				},
+				"metadata": {
+					Type:        "object",
+					Required:    false,
+					Description: "Additional context about the action",
+				},
+				"result": {
+					Type:        "string",
+					Required:    false,
+					Description: "Outcome of the action (success, failure, partial)",
+				},
+			},
+		},
+
+		"log_entry": {
+			Description: "General log entry for recording events with context",
+			Format:      "[{level}] {message}",
+			Formats:     map[string]string{
+				// All languages use same format (brackets and structure are universal)
+			},
+			Fields: map[string]FieldSpec{
+				"level": {
+					Type:        "string",
+					Required:    true,
+					Description: "Log level (info, warning, error, debug)",
+				},
+				"message": {
+					Type:        "string",
+					Required:    true,
+					Description: "Log message",
+				},
+				"context": {
+					Type:        "object",
+					Required:    false,
+					Description: "Additional context data",
+				},
+				"source": {
+					Type:        "string",
+					Required:    false,
+					Description: "Source component or function",
+				},
+			},
+		},
+
+		"error_occurred": {
+			Description: "An error or exception occurred",
+			Format:      "ERROR: {error}",
+			Formats: map[string]string{
+				// MVP Languages (v1.0.0 - Production Ready)
+				"ru": "ОШИБКА: {error}",  // Russian
+				"uk": "ПОМИЛКА: {error}", // Ukrainian
+				"da": "FEJL: {error}",    // Danish
+				"de": "FEHLER: {error}",  // German
+				"lt": "KLAIDA: {error}",  // Lithuanian
+				"sr": "GREŠKA: {error}",  // Serbian
+				"el": "ΣΦΑΛΜΑ: {error}",  // Greek
+				"tr": "HATA: {error}",    // Turkish
+				"ro": "EROARE: {error}",  // Romanian
+
+				// Future expansion placeholders
+				// "fr": "ERREUR: {error}",     // French
+				// "es": "ERROR: {error}",       // Spanish (same as English)
+				// "it": "ERRORE: {error}",      // Italian
+				// "pt": "ERRO: {error}",        // Portuguese
+				// "nl": "FOUT: {error}",        // Dutch
+				// "no": "FEIL: {error}",        // Norwegian
+				// "sv": "FEL: {error}",         // Swedish
+				// "pl": "BŁĄD: {error}",        // Polish
+				// "cs": "CHYBA: {error}",       // Czech
+				// "sk": "CHYBA: {error}",       // Slovak
+				// "hr": "GREŠKA: {error}",      // Croatian
+				// "bs": "GREŠKA: {error}",      // Bosnian
+				// "sl": "NAPAKA: {error}",      // Slovenian
+				// "mk": "ГРЕШКА: {error}",      // Macedonian
+				// "bg": "ГРЕШКА: {error}",      // Bulgarian
+				// "lv": "KĻŪDA: {error}",       // Latvian
+				// "et": "VIGA: {error}",        // Estonian
+				// "fi": "VIRHE: {error}",       // Finnish
+				// "sq": "GABIM: {error}",       // Albanian
+				// "hu": "HIBA: {error}",        // Hungarian
+			},
+			Fields: map[string]FieldSpec{
+				"error": {
+					Type:        "string",
+					Required:    true,
+					Description: "Error message",
+				},
+				"error_type": {
+					Type:        "string",
+					Required:    false,
+					Description: "Type or category of error",
+				},
+				"stack_trace": {
+					Type:        "string",
+					Required:    false,
+					Description: "Stack trace if available",
+				},
+				"context": {
+					Type:        "object",
+					Required:    false,
+					Description: "Context when error occurred",
+				},
+				"severity": {
+					Type:        "string",
+					Required:    false,
+					Description: "Error severity (low, medium, high, critical)",
+				},
+			},
+		},
+
+		"status_change": {
+			Description: "A status or state change event",
+			Format:      "{entity} changed status to {new_status}",
+			Formats: map[string]string{
+				// MVP Languages (v1.0.0 - Production Ready)
+				"ru": "{entity} изменил статус на {new_status}",      // Russian
+				"uk": "{entity} змінив статус на {new_status}",       // Ukrainian
+				"da": "{entity} ændrede status til {new_status}",     // Danish
+				"de": "{entity} hat Status geändert zu {new_status}", // German
+				"lt": "{entity} pakeitė būseną į {new_status}",       // Lithuanian
+				"sr": "{entity} je promenio status na {new_status}",  // Serbian
+				"el": "{entity} άλλαξε κατάσταση σε {new_status}",    // Greek
+				"tr": "{entity} durumu {new_status} olarak değişti",  // Turkish
+				"ro": "{entity} a schimbat starea în {new_status}",   // Romanian
+
+				// Future expansion placeholders
+				// "fr": "{entity} a changé le statut en {new_status}",       // French
+				// "es": "{entity} cambió el estado a {new_status}",           // Spanish
+				// "it": "{entity} ha cambiato lo stato in {new_status}",     // Italian
+				// "pt": "{entity} alterou o status para {new_status}",       // Portuguese
+				// "nl": "{entity} heeft status gewijzigd naar {new_status}", // Dutch
+				// "no": "{entity} endret status til {new_status}",            // Norwegian
+				// "sv": "{entity} ändrade status till {new_status}",          // Swedish
+				// "pl": "{entity} zmienił status na {new_status}",            // Polish
+				// "cs": "{entity} změnil stav na {new_status}",               // Czech
+				// "sk": "{entity} zmenil stav na {new_status}",               // Slovak
+				// "hr": "{entity} je promijenio status u {new_status}",      // Croatian
+				// "bs": "{entity} je promijenio status u {new_status}",      // Bosnian
+				// "sl": "{entity} je spremenil status v {new_status}",       // Slovenian
+				// "mk": "{entity} го промени статусот на {new_status}",      // Macedonian
+				// "bg": "{entity} промени статуса на {new_status}",          // Bulgarian
+				// "lv": "{entity} mainīja statusu uz {new_status}",          // Latvian
+				// "et": "{entity} muutis olekut {new_status}",                // Estonian
+				// "fi": "{entity} muutti tilan tilaksi {new_status}",        // Finnish
+				// "sq": "{entity} ndryshoi statusin në {new_status}",        // Albanian
+				// "hu": "{entity} állapotát {new_status}-ra változtatta",    // Hungarian
+			},
+			Fields: map[string]FieldSpec{
+				"entity": {
+					Type:        "string",
+					Required:    true,
+					Description: "What entity changed status",
+				},
+				"entity_id": {
+					Type:        "string",
+					Required:    false,
+					Description: "Unique identifier of the entity",
+				},
+				"old_status": {
+					Type:        "string",
+					Required:    false,
+					Description: "Previous status",
+				},
+				"new_status": {
+					Type:        "string",
+					Required:    true,
+					Description: "New status",
+				},
+				"reason": {
+					Type:        "string",
+					Required:    false,
+					Description: "Reason for the status change",
+				},
+				"metadata": {
+					Type:        "object",
+					Required:    false,
+					Description: "Additional status change data",
+				},
+			},
+		},
+
+		"metric_recorded": {
+			Description: "A metric or measurement was recorded",
+			Format:      "{metric_name}: {value}{unit}",
+			Formats:     map[string]string{
+				// All languages use same format (metrics are universal)
+			},
+			Fields: map[string]FieldSpec{
+				"metric_name": {
+					Type:        "string",
+					Required:    true,
+					Description: "Name of the metric",
+				},
+				"value": {
+					Type:        "number",
+					Required:    true,
+					Description: "Metric value",
+				},
+				"unit": {
+					Type:        "string",
+					Required:    false,
+					Description: "Unit of measurement (ms, bytes, count, etc.)",
+				},
+				"tags": {
+					Type:        "object",
+					Required:    false,
+					Description: "Tags or labels for the metric",
+				},
+			},
+		},
+	}
+}

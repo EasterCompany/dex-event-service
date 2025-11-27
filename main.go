@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/endpoints"
+	"github.com/EasterCompany/dex-event-service/handlers"
+	"github.com/EasterCompany/dex-event-service/middleware"
 	"github.com/EasterCompany/dex-event-service/utils"
 )
 
@@ -29,8 +32,41 @@ var (
 )
 
 func main() {
+	// Define CLI flags
+	deleteCmd := flag.Bool("delete", false, "Run in delete mode")
+	listCmd := flag.Bool("list", false, "List all events")
+	flag.Parse()
+
 	// Set the version for the service.
 	utils.SetVersion(version, branch, commit, buildDate, buildYear, buildHash, arch)
+
+	// Handle delete mode
+	if *deleteCmd {
+		patterns := flag.Args()
+		if len(patterns) == 0 {
+			fmt.Println("Usage: dex-event-service -delete <pattern1> [pattern2] ...")
+			fmt.Println("\nExamples:")
+			fmt.Println("  dex-event-service -delete '*'                    # Delete all events")
+			fmt.Println("  dex-event-service -delete '1*'                   # Delete all starting with 1")
+			fmt.Println("  dex-event-service -delete '123-456-789'          # Delete specific event")
+			fmt.Println("  dex-event-service -delete '*abc*' '*def*'        # Delete matching patterns")
+			fmt.Println("\nFirst run with -list to see all event IDs")
+			os.Exit(1)
+		}
+
+		if err := DeleteMode(patterns); err != nil {
+			log.Fatalf("Delete operation failed: %v", err)
+		}
+		return
+	}
+
+	// Handle list mode
+	if *listCmd {
+		if err := ListEvents(); err != nil {
+			log.Fatalf("List operation failed: %v", err)
+		}
+		return
+	}
 
 	// Load the service map and find our own configuration.
 	serviceMap, err := config.LoadServiceMap()
@@ -54,6 +90,19 @@ func main() {
 	port, err := strconv.Atoi(selfConfig.Port)
 	if err != nil {
 		log.Fatalf("FATAL: Invalid port '%s' for service '%s' in service-map.json: %v", selfConfig.Port, ServiceName, err)
+	}
+
+	// Initialize Redis before starting services
+	log.Println("Initializing Redis connection...")
+	if err := initializeRedis(); err != nil {
+		log.Fatalf("FATAL: Failed to initialize Redis: %v", err)
+	}
+	log.Println("Redis connected successfully")
+
+	// Initialize handler registry
+	log.Println("Loading event handlers...")
+	if err := handlers.Initialize(); err != nil {
+		log.Fatalf("FATAL: Failed to initialize handlers: %v", err)
 	}
 
 	// Create a context for graceful shutdown
@@ -81,7 +130,12 @@ func main() {
 	}
 
 	// Register handlers
+	// /service endpoint is public (for health checks)
 	http.HandleFunc("/service", endpoints.ServiceHandler)
+
+	// /events endpoints require authentication
+	http.HandleFunc("/events", middleware.ServiceAuthMiddleware(endpoints.EventsHandler(RedisClient)))
+	http.HandleFunc("/events/", middleware.ServiceAuthMiddleware(endpoints.EventsHandler(RedisClient)))
 
 	// Start HTTP server in a goroutine
 	go func() {

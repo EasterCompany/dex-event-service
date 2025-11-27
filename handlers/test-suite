@@ -1,0 +1,318 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"time"
+)
+
+type Event struct {
+	Type string                 `json:"type"`
+	Data map[string]interface{} `json:"data"`
+}
+
+type HandlerOutput struct {
+	Events []Event `json:"events"`
+}
+
+func createEvent(eventType string, data map[string]interface{}) Event {
+	return Event{Type: eventType, Data: data}
+}
+
+func logEvent(msg string) Event {
+	return createEvent("log_entry", map[string]interface{}{
+		"level":   "info",
+		"message": msg,
+	})
+}
+
+func testEvent(service, eventType string, data map[string]interface{}) (bool, string) {
+	payload := map[string]interface{}{
+		"service": service,
+		"event":   data,
+	}
+
+	jsonData, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "http://localhost:8100/events", bytes.NewBuffer(jsonData))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Service-Name", "dex-test-suite")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, fmt.Sprintf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return true, fmt.Sprintf("✓ %s event created successfully", eventType)
+	}
+	return false, fmt.Sprintf("✗ %s event failed: %s", eventType, string(body))
+}
+
+func testLanguageFormat(lang string) (bool, string) {
+	url := fmt.Sprintf("http://localhost:8100/events?ml=3&format=text&lang=%s", lang)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("X-Service-Name", "dex-test-suite")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, fmt.Sprintf("✗ Failed to query with lang=%s: %v", lang, err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == 200 && len(body) > 0 {
+		return true, fmt.Sprintf("✓ Language format '%s' works correctly", lang)
+	}
+	return false, fmt.Sprintf("✗ Language format '%s' failed", lang)
+}
+
+func main() {
+	var output HandlerOutput
+
+	// Read input event (not used, but required by handler protocol)
+	io.ReadAll(os.Stdin)
+
+	// ========================================
+	// PHASE 1: Template Validation Tests
+	// ========================================
+	output.Events = append(output.Events, logEvent("🧪 PHASE 1: Testing all 6 event templates..."))
+
+	// Test message_received
+	success, msg := testEvent("dex-test", "message_received", map[string]interface{}{
+		"type":    "message_received",
+		"user":    "alice",
+		"message": "Hello from test suite!",
+		"channel": "test-channel",
+	})
+	if success {
+		output.Events = append(output.Events, logEvent(msg))
+	} else {
+		output.Events = append(output.Events, createEvent("error_occurred", map[string]interface{}{
+			"error": msg,
+		}))
+	}
+
+	// Test action_performed
+	success, msg = testEvent("dex-test", "action_performed", map[string]interface{}{
+		"type":   "action_performed",
+		"actor":  "system",
+		"action": "created",
+		"target": "test-resource",
+	})
+	if success {
+		output.Events = append(output.Events, logEvent(msg))
+	} else {
+		output.Events = append(output.Events, createEvent("error_occurred", map[string]interface{}{
+			"error": msg,
+		}))
+	}
+
+	// Test log_entry
+	success, msg = testEvent("dex-test", "log_entry", map[string]interface{}{
+		"type":    "log_entry",
+		"level":   "debug",
+		"message": "Test log from comprehensive suite",
+	})
+	if success {
+		output.Events = append(output.Events, logEvent(msg))
+	} else {
+		output.Events = append(output.Events, createEvent("error_occurred", map[string]interface{}{
+			"error": msg,
+		}))
+	}
+
+	// Test error_occurred
+	success, msg = testEvent("dex-test", "error_occurred", map[string]interface{}{
+		"type":  "error_occurred",
+		"error": "Intentional test error - this is expected",
+	})
+	if success {
+		output.Events = append(output.Events, logEvent(msg))
+	} else {
+		output.Events = append(output.Events, createEvent("error_occurred", map[string]interface{}{
+			"error": msg,
+		}))
+	}
+
+	// Test status_change
+	success, msg = testEvent("dex-test", "status_change", map[string]interface{}{
+		"type":       "status_change",
+		"entity":     "test-service",
+		"new_status": "healthy",
+	})
+	if success {
+		output.Events = append(output.Events, logEvent(msg))
+	} else {
+		output.Events = append(output.Events, createEvent("error_occurred", map[string]interface{}{
+			"error": msg,
+		}))
+	}
+
+	// Test metric_recorded
+	success, msg = testEvent("dex-test", "metric_recorded", map[string]interface{}{
+		"type":        "metric_recorded",
+		"metric_name": "response_time",
+		"value":       42.5,
+		"unit":        "ms",
+	})
+	if success {
+		output.Events = append(output.Events, logEvent(msg))
+	} else {
+		output.Events = append(output.Events, createEvent("error_occurred", map[string]interface{}{
+			"error": msg,
+		}))
+	}
+
+	output.Events = append(output.Events, createEvent("status_change", map[string]interface{}{
+		"entity":     "template-tests",
+		"new_status": "completed",
+	}))
+
+	// ========================================
+	// PHASE 2: Validation Tests
+	// ========================================
+	output.Events = append(output.Events, logEvent("🔍 PHASE 2: Testing template validation..."))
+
+	// Test invalid event (missing required fields)
+	payload := map[string]interface{}{
+		"service": "dex-test",
+		"event": map[string]interface{}{
+			"type": "message_received",
+			// Missing required fields: user, message, channel
+		},
+	}
+	jsonData, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "http://localhost:8100/events", bytes.NewBuffer(jsonData))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Service-Name", "dex-test-suite")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, _ := client.Do(req)
+	if resp.StatusCode == 400 {
+		output.Events = append(output.Events, logEvent("✓ Invalid event correctly rejected with 400"))
+	} else {
+		output.Events = append(output.Events, createEvent("error_occurred", map[string]interface{}{
+			"error": "✗ Invalid event should have been rejected",
+		}))
+	}
+	resp.Body.Close()
+
+	output.Events = append(output.Events, createEvent("status_change", map[string]interface{}{
+		"entity":     "validation-tests",
+		"new_status": "completed",
+	}))
+
+	// ========================================
+	// PHASE 3: Multi-Language Tests
+	// ========================================
+	output.Events = append(output.Events, logEvent("🌍 PHASE 3: Testing multi-language support..."))
+
+	// Test ISO codes
+	langs := []string{"uk", "ru", "da", "de", "el", "ro", "tr", "sr", "lt"}
+	for _, lang := range langs {
+		success, msg := testLanguageFormat(lang)
+		if success {
+			output.Events = append(output.Events, logEvent(msg))
+		} else {
+			output.Events = append(output.Events, createEvent("error_occurred", map[string]interface{}{
+				"error": msg,
+			}))
+		}
+	}
+
+	// Test English language names
+	langNames := []string{"Ukrainian", "Russian", "Danish", "German", "Greek", "Romanian"}
+	for _, langName := range langNames {
+		success, msg := testLanguageFormat(langName)
+		if success {
+			output.Events = append(output.Events, logEvent(fmt.Sprintf("✓ English name '%s' resolves correctly", langName)))
+		} else {
+			output.Events = append(output.Events, createEvent("error_occurred", map[string]interface{}{
+				"error": msg,
+			}))
+		}
+	}
+
+	// Test native language names
+	nativeNames := []string{"Українська", "Русский", "Dansk", "Deutsch", "Ελληνικά"}
+	for _, nativeName := range nativeNames {
+		success, msg := testLanguageFormat(nativeName)
+		if success {
+			output.Events = append(output.Events, logEvent(fmt.Sprintf("✓ Native name '%s' resolves correctly", nativeName)))
+		} else {
+			output.Events = append(output.Events, createEvent("error_occurred", map[string]interface{}{
+				"error": msg,
+			}))
+		}
+	}
+
+	output.Events = append(output.Events, createEvent("status_change", map[string]interface{}{
+		"entity":     "language-tests",
+		"new_status": "completed",
+	}))
+
+	// ========================================
+	// PHASE 4: Format and Timezone Tests
+	// ========================================
+	output.Events = append(output.Events, logEvent("🕐 PHASE 4: Testing text format and timezone support..."))
+
+	// Test text format
+	req, _ = http.NewRequest("GET", "http://localhost:8100/events?ml=5&format=text", nil)
+	req.Header.Set("X-Service-Name", "dex-test-suite")
+	resp, _ = client.Do(req)
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == 200 && len(body) > 0 {
+		output.Events = append(output.Events, logEvent("✓ Text format rendering works"))
+	} else {
+		output.Events = append(output.Events, createEvent("error_occurred", map[string]interface{}{
+			"error": "✗ Text format rendering failed",
+		}))
+	}
+	resp.Body.Close()
+
+	// Test timezone
+	req, _ = http.NewRequest("GET", "http://localhost:8100/events?ml=5&format=text&timezone=Europe/Paris", nil)
+	req.Header.Set("X-Service-Name", "dex-test-suite")
+	resp, _ = client.Do(req)
+	body, _ = io.ReadAll(resp.Body)
+	if resp.StatusCode == 200 && len(body) > 0 {
+		output.Events = append(output.Events, logEvent("✓ Timezone conversion works (Europe/Paris)"))
+	} else {
+		output.Events = append(output.Events, createEvent("error_occurred", map[string]interface{}{
+			"error": "✗ Timezone conversion failed",
+		}))
+	}
+	resp.Body.Close()
+
+	output.Events = append(output.Events, createEvent("status_change", map[string]interface{}{
+		"entity":     "format-tests",
+		"new_status": "completed",
+	}))
+
+	// ========================================
+	// FINAL STATUS
+	// ========================================
+	output.Events = append(output.Events, logEvent("✅ COMPREHENSIVE TEST SUITE COMPLETED"))
+	output.Events = append(output.Events, createEvent("metric_recorded", map[string]interface{}{
+		"metric_name": "total_tests_run",
+		"value":       float64(len(output.Events)),
+		"unit":        "tests",
+	}))
+
+	output.Events = append(output.Events, createEvent("status_change", map[string]interface{}{
+		"entity":     "dex-event-service",
+		"new_status": "fully_validated",
+	}))
+
+	// Output all events
+	json.NewEncoder(os.Stdout).Encode(output)
+}

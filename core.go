@@ -1,12 +1,47 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
+	"net/http"
+	"os"
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/utils"
+	"github.com/redis/go-redis/v9"
 )
+
+// RedisClient is a global Redis client accessible by all endpoints
+var RedisClient *redis.Client
+
+// initializeRedis sets up the Redis connection
+func initializeRedis() error {
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379" // Default Redis address
+	}
+
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+	redisDB := 0 // Default DB
+
+	RedisClient = redis.NewClient(&redis.Options{
+		Addr:     redisAddr,
+		Password: redisPassword,
+		DB:       redisDB,
+	})
+
+	// Test Redis connection with a ping
+	ctx := context.Background()
+	if err := RedisClient.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("failed to connect to Redis at %s: %w", redisAddr, err)
+	}
+
+	log.Printf("Connected to Redis at %s", redisAddr)
+	return nil
+}
 
 // RunCoreLogic represents the persistent core functionality of the service.
 // This runs continuously in a goroutine, processing events and maintaining
@@ -53,32 +88,106 @@ func RunCoreLogic(ctx context.Context) error {
 
 // initializePersistentResources sets up database connections, message queue
 // connections, or any other resources that need to persist for the lifetime
-// of the service.
+// of the service. Note: Redis is initialized separately in main().
 func initializePersistentResources(ctx context.Context) error {
 	log.Println("Core Logic: Initializing persistent resources...")
 
-	// TODO: Initialize database connection
-	// Example:
-	// db, err := sql.Open("postgres", connectionString)
-	// if err != nil {
-	//     return fmt.Errorf("failed to connect to database: %w", err)
-	// }
+	// Redis is already initialized in main()
 
-	// TODO: Initialize message queue connection
-	// Example:
-	// mqConn, err := rabbitmq.Dial("amqp://localhost")
-	// if err != nil {
-	//     return fmt.Errorf("failed to connect to message queue: %w", err)
-	// }
-
-	// TODO: Initialize any other persistent resources
-	// - Redis connections
+	// TODO: Initialize other persistent resources
+	// - Database connections
+	// - Message queue connections
 	// - WebSocket connections
 	// - File watchers
 	// - etc.
 
 	log.Println("Core Logic: Persistent resources initialized successfully")
+
+	// Auto-validate on startup if needed
+	go autoValidateOnStartup()
+
 	return nil
+}
+
+// autoValidateOnStartup triggers the test handler if:
+// 1. There are no events in Redis (first run ever), OR
+// 2. The binary is newer than the last event (new deployment)
+func autoValidateOnStartup() {
+	// Give the service a moment to fully start up
+	time.Sleep(2 * time.Second)
+
+	ctx := context.Background()
+
+	// Check if there are any events in Redis
+	eventCount, err := RedisClient.ZCard(ctx, "events:timeline").Result()
+	if err != nil {
+		log.Printf("Auto-validate: Could not check event count: %v", err)
+		return
+	}
+
+	shouldTest := false
+	reason := ""
+
+	if eventCount == 0 {
+		// No events ever recorded - definitely test
+		shouldTest = true
+		reason = "first run (no events in Redis)"
+	} else {
+		// Check if binary is newer than last event
+		binaryPath := os.Args[0]
+		binaryInfo, err := os.Stat(binaryPath)
+		if err == nil {
+			// Get most recent event timestamp
+			events, err := RedisClient.ZRevRangeWithScores(ctx, "events:timeline", 0, 0).Result()
+			if err == nil && len(events) > 0 {
+				lastEventTime := int64(events[0].Score)
+				binaryTime := binaryInfo.ModTime().Unix()
+
+				if binaryTime > lastEventTime {
+					shouldTest = true
+					reason = "new build detected (binary newer than last event)"
+				}
+			}
+		}
+	}
+
+	if !shouldTest {
+		log.Println("Auto-validate: Skipping (service already validated)")
+		return
+	}
+
+	log.Printf("Auto-validate: Triggering self-test (%s)", reason)
+
+	// Create test event with handler
+	payload := map[string]interface{}{
+		"service": "dex-event-service",
+		"event": map[string]interface{}{
+			"type":    "log_entry",
+			"level":   "info",
+			"message": fmt.Sprintf("Auto-validation triggered: %s", reason),
+		},
+		"handler":      "test",
+		"handler_mode": "async", // Don't block startup
+	}
+
+	jsonData, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "http://localhost:8100/events", bytes.NewBuffer(jsonData))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Service-Name", "dex-event-service")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Auto-validate: Failed to trigger test: %v", err)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		log.Println("Auto-validate: Self-test triggered successfully (running in background)")
+	} else {
+		log.Printf("Auto-validate: Failed to trigger test (HTTP %d)", resp.StatusCode)
+	}
 }
 
 // cleanupPersistentResources closes all persistent connections and releases
@@ -86,20 +195,18 @@ func initializePersistentResources(ctx context.Context) error {
 func cleanupPersistentResources() {
 	log.Println("Core Logic: Cleaning up persistent resources...")
 
-	// TODO: Close database connections
-	// Example:
-	// if db != nil {
-	//     db.Close()
-	// }
-
-	// TODO: Close message queue connections
-	// Example:
-	// if mqConn != nil {
-	//     mqConn.Close()
-	// }
+	// Close Redis connection
+	if RedisClient != nil {
+		if err := RedisClient.Close(); err != nil {
+			log.Printf("Error closing Redis connection: %v", err)
+		} else {
+			log.Println("Redis connection closed")
+		}
+	}
 
 	// TODO: Clean up any other resources
-	// - Close Redis connections
+	// - Close database connections
+	// - Close message queue connections
 	// - Close WebSocket connections
 	// - Stop file watchers
 	// - etc.
