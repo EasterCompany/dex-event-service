@@ -32,6 +32,27 @@ var (
 )
 
 func main() {
+	// Handle version/help commands first (before flag parsing)
+	if len(os.Args) > 1 {
+		arg := os.Args[1]
+		switch arg {
+		case "version", "--version", "-v":
+			// Format version like other services: major.minor.patch.branch.commit.buildDate.arch.buildHash
+			utils.SetVersion(version, branch, commit, buildDate, buildYear, buildHash, arch)
+			fmt.Println(utils.GetVersion())
+			os.Exit(0)
+		case "help", "--help", "-h":
+			fmt.Println("Dexter Event Service")
+			fmt.Println()
+			fmt.Println("Usage:")
+			fmt.Println("  dex-event-service              Start the event service")
+			fmt.Println("  dex-event-service version      Display version information")
+			fmt.Println("  dex-event-service -list        List all events")
+			fmt.Println("  dex-event-service -delete <pattern>  Delete events matching pattern")
+			os.Exit(0)
+		}
+	}
+
 	// Define CLI flags
 	deleteCmd := flag.Bool("delete", false, "Run in delete mode")
 	listCmd := flag.Bool("list", false, "List all events")
