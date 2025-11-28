@@ -2,28 +2,15 @@ package endpoints
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 
-	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/utils"
 )
 
-// ServiceHandler provides a comprehensive status report for the service.
+// ServiceHandler provides the UNIVERSAL service status endpoint.
+// This endpoint MUST return the standard structure used by ALL Dexter services.
 func ServiceHandler(w http.ResponseWriter, r *http.Request) {
-	cfg, err := config.LoadServiceMap()
-	if err != nil {
-		// If config fails to load, we can't be sure of the service's state.
-		http.Error(w, "Failed to load service configuration", http.StatusInternalServerError)
-		return
-	}
-
-	systemCfg, err := config.LoadSystem()
-	if err != nil {
-		http.Error(w, "Failed to load system configuration", http.StatusInternalServerError)
-		return
-	}
-
+	// Support ?format=version for simple version string
 	if r.URL.Query().Get("format") == "version" {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
@@ -31,25 +18,18 @@ func ServiceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Omit sensitive fields from the config report
-	safeConfig := make(map[string]interface{})
-	for key, val := range cfg.GetSanitized() {
-		safeConfig[key] = val
-	}
+	// Build service-specific metrics
+	metrics := make(map[string]interface{})
+	// Add event-service specific metrics here
+	// metrics["events_processed"] = eventCounter
+	// metrics["handlers_active"] = handlerCount
+	// etc.
 
-	logs, err := utils.GetSystemdLogs(systemCfg.Packages[0].Name, 10)
-	if err != nil {
-		// If logs can't be fetched, we can still return a report.
-		// We'll add a note to the logs field about the error.
-		logs = []string{fmt.Sprintf("Failed to fetch systemd logs: %v", err)}
-	}
-
+	// Build standard service report
 	report := utils.ServiceReport{
 		Version: utils.GetVersion(),
 		Health:  utils.GetHealth(),
-		Metrics: utils.Metrics{}, // Placeholder for future implementation
-		Logs:    logs,
-		Config:  safeConfig,
+		Metrics: metrics,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

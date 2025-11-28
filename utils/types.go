@@ -1,21 +1,22 @@
 package utils
 
-// ServiceReport defines the structure for the /service endpoint response.
+// ServiceReport defines the UNIVERSAL structure for the /service endpoint response.
+// ALL Dexter services MUST implement this exact structure.
 type ServiceReport struct {
 	Version Version                `json:"version"`
 	Health  Health                 `json:"health"`
-	Metrics Metrics                `json:"metrics"`
-	Logs    []string               `json:"logs"`
-	Config  map[string]interface{} `json:"config"`
+	Metrics map[string]interface{} `json:"metrics"`
 }
 
 // Version holds all version-related information for a service.
+// This structure is UNIVERSAL across all services.
 type Version struct {
 	Str string         `json:"str"`
 	Obj VersionDetails `json:"obj"`
 }
 
 // VersionDetails breaks down the version string into its components.
+// This structure is UNIVERSAL across all services.
 type VersionDetails struct {
 	Major     string `json:"major"`
 	Minor     string `json:"minor"`
@@ -28,14 +29,9 @@ type VersionDetails struct {
 }
 
 // Health represents the health status of the service.
+// This structure is UNIVERSAL across all services.
 type Health struct {
 	Status  string `json:"status"`
 	Uptime  string `json:"uptime"`
-	Message string `json:"message,omitempty"`
-}
-
-// Metrics holds basic performance metrics.
-type Metrics struct {
-	CPU    string `json:"cpu"`
-	Memory string `json:"memory"`
+	Message string `json:"message"`
 }
