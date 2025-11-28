@@ -75,6 +75,9 @@ install: all
 	@chmod +x $(BIN_DIR)/$(TEST_HANDLER)
 	@echo "✓ Installed $(SERVICE_NAME) to $(BIN_DIR)"
 	@echo "✓ Installed $(TEST_HANDLER) to $(BIN_DIR)"
+	@rm -f $(SERVICE_NAME)
+	@rm -f $(TEST_HANDLER)
+	@echo "✓ Cleaned source directory"
 
 # Clean build artifacts
 clean:
