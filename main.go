@@ -39,7 +39,7 @@ func main() {
 		case "version", "--version", "-v":
 			// Format version like other services: major.minor.patch.branch.commit.buildDate.arch.buildHash
 			utils.SetVersion(version, branch, commit, buildDate, buildYear, buildHash, arch)
-			fmt.Println(utils.GetVersion())
+			fmt.Println(utils.GetVersion().Str)
 			os.Exit(0)
 		case "help", "--help", "-h":
 			fmt.Println("Dexter Event Service")
