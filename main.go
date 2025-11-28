@@ -113,9 +113,25 @@ func main() {
 		log.Fatalf("FATAL: Invalid port '%s' for service '%s' in service-map.json: %v", selfConfig.Port, ServiceName, err)
 	}
 
+	// Find the Redis service configuration from the service map.
+	// For now, we'll hardcode to "local-cache-0" for consistency in local development.
+	var redisConfig *config.ServiceEntry
+	if osServices, ok := serviceMap.Services["os"]; ok {
+		for _, service := range osServices {
+			if service.ID == "local-cache-0" { // Using local-cache-0 as default Redis service
+				redisConfig = &service
+				break
+			}
+		}
+	}
+
+	if redisConfig == nil {
+		log.Fatalf("FATAL: Redis service 'local-cache-0' not found in service-map.json. Shutting down.")
+	}
+
 	// Initialize Redis before starting services
 	log.Println("Initializing Redis connection...")
-	if err := initializeRedis(); err != nil {
+	if err := initializeRedis(redisConfig); err != nil {
 		log.Fatalf("FATAL: Failed to initialize Redis: %v", err)
 	}
 	log.Println("Redis connected successfully")

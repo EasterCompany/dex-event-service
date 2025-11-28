@@ -35,11 +35,10 @@ type ServiceEntry struct {
 
 // OptionsConfig represents the structure of options.json
 type OptionsConfig struct {
-	Editor             string             `json:"editor"`
-	Theme              string             `json:"theme"`
-	Logging            bool               `json:"logging"`
-	Discord            DiscordOptions     `json:"discord"`
-	CommandPermissions CommandPermissions `json:"command_permissions"`
+	Editor  string         `json:"editor"`
+	Theme   string         `json:"theme"`
+	Logging bool           `json:"logging"`
+	Discord DiscordOptions `json:"discord"`
 }
 
 // DiscordOptions holds Discord-specific settings
@@ -47,13 +46,6 @@ type DiscordOptions struct {
 	Token          string `json:"token"`
 	ServerID       string `json:"server_id"`
 	DebugChannelID string `json:"debug_channel_id"`
-}
-
-// CommandPermissions defines access levels for commands
-type CommandPermissions struct {
-	DefaultLevel  int      `json:"default_level"`
-	AllowedRoles  []string `json:"allowed_roles"`
-	UserWhitelist []string `json:"user_whitelist"`
 }
 
 // SystemConfig represents the structure of system.json

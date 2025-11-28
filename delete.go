@@ -6,15 +6,38 @@ import (
 	"log"
 	"regexp"
 	"strings"
+
+	"github.com/EasterCompany/dex-event-service/config"
 )
 
 // DeleteMode runs the event deletion CLI tool
 func DeleteMode(patterns []string) error {
 	ctx := context.Background()
 
+	// Load the service map to get Redis configuration
+	serviceMap, err := config.LoadServiceMap()
+	if err != nil {
+		return fmt.Errorf("FATAL: Could not load service-map.json: %w", err)
+	}
+
+	// Find the Redis service configuration from the service map.
+	var redisConfig *config.ServiceEntry
+	if osServices, ok := serviceMap.Services["os"]; ok {
+		for _, service := range osServices {
+			if service.ID == "local-cache-0" { // Using local-cache-0 as default Redis service
+				redisConfig = &service
+				break
+			}
+		}
+	}
+
+	if redisConfig == nil {
+		return fmt.Errorf("FATAL: Redis service 'local-cache-0' not found in service-map.json")
+	}
+
 	// Initialize Redis
 	log.Println("Connecting to Redis for deletion operation...")
-	if err := initializeRedis(); err != nil {
+	if err := initializeRedis(redisConfig); err != nil {
 		return fmt.Errorf("failed to connect to Redis: %w", err)
 	}
 	defer func() {
@@ -169,9 +192,30 @@ func deleteEvent(ctx context.Context, eventID string) error {
 func ListEvents() error {
 	ctx := context.Background()
 
+	// Load the service map to get Redis configuration
+	serviceMap, err := config.LoadServiceMap()
+	if err != nil {
+		return fmt.Errorf("FATAL: Could not load service-map.json: %w", err)
+	}
+
+	// Find the Redis service configuration from the service map.
+	var redisConfig *config.ServiceEntry
+	if osServices, ok := serviceMap.Services["os"]; ok {
+		for _, service := range osServices {
+			if service.ID == "local-cache-0" { // Using local-cache-0 as default Redis service
+				redisConfig = &service
+				break
+			}
+		}
+	}
+
+	if redisConfig == nil {
+		return fmt.Errorf("FATAL: Redis service 'local-cache-0' not found in service-map.json")
+	}
+
 	// Initialize Redis
 	log.Println("Connecting to Redis...")
-	if err := initializeRedis(); err != nil {
+	if err := initializeRedis(redisConfig); err != nil {
 		return fmt.Errorf("failed to connect to Redis: %w", err)
 	}
 	defer func() {

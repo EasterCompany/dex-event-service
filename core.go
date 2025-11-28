@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/redis/go-redis/v9"
 )
@@ -17,15 +18,24 @@ import (
 // RedisClient is a global Redis client accessible by all endpoints
 var RedisClient *redis.Client
 
-// initializeRedis sets up the Redis connection
-func initializeRedis() error {
-	redisAddr := os.Getenv("REDIS_ADDR")
-	if redisAddr == "" {
-		redisAddr = "localhost:6379" // Default Redis address
-	}
+// initializeRedis sets up the Redis connection using the provided configuration.
+func initializeRedis(redisConfig *config.ServiceEntry) error {
+	redisAddr := fmt.Sprintf("%s:%s", redisConfig.Domain, redisConfig.Port)
 
-	redisPassword := os.Getenv("REDIS_PASSWORD")
-	redisDB := 0 // Default DB
+	// Parse credentials
+	var redisPassword string
+	redisDB := 0
+
+	if creds, ok := redisConfig.Credentials.(map[string]interface{}); ok {
+		if password, found := creds["password"].(string); found {
+			redisPassword = password
+		}
+		if db, found := creds["db"].(float64); found { // JSON numbers are float64
+			redisDB = int(db)
+		}
+	} else {
+		log.Printf("Warning: Redis credentials not found or invalid for service %s", redisConfig.ID)
+	}
 
 	RedisClient = redis.NewClient(&redis.Options{
 		Addr:     redisAddr,
