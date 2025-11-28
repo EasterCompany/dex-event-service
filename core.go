@@ -1,13 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
-	"os"
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/config"
@@ -113,91 +109,7 @@ func initializePersistentResources(ctx context.Context) error {
 
 	log.Println("Core Logic: Persistent resources initialized successfully")
 
-	// Auto-validate on startup if needed
-	go autoValidateOnStartup()
-
 	return nil
-}
-
-// autoValidateOnStartup triggers the test handler if:
-// 1. There are no events in Redis (first run ever), OR
-// 2. The binary is newer than the last event (new deployment)
-func autoValidateOnStartup() {
-	// Give the service a moment to fully start up
-	time.Sleep(2 * time.Second)
-
-	ctx := context.Background()
-
-	// Check if there are any events in Redis
-	eventCount, err := RedisClient.ZCard(ctx, "events:timeline").Result()
-	if err != nil {
-		log.Printf("Auto-validate: Could not check event count: %v", err)
-		return
-	}
-
-	shouldTest := false
-	reason := ""
-
-	if eventCount == 0 {
-		// No events ever recorded - definitely test
-		shouldTest = true
-		reason = "first run (no events in Redis)"
-	} else {
-		// Check if binary is newer than last event
-		binaryPath := os.Args[0]
-		binaryInfo, err := os.Stat(binaryPath)
-		if err == nil {
-			// Get most recent event timestamp
-			events, err := RedisClient.ZRevRangeWithScores(ctx, "events:timeline", 0, 0).Result()
-			if err == nil && len(events) > 0 {
-				lastEventTime := int64(events[0].Score)
-				binaryTime := binaryInfo.ModTime().Unix()
-
-				if binaryTime > lastEventTime {
-					shouldTest = true
-					reason = "new build detected (binary newer than last event)"
-				}
-			}
-		}
-	}
-
-	if !shouldTest {
-		log.Println("Auto-validate: Skipping (service already validated)")
-		return
-	}
-
-	log.Printf("Auto-validate: Triggering self-test (%s)", reason)
-
-	// Create test event with handler
-	payload := map[string]interface{}{
-		"service": "dex-event-service",
-		"event": map[string]interface{}{
-			"type":    "log_entry",
-			"level":   "info",
-			"message": fmt.Sprintf("Auto-validation triggered: %s", reason),
-		},
-		"handler":      "test",
-		"handler_mode": "async", // Don't block startup
-	}
-
-	jsonData, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", "http://localhost:8100/events", bytes.NewBuffer(jsonData))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Service-Name", "dex-event-service")
-
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("Auto-validate: Failed to trigger test: %v", err)
-		return
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		log.Println("Auto-validate: Self-test triggered successfully (running in background)")
-	} else {
-		log.Printf("Auto-validate: Failed to trigger test (HTTP %d)", resp.StatusCode)
-	}
 }
 
 // cleanupPersistentResources closes all persistent connections and releases

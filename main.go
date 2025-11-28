@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -47,8 +49,16 @@ func main() {
 			fmt.Println("Usage:")
 			fmt.Println("  dex-event-service              Start the event service")
 			fmt.Println("  dex-event-service version      Display version information")
+			fmt.Println("  dex-event-service test         Run test suite")
 			fmt.Println("  dex-event-service -list        List all events")
 			fmt.Println("  dex-event-service -delete <pattern>  Delete events matching pattern")
+			os.Exit(0)
+		case "test":
+			// Run test suite
+			utils.SetVersion(version, branch, commit, buildDate, buildYear, buildHash, arch)
+			if err := RunTestSuite(); err != nil {
+				log.Fatalf("Test suite failed: %v", err)
+			}
 			os.Exit(0)
 		}
 	}
@@ -203,4 +213,97 @@ func main() {
 	}
 
 	log.Println("Service exited cleanly")
+}
+
+// RunTestSuite runs the test suite by triggering the test handler
+func RunTestSuite() error {
+	log.Println("Loading service configuration...")
+
+	// Load the service map to get Redis configuration
+	serviceMap, err := config.LoadServiceMap()
+	if err != nil {
+		return fmt.Errorf("could not load service-map.json: %w", err)
+	}
+
+	// Find Redis configuration
+	var redisConfig *config.ServiceEntry
+	if osServices, ok := serviceMap.Services["os"]; ok {
+		for _, service := range osServices {
+			if service.ID == "local-cache-0" {
+				redisConfig = &service
+				break
+			}
+		}
+	}
+
+	if redisConfig == nil {
+		return fmt.Errorf("redis service 'local-cache-0' not found in service-map.json")
+	}
+
+	// Initialize Redis
+	log.Println("Connecting to Redis...")
+	if err := initializeRedis(redisConfig); err != nil {
+		return fmt.Errorf("failed to initialize Redis: %w", err)
+	}
+	defer func() {
+		if RedisClient != nil {
+			_ = RedisClient.Close()
+		}
+	}()
+
+	// Wait for the event service to be available
+	log.Println("Waiting for event service to be available...")
+	serviceURL := "http://localhost:8100/service"
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	maxRetries := 10
+	for i := 0; i < maxRetries; i++ {
+		resp, err := client.Get(serviceURL)
+		if err == nil && resp.StatusCode == 200 {
+			_ = resp.Body.Close()
+			log.Println("Event service is available")
+			break
+		}
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+
+		if i == maxRetries-1 {
+			return fmt.Errorf("event service not available after %d attempts - make sure 'dex-event-service' is running", maxRetries)
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+
+	// Trigger the test by creating an event with the test handler
+	log.Println("Triggering test suite...")
+
+	payload := map[string]interface{}{
+		"service": "dex-event-service",
+		"event": map[string]interface{}{
+			"type":    "log_entry",
+			"level":   "info",
+			"message": "Manual test suite triggered via CLI",
+		},
+		"handler":      "test",
+		"handler_mode": "sync", // Wait for test to complete
+	}
+
+	jsonData, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "http://localhost:8100/events", bytes.NewBuffer(jsonData))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Service-Name", "dex-event-service")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to trigger test: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("test suite returned HTTP %d", resp.StatusCode)
+	}
+
+	log.Println("Test suite completed successfully")
+	return nil
 }
