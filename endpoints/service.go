@@ -18,14 +18,13 @@ func ServiceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build service-specific metrics
-	metrics := make(map[string]interface{})
-	// Add event-service specific metrics here
-	// metrics["events_processed"] = eventCounter
-	// metrics["handlers_active"] = handlerCount
-	// etc.
+	// Build standard service report with system metrics
+	systemMetrics := utils.GetMetrics()
+	metrics := map[string]interface{}{
+		"cpu":    systemMetrics.CPU,
+		"memory": systemMetrics.Memory,
+	}
 
-	// Build standard service report
 	report := utils.ServiceReport{
 		Version: utils.GetVersion(),
 		Health:  utils.GetHealth(),
