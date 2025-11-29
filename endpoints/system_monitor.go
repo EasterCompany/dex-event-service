@@ -1,15 +1,18 @@
 package endpoints
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/utils"
+	"github.com/redis/go-redis/v9"
 )
 
 // ServiceReport for a single service, adapted for JSON output to frontend
@@ -118,11 +121,15 @@ func checkService(service config.ServiceEntry, serviceType string) ServiceReport
 	case "cli":
 		return newUnknownServiceReport(baseReport, "CLI service status cannot be checked directly from event service.")
 	case "os":
+		// Check for Ollama services
 		if strings.Contains(strings.ToLower(service.ID), "ollama") {
-			return newUnknownServiceReport(baseReport, "Ollama service status checking is simplified for event service.")
+			return checkOllamaStatus(baseReport)
 		}
-		// For other OS services (like Redis), we attempt an HTTP check if a port is defined,
-		// or mark as unknown if not. Full Redis PING logic from dex-cli is not replicated here.
+		// Check for Redis cache services
+		if strings.Contains(strings.ToLower(service.ID), "cache") {
+			return checkRedisStatus(baseReport)
+		}
+		// For other OS services, attempt HTTP check if port is defined
 		if service.Port != "" {
 			return checkHTTPStatus(baseReport)
 		}
@@ -211,4 +218,237 @@ func checkHTTPStatus(baseReport ServiceReport) ServiceReport {
 	}
 
 	return report
+}
+
+// checkRedisStatus checks a Redis server via PING and INFO commands
+func checkRedisStatus(baseReport ServiceReport) ServiceReport {
+	report := baseReport
+
+	host := report.Domain
+	if report.Domain == "0.0.0.0" {
+		host = "localhost"
+	}
+	addr := fmt.Sprintf("%s:%s", host, report.Port)
+
+	// Create Redis client with timeout
+	rdb := redis.NewClient(&redis.Options{
+		Addr:         addr,
+		DialTimeout:  2 * time.Second,
+		ReadTimeout:  2 * time.Second,
+		WriteTimeout: 2 * time.Second,
+	})
+	defer func() {
+		_ = rdb.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Try to PING
+	pong, err := rdb.Ping(ctx).Result()
+	if err != nil {
+		report.Status = "offline"
+		report.HealthMessage = fmt.Sprintf("Failed to connect: %v", err)
+		report.Uptime = "N/A"
+		report.CPU = "N/A"
+		report.Memory = "N/A"
+		return report
+	}
+
+	if pong != "PONG" {
+		report.Status = "offline"
+		report.HealthMessage = "Unexpected PING response"
+		report.Uptime = "N/A"
+		report.CPU = "N/A"
+		report.Memory = "N/A"
+		return report
+	}
+
+	// Get server info
+	infoStr, err := rdb.Info(ctx, "server", "memory", "cpu").Result()
+	if err != nil {
+		// Online but couldn't get info
+		report.Status = "online"
+		report.HealthMessage = "Connected but couldn't retrieve server info"
+		report.Uptime = "N/A"
+		report.CPU = "N/A"
+		report.Memory = "N/A"
+		return report
+	}
+
+	// Parse INFO response
+	info := parseRedisInfo(infoStr)
+
+	report.Status = "online"
+	report.HealthMessage = "Redis server is responding"
+
+	// Extract version
+	if version, ok := info["redis_version"]; ok {
+		report.Version = VersionInfo{
+			Str: version,
+			Obj: struct {
+				Major     string `json:"major"`
+				Minor     string `json:"minor"`
+				Patch     string `json:"patch"`
+				Branch    string `json:"branch"`
+				Commit    string `json:"commit"`
+				BuildDate string `json:"build_date"`
+				Arch      string `json:"arch"`
+				BuildHash string `json:"build_hash"`
+			}{
+				Major: strings.Split(version, ".")[0],
+			},
+		}
+		if parts := strings.Split(version, "."); len(parts) >= 2 {
+			report.Version.Obj.Minor = parts[1]
+		}
+		if parts := strings.Split(version, "."); len(parts) >= 3 {
+			report.Version.Obj.Patch = parts[2]
+		}
+	}
+
+	// Extract uptime
+	if uptimeSeconds, ok := info["uptime_in_seconds"]; ok {
+		if seconds, err := strconv.ParseInt(uptimeSeconds, 10, 64); err == nil {
+			report.Uptime = formatSecondsToUptime(seconds)
+		}
+	}
+
+	// Extract memory usage
+	if usedMemory, ok := info["used_memory"]; ok {
+		if maxMemory, ok2 := info["maxmemory"]; ok2 {
+			used, err1 := strconv.ParseInt(usedMemory, 10, 64)
+			max, err2 := strconv.ParseInt(maxMemory, 10, 64)
+			if err1 == nil && err2 == nil && max > 0 {
+				percentage := float64(used) / float64(max) * 100
+				report.Memory = fmt.Sprintf("%.1f%%", percentage)
+			} else {
+				report.Memory = formatBytes(usedMemory)
+			}
+		} else {
+			report.Memory = formatBytes(usedMemory)
+		}
+	}
+
+	// Extract CPU usage (if available)
+	if cpuSys, ok := info["used_cpu_sys"]; ok {
+		if cpu, err := strconv.ParseFloat(cpuSys, 64); err == nil {
+			report.CPU = fmt.Sprintf("%.1f%%", cpu)
+		}
+	} else {
+		report.CPU = "N/A"
+	}
+
+	return report
+}
+
+// checkOllamaStatus checks an Ollama server via its API
+func checkOllamaStatus(baseReport ServiceReport) ServiceReport {
+	report := baseReport
+
+	host := report.Domain
+	if report.Domain == "0.0.0.0" {
+		host = "localhost"
+	}
+
+	// Check version endpoint
+	versionURL := fmt.Sprintf("http://%s:%s/api/version", host, report.Port)
+	versionResponse, err := utils.FetchURL(versionURL, 2*time.Second)
+	if err != nil {
+		report.Status = "offline"
+		report.HealthMessage = fmt.Sprintf("Failed to connect: %v", err)
+		report.Uptime = "N/A"
+		report.CPU = "N/A"
+		report.Memory = "N/A"
+		return report
+	}
+
+	var versionData struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(versionResponse), &versionData); err == nil {
+		report.Version = VersionInfo{
+			Str: versionData.Version,
+		}
+	}
+
+	// Check tags endpoint to verify server is functional
+	tagsURL := fmt.Sprintf("http://%s:%s/api/tags", host, report.Port)
+	_, err = utils.FetchURL(tagsURL, 2*time.Second)
+	if err != nil {
+		report.Status = "offline"
+		report.HealthMessage = "Service responded but is not functional"
+		report.Uptime = "N/A"
+		report.CPU = "N/A"
+		report.Memory = "N/A"
+		return report
+	}
+
+	report.Status = "online"
+	report.HealthMessage = "Ollama server is running"
+	report.Uptime = "N/A" // Ollama doesn't provide uptime
+	report.CPU = "N/A"
+	report.Memory = "N/A"
+
+	return report
+}
+
+// parseRedisInfo parses the Redis INFO response into a key-value map
+func parseRedisInfo(info string) map[string]string {
+	result := make(map[string]string)
+	lines := strings.Split(info, "\r\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) == 2 {
+			result[parts[0]] = parts[1]
+		}
+	}
+	return result
+}
+
+// formatSecondsToUptime converts seconds to a readable uptime string
+func formatSecondsToUptime(seconds int64) string {
+	days := seconds / 86400
+	hours := (seconds % 86400) / 3600
+	minutes := (seconds % 3600) / 60
+	secs := seconds % 60
+
+	if days > 0 {
+		return fmt.Sprintf("%dd%dh%dm%ds", days, hours, minutes, secs)
+	} else if hours > 0 {
+		return fmt.Sprintf("%dh%dm%ds", hours, minutes, secs)
+	} else if minutes > 0 {
+		return fmt.Sprintf("%dm%ds", minutes, secs)
+	}
+	return fmt.Sprintf("%ds", secs)
+}
+
+// formatBytes formats a byte count string into a human-readable format
+func formatBytes(bytesStr string) string {
+	bytes, err := strconv.ParseInt(bytesStr, 10, 64)
+	if err != nil {
+		return bytesStr
+	}
+
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+
+	units := []string{"KB", "MB", "GB", "TB"}
+	if exp >= len(units) {
+		exp = len(units) - 1
+	}
+
+	return fmt.Sprintf("%.1f %s", float64(bytes)/float64(div), units[exp])
 }
