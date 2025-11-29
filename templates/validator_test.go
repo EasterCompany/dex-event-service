@@ -165,17 +165,20 @@ func TestValidate_AllEventTypes(t *testing.T) {
 func TestGetTemplateList(t *testing.T) {
 	types := GetTemplateList()
 
-	if len(types) != 6 {
-		t.Errorf("Expected 6 event types, got %d", len(types))
+	if len(types) != 9 {
+		t.Errorf("Expected 9 event types, got %d", len(types))
 	}
 
 	expectedTypes := map[string]bool{
-		"message_received": true,
-		"action_performed": true,
-		"log_entry":        true,
-		"error_occurred":   true,
-		"status_change":    true,
-		"metric_recorded":  true,
+		"message_received":       true,
+		"action_performed":       true,
+		"log_entry":              true,
+		"error_occurred":         true,
+		"status_change":          true,
+		"metric_recorded":        true,
+		"voice_speaking_started": true,
+		"voice_speaking_stopped": true,
+		"voice_transcribed":      true,
 	}
 
 	for _, typeName := range types {

@@ -326,5 +326,80 @@ func GetTemplates() map[string]EventTemplate {
 				},
 			},
 		},
+
+		"voice_speaking_started": {
+			Description: "A user started speaking in a voice channel",
+			Format:      "User {user_id} started speaking in voice channel {channel_id}",
+			Formats:     map[string]string{
+				// All languages use same format (user/channel IDs are universal)
+			},
+			Fields: map[string]FieldSpec{
+				"user_id": {
+					Type:        "string",
+					Required:    true,
+					Description: "Discord user ID who started speaking",
+				},
+				"channel_id": {
+					Type:        "string",
+					Required:    true,
+					Description: "Discord voice channel ID",
+				},
+			},
+		},
+
+		"voice_speaking_stopped": {
+			Description: "A user stopped speaking in a voice channel",
+			Format:      "User {user_id} stopped speaking in voice channel {channel_id}",
+			Formats:     map[string]string{
+				// All languages use same format (user/channel IDs are universal)
+			},
+			Fields: map[string]FieldSpec{
+				"user_id": {
+					Type:        "string",
+					Required:    true,
+					Description: "Discord user ID who stopped speaking",
+				},
+				"channel_id": {
+					Type:        "string",
+					Required:    true,
+					Description: "Discord voice channel ID",
+				},
+				"redis_key": {
+					Type:        "string",
+					Required:    false,
+					Description: "Redis key where the audio data is stored (empty if recording was too short)",
+				},
+			},
+		},
+
+		"voice_transcribed": {
+			Description: "Voice audio was transcribed to text",
+			Format:      "User {user_id} said in voice channel {channel_id}: {transcription}",
+			Formats:     map[string]string{
+				// All languages use same format
+			},
+			Fields: map[string]FieldSpec{
+				"user_id": {
+					Type:        "string",
+					Required:    true,
+					Description: "Discord user ID who spoke",
+				},
+				"channel_id": {
+					Type:        "string",
+					Required:    true,
+					Description: "Discord voice channel ID",
+				},
+				"transcription": {
+					Type:        "string",
+					Required:    true,
+					Description: "Transcribed text from the voice audio",
+				},
+				"redis_key": {
+					Type:        "string",
+					Required:    false,
+					Description: "Redis key where the original audio data was stored",
+				},
+			},
+		},
 	}
 }
