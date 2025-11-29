@@ -177,6 +177,7 @@ func main() {
 	// /events endpoints require authentication
 	mux.HandleFunc("/events", middleware.ServiceAuthMiddleware(endpoints.EventsHandler(RedisClient)))
 	mux.HandleFunc("/events/", middleware.ServiceAuthMiddleware(endpoints.EventsHandler(RedisClient)))
+	mux.HandleFunc("/system_monitor_metrics", endpoints.SystemMonitorHandler)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
