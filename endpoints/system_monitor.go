@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -51,9 +52,45 @@ func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
 
 	var reports []ServiceReport
 
-	// Iterate through all service groups defined in service map
-	// The key of the map is the service type (e.g., "cs", "be")
-	for group, servicesInGroup := range configuredServices.Services {
+	// Define service type order for consistent sorting
+	typeOrder := map[string]int{
+		"fe":  0,
+		"be":  1,
+		"cs":  2,
+		"th":  3,
+		"os":  4,
+		"cli": 5,
+	}
+
+	// Get sorted group keys to ensure consistent order
+	var groupKeys []string
+	for group := range configuredServices.Services {
+		groupKeys = append(groupKeys, group)
+	}
+	sort.Slice(groupKeys, func(i, j int) bool {
+		orderI, okI := typeOrder[groupKeys[i]]
+		orderJ, okJ := typeOrder[groupKeys[j]]
+		if okI && okJ {
+			return orderI < orderJ
+		}
+		if okI {
+			return true
+		}
+		if okJ {
+			return false
+		}
+		return groupKeys[i] < groupKeys[j]
+	})
+
+	// Iterate through sorted service groups
+	for _, group := range groupKeys {
+		servicesInGroup := configuredServices.Services[group]
+
+		// Sort services within each group by ID for consistent ordering
+		sort.Slice(servicesInGroup, func(i, j int) bool {
+			return servicesInGroup[i].ID < servicesInGroup[j].ID
+		})
+
 		for _, serviceDef := range servicesInGroup {
 			report := checkService(serviceDef, group) // Pass the service type (group)
 			reports = append(reports, report)
