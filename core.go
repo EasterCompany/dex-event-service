@@ -22,13 +22,9 @@ func initializeRedis(redisConfig *config.ServiceEntry) error {
 	var redisPassword string
 	redisDB := 0
 
-	if creds, ok := redisConfig.Credentials.(map[string]interface{}); ok {
-		if password, found := creds["password"].(string); found {
-			redisPassword = password
-		}
-		if db, found := creds["db"].(float64); found { // JSON numbers are float64
-			redisDB = int(db)
-		}
+	if redisConfig.Credentials != nil {
+		redisPassword = redisConfig.Credentials.Password
+		redisDB = redisConfig.Credentials.DB
 	} else {
 		log.Printf("Warning: Redis credentials not found or invalid for service %s", redisConfig.ID)
 	}

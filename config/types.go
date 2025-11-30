@@ -25,12 +25,19 @@ type ServiceType struct {
 
 // ServiceEntry represents a single service in the service map
 type ServiceEntry struct {
-	ID          string      `json:"id"`
-	Repo        string      `json:"repo"`
-	Source      string      `json:"source"`
-	Domain      string      `json:"domain,omitempty"`
-	Port        string      `json:"port,omitempty"`
-	Credentials interface{} `json:"credentials,omitempty"` // Using interface{} for flexibility
+	ID          string              `json:"id"`
+	Repo        string              `json:"repo"`
+	Source      string              `json:"source"`
+	Domain      string              `json:"domain,omitempty"`
+	Port        string              `json:"port,omitempty"`
+	Credentials *ServiceCredentials `json:"credentials,omitempty"`
+}
+
+// ServiceCredentials holds connection credentials for services like Redis
+type ServiceCredentials struct {
+	Username string `json:"username,omitempty"`
+	Password string `json:"password"`
+	DB       int    `json:"db"`
 }
 
 // OptionsConfig represents the structure of options.json

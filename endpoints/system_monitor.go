@@ -114,7 +114,7 @@ func checkService(service config.ServiceEntry, serviceType string) ServiceReport
 		}
 		// Check for Redis cache services
 		if strings.Contains(strings.ToLower(service.ID), "cache") {
-			return checkRedisStatus(baseReport)
+			return checkRedisStatus(baseReport, service.Credentials)
 		}
 		// For other OS services, attempt HTTP check if port is defined
 		if service.Port != "" {
@@ -392,7 +392,7 @@ func checkHTTPStatus(baseReport ServiceReport) ServiceReport {
 }
 
 // checkRedisStatus checks a Redis server via PING and INFO commands
-func checkRedisStatus(baseReport ServiceReport) ServiceReport {
+func checkRedisStatus(baseReport ServiceReport, creds *config.ServiceCredentials) ServiceReport {
 	report := baseReport
 
 	host := report.Domain
@@ -401,9 +401,15 @@ func checkRedisStatus(baseReport ServiceReport) ServiceReport {
 	}
 	addr := fmt.Sprintf("%s:%s", host, report.Port)
 
+	var password string
+	if creds != nil {
+		password = creds.Password
+	}
+
 	// Create Redis client with timeout
 	rdb := redis.NewClient(&redis.Options{
 		Addr:         addr,
+		Password:     password,
 		DialTimeout:  2 * time.Second,
 		ReadTimeout:  2 * time.Second,
 		WriteTimeout: 2 * time.Second,
