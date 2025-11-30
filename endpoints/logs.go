@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/EasterCompany/dex-event-service/config"
@@ -27,7 +28,24 @@ func LogsHandler(w http.ResponseWriter, r *http.Request) {
 
 	var reports []LogReport
 
-	for _, servicesInGroup := range configuredServices.Services {
+	// Get sorted group keys to ensure consistent order
+	var groupKeys []string
+	for group := range configuredServices.Services {
+		groupKeys = append(groupKeys, group)
+	}
+	sort.Slice(groupKeys, func(i, j int) bool {
+		return groupKeys[i] < groupKeys[j]
+	})
+
+	// Iterate through sorted service groups
+	for _, group := range groupKeys {
+		servicesInGroup := configuredServices.Services[group]
+
+		// Sort services within each group by ID for consistent ordering
+		sort.Slice(servicesInGroup, func(i, j int) bool {
+			return servicesInGroup[i].ID < servicesInGroup[j].ID
+		})
+
 		for _, serviceDef := range servicesInGroup {
 			// We are only interested in manageable services that have log files
 			if !isServiceManageable(serviceDef.ID) {
