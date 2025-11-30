@@ -22,7 +22,7 @@ func ServiceAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 		// Allow requests from localhost without authentication
 		if isLocalhost(clientIP) {
-			log.Printf("AUTH BYPASS: Localhost request from %s", clientIP)
+			// log.Printf("AUTH BYPASS: Localhost request from %s", clientIP)
 			next(w, r)
 			return
 		}
