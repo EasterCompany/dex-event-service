@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -18,32 +19,17 @@ import (
 
 // ServiceReport for a single service, adapted for JSON output to frontend
 type ServiceReport struct {
-	ID            string      `json:"id"`
-	ShortName     string      `json:"short_name"` // Will use ID as short_name fallback if not present
-	Type          string      `json:"type"`       // Service type from service map group (e.g., "cs", "be")
-	Domain        string      `json:"domain"`
-	Port          string      `json:"port"`
-	Status        string      `json:"status"` // "online", "offline", "unknown"
-	Uptime        string      `json:"uptime"` // formatted string
-	Version       VersionInfo `json:"version"`
-	HealthMessage string      `json:"health_message"`
-	CPU           string      `json:"cpu"`    // formatted string (e.g., "1.2%")
-	Memory        string      `json:"memory"` // formatted string (e.g., "5.3%")
-}
-
-// VersionInfo matches the structure expected from /service endpoint
-type VersionInfo struct {
-	Str string `json:"str"`
-	Obj struct {
-		Major     string `json:"major"`
-		Minor     string `json:"minor"`
-		Patch     string `json:"patch"`
-		Branch    string `json:"branch"`
-		Commit    string `json:"commit"`
-		BuildDate string `json:"build_date"`
-		Arch      string `json:"arch"`
-		BuildHash string `json:"build_hash"`
-	} `json:"obj"`
+	ID            string        `json:"id"`
+	ShortName     string        `json:"short_name"` // Will use ID as short_name fallback if not present
+	Type          string        `json:"type"`       // Service type from service map group (e.g., "cs", "be")
+	Domain        string        `json:"domain"`
+	Port          string        `json:"port"`
+	Status        string        `json:"status"` // "online", "offline", "unknown"
+	Uptime        string        `json:"uptime"` // formatted string
+	Version       utils.Version `json:"version"`
+	HealthMessage string        `json:"health_message"`
+	CPU           string        `json:"cpu"`    // formatted string (e.g., "1.2%")
+	Memory        string        `json:"memory"` // formatted string (e.g., "5.3%")
 }
 
 // SystemMonitorHandler collects status for all configured services and returns as JSON
@@ -120,7 +106,7 @@ func checkService(service config.ServiceEntry, serviceType string) ServiceReport
 
 	switch serviceType {
 	case "cli":
-		return newUnknownServiceReport(baseReport, "CLI service status cannot be checked directly from event service.")
+		return checkCLIStatus(baseReport)
 	case "os":
 		// Check for Ollama services
 		if strings.Contains(strings.ToLower(service.ID), "ollama") {
@@ -147,7 +133,7 @@ func newUnknownServiceReport(baseReport ServiceReport, message string) ServiceRe
 	baseReport.Uptime = "N/A"
 	baseReport.CPU = "N/A"
 	baseReport.Memory = "N/A"
-	baseReport.Version = VersionInfo{} // Empty version info
+	baseReport.Version = utils.Version{} // Empty version info
 	return baseReport
 }
 
@@ -306,6 +292,42 @@ func isLocalAddress(domain string) bool {
 		strings.HasPrefix(domain, "172.31.")
 }
 
+// checkCLIStatus checks if the CLI tool is installed and working
+func checkCLIStatus(baseReport ServiceReport) ServiceReport {
+	report := baseReport
+	cmd := exec.Command(os.ExpandEnv("$HOME/Dexter/bin/dex"), "version")
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		report.Status = "offline"
+		report.HealthMessage = "Failed to execute 'dex version'"
+		report.Uptime = "N/A"
+		report.CPU = "N/A"
+		report.Memory = "N/A"
+		return report
+	}
+
+	parsedVersion, err := utils.Parse(strings.TrimSpace(string(output)))
+	if err != nil {
+		report.Status = "offline"
+		report.HealthMessage = "Failed to parse 'dex version' output"
+		report.Uptime = "N/A"
+		report.CPU = "N/A"
+		report.Memory = "N/A"
+		return report
+	}
+
+	report.Status = "online"
+	report.HealthMessage = "CLI is installed"
+	report.Version.Str = fmt.Sprintf("%s.%s.%s", parsedVersion.Major, parsedVersion.Minor, parsedVersion.Patch)
+	report.Version.Obj = *parsedVersion
+	report.Uptime = "N/A"
+	report.CPU = "N/A"
+	report.Memory = "N/A"
+
+	return report
+}
+
 // checkHTTPStatus checks a service via its new, unified /service endpoint
 func checkHTTPStatus(baseReport ServiceReport) ServiceReport {
 	report := baseReport // Start with base info
@@ -326,23 +348,7 @@ func checkHTTPStatus(baseReport ServiceReport) ServiceReport {
 		return report
 	}
 
-	var serviceHealthReport struct {
-		Version VersionInfo `json:"version"`
-		Health  struct {
-			Status  string `json:"status"`
-			Uptime  string `json:"uptime"`
-			Message string `json:"message"`
-		} `json:"health"`
-		Metrics struct {
-			CPU struct {
-				Avg float64 `json:"avg"`
-			} `json:"cpu"`
-			Memory struct {
-				Avg float64 `json:"avg"`
-			} `json:"memory"`
-		} `json:"metrics"`
-	}
-
+	var serviceHealthReport utils.ServiceReport
 	if err := json.Unmarshal([]byte(jsonResponse), &serviceHealthReport); err != nil {
 		report.Status = "offline"
 		report.HealthMessage = fmt.Sprintf("Failed to parse /service response: %v", err)
@@ -362,13 +368,22 @@ func checkHTTPStatus(baseReport ServiceReport) ServiceReport {
 	report.Version = serviceHealthReport.Version
 	report.HealthMessage = serviceHealthReport.Health.Message
 
-	if serviceHealthReport.Metrics.CPU.Avg > 0 {
-		report.CPU = fmt.Sprintf("%.1f%%", serviceHealthReport.Metrics.CPU.Avg)
+	if serviceHealthReport.Metrics["cpu"] != nil {
+		if cpu, ok := serviceHealthReport.Metrics["cpu"].(map[string]interface{}); ok {
+			if avg, ok := cpu["avg"].(float64); ok && avg > 0 {
+				report.CPU = fmt.Sprintf("%.1f%%", avg)
+			}
+		}
 	} else {
 		report.CPU = "N/A"
 	}
-	if serviceHealthReport.Metrics.Memory.Avg > 0 {
-		report.Memory = fmt.Sprintf("%.1f%%", serviceHealthReport.Metrics.Memory.Avg)
+
+	if serviceHealthReport.Metrics["memory"] != nil {
+		if mem, ok := serviceHealthReport.Metrics["memory"].(map[string]interface{}); ok {
+			if avg, ok := mem["avg"].(float64); ok && avg > 0 {
+				report.Memory = fmt.Sprintf("%.1f%%", avg)
+			}
+		}
 	} else {
 		report.Memory = "N/A"
 	}
@@ -440,18 +455,9 @@ func checkRedisStatus(baseReport ServiceReport) ServiceReport {
 
 	// Extract version
 	if version, ok := info["redis_version"]; ok {
-		report.Version = VersionInfo{
+		report.Version = utils.Version{
 			Str: version,
-			Obj: struct {
-				Major     string `json:"major"`
-				Minor     string `json:"minor"`
-				Patch     string `json:"patch"`
-				Branch    string `json:"branch"`
-				Commit    string `json:"commit"`
-				BuildDate string `json:"build_date"`
-				Arch      string `json:"arch"`
-				BuildHash string `json:"build_hash"`
-			}{
+			Obj: utils.VersionDetails{
 				Major: strings.Split(version, ".")[0],
 			},
 		}
@@ -563,7 +569,7 @@ func checkOllamaStatus(baseReport ServiceReport) ServiceReport {
 		Version string `json:"version"`
 	}
 	if err := json.Unmarshal([]byte(versionResponse), &versionData); err == nil {
-		report.Version = VersionInfo{
+		report.Version = utils.Version{
 			Str: versionData.Version,
 		}
 	}

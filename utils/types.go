@@ -1,5 +1,10 @@
 package utils
 
+import (
+	"fmt"
+	"strings"
+)
+
 // ServiceReport defines the UNIVERSAL structure for the /service endpoint response.
 // ALL Dexter services MUST implement this exact structure.
 type ServiceReport struct {
@@ -34,4 +39,35 @@ type Health struct {
 	Status  string `json:"status"`
 	Uptime  string `json:"uptime"`
 	Message string `json:"message"`
+}
+
+// Parse takes a version string and returns a Version object.
+func Parse(versionStr string) (*VersionDetails, error) {
+	versionStr = strings.TrimPrefix(versionStr, "v") // Always trim 'v' if present
+	parts := strings.Split(versionStr, ".")
+
+	// Handle simple "M.m.p" versions, common for cache services or initial states.
+	if len(parts) == 3 {
+		return &VersionDetails{
+			Major: parts[0],
+			Minor: parts[1],
+			Patch: parts[2],
+		}, nil
+	}
+
+	// Handle the full "M.m.p.branch.commit.build_date.arch.build_hash" format.
+	if len(parts) != 8 {
+		return nil, fmt.Errorf("invalid version string format: expected 3 or 8 parts, got %d for '%s'", len(parts), versionStr)
+	}
+
+	return &VersionDetails{
+		Major:     parts[0],
+		Minor:     parts[1],
+		Patch:     parts[2],
+		Branch:    parts[3],
+		Commit:    parts[4],
+		BuildDate: parts[5],
+		Arch:      parts[6],
+		BuildHash: parts[7],
+	}, nil
 }

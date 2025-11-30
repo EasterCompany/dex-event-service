@@ -2,42 +2,70 @@ package utils
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
-var currentVersion Version
+var (
+	// Version information will be injected by the build process
+	VersionStr   = "0.0.0"
+	BuildDate    = "unknown"
+	GitCommit    = "unknown"
+	GitBranch    = "unknown"
+	GitTag       = "unknown"
+	Architecture = "unknown"
+	BuildHash    = "unknown"
+)
 
-// SetVersion populates the package-level version variables.
-func SetVersion(versionStr, branchStr, commitStr, buildDateStr, buildYearStr, buildHashStr, archStr string) {
-	// Format the architecture: linux/amd64 -> linux-amd64
-	formattedArch := strings.ReplaceAll(archStr, "/", "-")
+// SetVersion sets the version information for the service.
+func SetVersion(version, branch, commit, buildDate, buildYear, buildHash, arch string) {
+	VersionStr = version
+	GitBranch = branch
+	GitCommit = commit
+	BuildDate = buildDate
+	BuildHash = buildHash
+	Architecture = arch
+}
 
-	// Parse major, minor, patch from the full version string
-	vParts := strings.Split(strings.TrimPrefix(versionStr, "v"), ".")
-	major, minor, patch := "0", "0", "0"
-	if len(vParts) >= 3 {
-		major = vParts[0]
-		minor = vParts[1]
-		patch = vParts[2]
-	}
-
-	currentVersion = Version{
-		Str: fmt.Sprintf("%s.%s.%s.%s.%s.%s.%s.%s",
-			major, minor, patch, branchStr, commitStr, buildDateStr, formattedArch, buildHashStr),
+// GetVersion returns the version information for the service.
+func GetVersion() Version {
+	major, minor, patch, _ := ParseVersionTag(VersionStr)
+	return Version{
+		Str: VersionStr,
 		Obj: VersionDetails{
-			Major:     major,
-			Minor:     minor,
-			Patch:     patch,
-			Branch:    branchStr,
-			Commit:    commitStr,
-			BuildDate: buildDateStr,
-			Arch:      formattedArch,
-			BuildHash: buildHashStr,
+			Major:     fmt.Sprintf("%d", major),
+			Minor:     fmt.Sprintf("%d", minor),
+			Patch:     fmt.Sprintf("%d", patch),
+			Branch:    GitBranch,
+			Commit:    GitCommit,
+			BuildDate: BuildDate,
+			Arch:      Architecture,
+			BuildHash: BuildHash,
 		},
 	}
 }
 
-// GetVersion constructs and returns the version information for the service.
-func GetVersion() Version {
-	return currentVersion
+// ParseVersionTag is a helper function to parse version tags.
+// It is duplicated here to avoid circular dependencies.
+func ParseVersionTag(tag string) (int, int, int, error) {
+	trimmedTag := strings.TrimPrefix(tag, "v")
+	parts := strings.Split(trimmedTag, ".")
+	if len(parts) != 3 {
+		return 0, 0, 0, fmt.Errorf("tag does not have 3 parts separated by '.'")
+	}
+
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to parse major version '%s': %w", parts[0], err)
+	}
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to parse minor version '%s': %w", parts[1], err)
+	}
+	patch, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to parse patch version '%s': %w", parts[2], err)
+	}
+
+	return major, minor, patch, nil
 }
