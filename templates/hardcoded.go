@@ -335,7 +335,7 @@ func GetTemplates() map[string]EventTemplate {
 
 		string(types.EventTypeMessagingUserJoinedVoice): {
 			Description: "A user joined a voice channel",
-			Format:      "{UserName} joined voice channel {ChannelName}",
+			Format:      "{user_name} joined voice channel {channel_name}",
 			Fields: map[string]FieldSpec{
 				"type":         {Type: "string", Required: true},
 				"source":       {Type: "string", Required: true},
@@ -351,7 +351,7 @@ func GetTemplates() map[string]EventTemplate {
 
 		string(types.EventTypeMessagingUserLeftVoice): {
 			Description: "A user left a voice channel",
-			Format:      "{UserName} left voice channel {ChannelName}",
+			Format:      "{user_name} left voice channel {channel_name}",
 			Fields: map[string]FieldSpec{
 				"type":         {Type: "string", Required: true},
 				"source":       {Type: "string", Required: true},
@@ -367,7 +367,7 @@ func GetTemplates() map[string]EventTemplate {
 
 		string(types.EventTypeMessagingUserSentMessage): {
 			Description: "A user sent a message in a text channel",
-			Format:      "{UserName} in {ChannelName}: {content}",
+			Format:      "{user_name} in {channel_name}: {content}",
 			Fields: map[string]FieldSpec{
 				"type":         {Type: "string", Required: true},
 				"source":       {Type: "string", Required: true},
@@ -397,7 +397,7 @@ func GetTemplates() map[string]EventTemplate {
 
 		string(types.EventTypeMessagingUserSpeakingStarted): {
 			Description: "A user started speaking",
-			Format:      "{UserName} started speaking",
+			Format:      "{user_name} started speaking",
 			Fields: map[string]FieldSpec{
 				"type":         {Type: "string", Required: true},
 				"source":       {Type: "string", Required: true},
@@ -414,7 +414,7 @@ func GetTemplates() map[string]EventTemplate {
 
 		string(types.EventTypeMessagingUserSpeakingStopped): {
 			Description: "A user stopped speaking",
-			Format:      "{UserName} stopped speaking",
+			Format:      "{user_name} stopped speaking",
 			Fields: map[string]FieldSpec{
 				"type":         {Type: "string", Required: true},
 				"source":       {Type: "string", Required: true},
@@ -431,7 +431,7 @@ func GetTemplates() map[string]EventTemplate {
 
 		string(types.EventTypeMessagingUserTranscribed): {
 			Description: "A user's speech was transcribed",
-			Format:      "{UserName} said: {transcription}",
+			Format:      "{user_name} said: {transcription}",
 			Fields: map[string]FieldSpec{
 				"type":          {Type: "string", Required: true},
 				"source":        {Type: "string", Required: true},
@@ -449,7 +449,7 @@ func GetTemplates() map[string]EventTemplate {
 
 		string(types.EventTypeMessagingUserJoinedServer): {
 			Description: "A user joined the server",
-			Format:      "{UserName} joined {ServerName}",
+			Format:      "{user_name} joined {server_name}",
 			Fields: map[string]FieldSpec{
 				"type":         {Type: "string", Required: true},
 				"source":       {Type: "string", Required: true},
