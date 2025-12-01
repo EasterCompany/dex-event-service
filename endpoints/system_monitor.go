@@ -113,52 +113,35 @@ func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// checkModelsStatus checks the status of required and custom Ollama models.
+// checkModelsStatus reports on all models currently downloaded in Ollama.
 func checkModelsStatus() []ModelReport {
 	var reports []ModelReport
 
-	// Define required models
-	requiredBaseModels := []string{"gpt-oss:20b"}
-	requiredCustomModels := []string{"dex-commit-model", "dex-summary-model"}
-
-	// Get all downloaded models from Ollama
 	downloadedModels, err := utils.ListOllamaModels()
 	if err != nil {
-		// If Ollama is down, we can't check models. Return empty slice.
+		// Ollama is likely offline, return an empty slice.
 		return reports
 	}
 
 	// Create a map for quick lookup of downloaded models
-	downloadedMap := make(map[string]utils.ModelInfo)
 	for _, model := range downloadedModels {
-		downloadedMap[model.Name] = model
-	}
-
-	// Check base models
-	for _, modelName := range requiredBaseModels {
-		report := ModelReport{Name: modelName, Type: "base"}
-		if modelInfo, ok := downloadedMap[modelName]; ok {
-			report.Status = "Downloaded"
-			report.Size = modelInfo.Size
+		report := ModelReport{
+			Name:   model.Name,
+			Status: "Downloaded",
+			Size:   model.Size,
+		}
+		if strings.HasPrefix(model.Name, "dex-") {
+			report.Type = "custom"
 		} else {
-			report.Status = "Missing"
-			report.Size = 0
+			report.Type = "base"
 		}
 		reports = append(reports, report)
 	}
 
-	// Check custom models
-	for _, modelName := range requiredCustomModels {
-		report := ModelReport{Name: modelName, Type: "custom"}
-		if modelInfo, ok := downloadedMap[modelName]; ok {
-			report.Status = "Downloaded"
-			report.Size = modelInfo.Size
-		} else {
-			report.Status = "Missing"
-			report.Size = 0
-		}
-		reports = append(reports, report)
-	}
+	// Sort reports by name for consistent order
+	sort.Slice(reports, func(i, j int) bool {
+		return reports[i].Name < reports[j].Name
+	})
 
 	return reports
 }
