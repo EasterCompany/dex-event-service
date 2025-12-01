@@ -32,6 +32,20 @@ type ServiceReport struct {
 	Memory        string        `json:"memory"` // formatted string (e.g., "5.3%")
 }
 
+// ModelReport for a single model's status
+type ModelReport struct {
+	Name   string `json:"name"`
+	Type   string `json:"type"`   // "base" or "custom"
+	Status string `json:"status"` // "Downloaded" or "Missing"
+	Size   int64  `json:"size"`
+}
+
+// SystemMonitorResponse is the top-level response for the system monitor endpoint
+type SystemMonitorResponse struct {
+	Services []ServiceReport `json:"services"`
+	Models   []ModelReport   `json:"models"`
+}
+
 // SystemMonitorHandler collects status for all configured services and returns as JSON
 func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
 	configuredServices, err := config.LoadServiceMap()
@@ -40,7 +54,7 @@ func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var reports []ServiceReport
+	var serviceReports []ServiceReport
 
 	// Define service type order for consistent sorting
 	typeOrder := map[string]int{
@@ -72,25 +86,81 @@ func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
 		return groupKeys[i] < groupKeys[j]
 	})
 
-	// Iterate through sorted service groups
+	// Iterate through sorted service groups to get service reports
 	for _, group := range groupKeys {
 		servicesInGroup := configuredServices.Services[group]
-
-		// Sort services within each group by ID for consistent ordering
 		sort.Slice(servicesInGroup, func(i, j int) bool {
 			return servicesInGroup[i].ID < servicesInGroup[j].ID
 		})
-
 		for _, serviceDef := range servicesInGroup {
-			report := checkService(serviceDef, group) // Pass the service type (group)
-			reports = append(reports, report)
+			report := checkService(serviceDef, group)
+			serviceReports = append(serviceReports, report)
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(reports); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to encode service reports: %v", err), http.StatusInternalServerError)
+	// Get model reports
+	modelReports := checkModelsStatus()
+
+	// Combine into the final response
+	response := SystemMonitorResponse{
+		Services: serviceReports,
+		Models:   modelReports,
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+	}
+}
+
+// checkModelsStatus checks the status of required and custom Ollama models.
+func checkModelsStatus() []ModelReport {
+	var reports []ModelReport
+
+	// Define required models
+	requiredBaseModels := []string{"gpt-oss:20b"}
+	requiredCustomModels := []string{"dex-commit-model", "dex-summary-model"}
+
+	// Get all downloaded models from Ollama
+	downloadedModels, err := utils.ListOllamaModels()
+	if err != nil {
+		// If Ollama is down, we can't check models. Return empty slice.
+		return reports
+	}
+
+	// Create a map for quick lookup of downloaded models
+	downloadedMap := make(map[string]utils.ModelInfo)
+	for _, model := range downloadedModels {
+		downloadedMap[model.Name] = model
+	}
+
+	// Check base models
+	for _, modelName := range requiredBaseModels {
+		report := ModelReport{Name: modelName, Type: "base"}
+		if modelInfo, ok := downloadedMap[modelName]; ok {
+			report.Status = "Downloaded"
+			report.Size = modelInfo.Size
+		} else {
+			report.Status = "Missing"
+			report.Size = 0
+		}
+		reports = append(reports, report)
+	}
+
+	// Check custom models
+	for _, modelName := range requiredCustomModels {
+		report := ModelReport{Name: modelName, Type: "custom"}
+		if modelInfo, ok := downloadedMap[modelName]; ok {
+			report.Status = "Downloaded"
+			report.Size = modelInfo.Size
+		} else {
+			report.Status = "Missing"
+			report.Size = 0
+		}
+		reports = append(reports, report)
+	}
+
+	return reports
 }
 
 // checkService dispatches to appropriate status checker based on service type.
