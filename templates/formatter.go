@@ -40,6 +40,11 @@ func FormatEventAsText(eventType string, eventData map[string]interface{}, servi
 	}
 
 	// Combine all parts
+	if eventType == "user_transcribed" {
+		if audioKey, ok := eventData["audio_key"].(string); ok {
+			message += fmt.Sprintf(" 🔊 (http://localhost:8300/audio/%s)", audioKey)
+		}
+	}
 	return fmt.Sprintf("%s%s | %s | %s", prefix, timeStr, service, message)
 }
 
