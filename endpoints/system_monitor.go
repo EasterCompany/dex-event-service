@@ -142,18 +142,45 @@ func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// checkModelsStatus reports on all models currently downloaded in Ollama.
+// checkModelsStatus reports on all models currently downloaded in Ollama, filtering out duplicate base models.
 func checkModelsStatus() []ModelReport {
-	var reports []ModelReport
-
 	downloadedModels, err := utils.ListOllamaModels()
 	if err != nil {
-		// Ollama is likely offline, return an empty slice.
-		return reports
+		return []ModelReport{} // Ollama is likely offline
 	}
 
-	// Create a map for quick lookup of downloaded models
+	// Use a map to select the best tag for each base model.
+	// We prefer specific tags over "latest" for base models.
+	bestModels := make(map[string]utils.ModelInfo)
+
 	for _, model := range downloadedModels {
+		isCustom := strings.HasPrefix(model.Name, "dex-")
+		baseName := strings.Split(model.Name, ":")[0]
+		isLatest := strings.HasSuffix(model.Name, ":latest")
+
+		// Always include custom models directly.
+		if isCustom {
+			bestModels[model.Name] = model
+			continue
+		}
+
+		existing, exists := bestModels[baseName]
+		if !exists {
+			// First time seeing this base model, add it.
+			bestModels[baseName] = model
+		} else {
+			// We've seen this base model before. If the existing one is a "latest"
+			// and the new one is not, replace it with the more specific tag.
+			isExistingLatest := strings.HasSuffix(existing.Name, ":latest")
+			if isExistingLatest && !isLatest {
+				bestModels[baseName] = model
+			}
+		}
+	}
+
+	// Now, create the final reports from the filtered map.
+	var reports []ModelReport
+	for _, model := range bestModels {
 		report := ModelReport{
 			Name:   model.Name,
 			Status: "Downloaded",
