@@ -1,5 +1,9 @@
 package templates
 
+import (
+	"github.com/EasterCompany/dex-event-service/types"
+)
+
 // GetTemplates returns all available event templates
 // All templates are hardcoded and versioned with the application
 func GetTemplates() map[string]EventTemplate {
@@ -326,6 +330,140 @@ func GetTemplates() map[string]EventTemplate {
 				},
 			},
 		},
+
+		// NEW MESSAGING EVENTS START HERE
+
+		string(types.EventTypeMessagingUserJoinedVoice): {
+			Description: "A user joined a voice channel",
+			Format:      "{UserName} joined voice channel {ChannelName}",
+			Fields: map[string]FieldSpec{
+				"type":         {Type: "string", Required: true},
+				"source":       {Type: "string", Required: true},
+				"user_id":      {Type: "string", Required: true},
+				"user_name":    {Type: "string", Required: true},
+				"channel_id":   {Type: "string", Required: true},
+				"channel_name": {Type: "string", Required: true},
+				"server_id":    {Type: "string", Required: true},
+				"server_name":  {Type: "string", Required: false},
+				"timestamp":    {Type: "string", Required: true}, // time.Time marshals to string
+			},
+		},
+
+		string(types.EventTypeMessagingUserLeftVoice): {
+			Description: "A user left a voice channel",
+			Format:      "{UserName} left voice channel {ChannelName}",
+			Fields: map[string]FieldSpec{
+				"type":         {Type: "string", Required: true},
+				"source":       {Type: "string", Required: true},
+				"user_id":      {Type: "string", Required: true},
+				"user_name":    {Type: "string", Required: true},
+				"channel_id":   {Type: "string", Required: true},
+				"channel_name": {Type: "string", Required: true},
+				"server_id":    {Type: "string", Required: true},
+				"server_name":  {Type: "string", Required: false},
+				"timestamp":    {Type: "string", Required: true},
+			},
+		},
+
+		string(types.EventTypeMessagingUserSentMessage): {
+			Description: "A user sent a message in a text channel",
+			Format:      "{UserName} in {ChannelName}: {content}",
+			Fields: map[string]FieldSpec{
+				"type":         {Type: "string", Required: true},
+				"source":       {Type: "string", Required: true},
+				"user_id":      {Type: "string", Required: true},
+				"user_name":    {Type: "string", Required: true},
+				"channel_id":   {Type: "string", Required: true},
+				"channel_name": {Type: "string", Required: true},
+				"server_id":    {Type: "string", Required: true},
+				"server_name":  {Type: "string", Required: false},
+				"timestamp":    {Type: "string", Required: true},
+				"message_id":   {Type: "string", Required: true},
+				"content":      {Type: "string", Required: true},
+			},
+		},
+
+		string(types.EventTypeMessagingBotStatusUpdate): {
+			Description: "The bot's status has changed",
+			Format:      "Bot status changed to {status}: {details}",
+			Fields: map[string]FieldSpec{
+				"type":      {Type: "string", Required: true},
+				"source":    {Type: "string", Required: true},
+				"status":    {Type: "string", Required: true},
+				"details":   {Type: "string", Required: true},
+				"timestamp": {Type: "string", Required: true},
+			},
+		},
+
+		string(types.EventTypeMessagingUserSpeakingStarted): {
+			Description: "A user started speaking",
+			Format:      "{UserName} started speaking",
+			Fields: map[string]FieldSpec{
+				"type":         {Type: "string", Required: true},
+				"source":       {Type: "string", Required: true},
+				"user_id":      {Type: "string", Required: true},
+				"user_name":    {Type: "string", Required: true},
+				"channel_id":   {Type: "string", Required: true},
+				"channel_name": {Type: "string", Required: true},
+				"server_id":    {Type: "string", Required: true},
+				"server_name":  {Type: "string", Required: false},
+				"timestamp":    {Type: "string", Required: true},
+				"ssrc":         {Type: "number", Required: true},
+			},
+		},
+
+		string(types.EventTypeMessagingUserSpeakingStopped): {
+			Description: "A user stopped speaking",
+			Format:      "{UserName} stopped speaking",
+			Fields: map[string]FieldSpec{
+				"type":         {Type: "string", Required: true},
+				"source":       {Type: "string", Required: true},
+				"user_id":      {Type: "string", Required: true},
+				"user_name":    {Type: "string", Required: true},
+				"channel_id":   {Type: "string", Required: true},
+				"channel_name": {Type: "string", Required: true},
+				"server_id":    {Type: "string", Required: true},
+				"server_name":  {Type: "string", Required: false},
+				"timestamp":    {Type: "string", Required: true},
+				"ssrc":         {Type: "number", Required: true},
+			},
+		},
+
+		string(types.EventTypeMessagingUserTranscribed): {
+			Description: "A user's speech was transcribed",
+			Format:      "{UserName} said: {transcription}",
+			Fields: map[string]FieldSpec{
+				"type":          {Type: "string", Required: true},
+				"source":        {Type: "string", Required: true},
+				"user_id":       {Type: "string", Required: true},
+				"user_name":     {Type: "string", Required: true},
+				"channel_id":    {Type: "string", Required: true},
+				"channel_name":  {Type: "string", Required: true},
+				"server_id":     {Type: "string", Required: true},
+				"server_name":   {Type: "string", Required: false},
+				"timestamp":     {Type: "string", Required: true},
+				"transcription": {Type: "string", Required: true},
+				"audio_key":     {Type: "string", Required: true},
+			},
+		},
+
+		string(types.EventTypeMessagingUserJoinedServer): {
+			Description: "A user joined the server",
+			Format:      "{UserName} joined {ServerName}",
+			Fields: map[string]FieldSpec{
+				"type":         {Type: "string", Required: true},
+				"source":       {Type: "string", Required: true},
+				"user_id":      {Type: "string", Required: true},
+				"user_name":    {Type: "string", Required: true},
+				"channel_id":   {Type: "string", Required: false}, // May not be applicable
+				"channel_name": {Type: "string", Required: false},
+				"server_id":    {Type: "string", Required: true},
+				"server_name":  {Type: "string", Required: true},
+				"timestamp":    {Type: "string", Required: true},
+			},
+		},
+
+		// END NEW MESSAGING EVENTS
 
 		"voice_speaking_started": {
 			Description: "A user started speaking in a voice channel",

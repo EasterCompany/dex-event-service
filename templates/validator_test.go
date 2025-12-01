@@ -1,6 +1,7 @@
 package templates
 
 import (
+	"github.com/EasterCompany/dex-event-service/types"
 	"testing"
 )
 
@@ -163,10 +164,11 @@ func TestValidate_AllEventTypes(t *testing.T) {
 }
 
 func TestGetTemplateList(t *testing.T) {
-	types := GetTemplateList()
+	// Need to import types to use the constants
+	eventTypes := GetTemplateList()
 
-	if len(types) != 9 {
-		t.Errorf("Expected 9 event types, got %d", len(types))
+	if len(eventTypes) != 17 {
+		t.Errorf("Expected 17 event types, got %d", len(eventTypes))
 	}
 
 	expectedTypes := map[string]bool{
@@ -179,9 +181,17 @@ func TestGetTemplateList(t *testing.T) {
 		"voice_speaking_started": true,
 		"voice_speaking_stopped": true,
 		"voice_transcribed":      true,
+		string(types.EventTypeMessagingUserJoinedVoice):     true,
+		string(types.EventTypeMessagingUserLeftVoice):       true,
+		string(types.EventTypeMessagingUserSentMessage):     true,
+		string(types.EventTypeMessagingBotStatusUpdate):     true,
+		string(types.EventTypeMessagingUserSpeakingStarted): true,
+		string(types.EventTypeMessagingUserSpeakingStopped): true,
+		string(types.EventTypeMessagingUserTranscribed):     true,
+		string(types.EventTypeMessagingUserJoinedServer):    true,
 	}
 
-	for _, typeName := range types {
+	for _, typeName := range eventTypes {
 		if !expectedTypes[typeName] {
 			t.Errorf("Unexpected event type: %s", typeName)
 		}
