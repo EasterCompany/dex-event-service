@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,8 +43,32 @@ type ModelReport struct {
 
 // SystemMonitorResponse is the top-level response for the system monitor endpoint
 type SystemMonitorResponse struct {
-	Services []ServiceReport `json:"services"`
-	Models   []ModelReport   `json:"models"`
+	Services []ServiceReport      `json:"services"`
+	Models   []ModelReport        `json:"models"`
+	Whisper  *WhisperStatusReport `json:"whisper,omitempty"`
+}
+
+// WhisperStatusReport provides status for the Whisper model environment
+type WhisperStatusReport struct {
+	Status string `json:"status"` // "Ready" or "Not Initialized"
+	Path   string `json:"path"`
+}
+
+// checkWhisperStatus checks if the Whisper model has been initialized
+func checkWhisperStatus() *WhisperStatusReport {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil // Cannot determine home directory
+	}
+	modelDir := filepath.Join(home, "Dexter", "models", "whisper", "large-v3-turbo")
+
+	report := &WhisperStatusReport{Path: modelDir}
+	if _, err := os.Stat(modelDir); err == nil {
+		report.Status = "Ready"
+	} else {
+		report.Status = "Not Initialized"
+	}
+	return report
 }
 
 // SystemMonitorHandler collects status for all configured services and returns as JSON
@@ -101,10 +126,14 @@ func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
 	// Get model reports
 	modelReports := checkModelsStatus()
 
+	// Get whisper status report
+	whisperReport := checkWhisperStatus()
+
 	// Combine into the final response
 	response := SystemMonitorResponse{
 		Services: serviceReports,
 		Models:   modelReports,
+		Whisper:  whisperReport,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
