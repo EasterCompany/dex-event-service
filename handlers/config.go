@@ -74,7 +74,7 @@ func Initialize() error {
 	return nil
 }
 
-// ensureDefaultHandlers adds missing default handlers to the registry. Returns true if changes were made.
+// ensureDefaultHandlers adds or updates default handlers in the registry. Returns true if changes were made.
 func ensureDefaultHandlers() bool {
 	if registry.Handlers == nil {
 		registry.Handlers = make(map[string]types.HandlerConfig)
@@ -82,30 +82,74 @@ func ensureDefaultHandlers() bool {
 
 	updated := false
 
-	// Test Handler
-	if _, exists := registry.Handlers["test"]; !exists {
-		registry.Handlers["test"] = types.HandlerConfig{
+	// Define default handlers
+	defaults := map[string]types.HandlerConfig{
+		"test": {
 			Name:        "test",
 			Binary:      "event-test-handler",
-			Description: "Test handler for verification",
+			Description: "Validates the service",
 			Timeout:     10,
-		}
-		updated = true
-	}
-
-	// Transcription Handler
-	if _, exists := registry.Handlers["transcription"]; !exists {
-		registry.Handlers["transcription"] = types.HandlerConfig{
+			EventTypes:  []string{},
+			OutputEvent: "multiple", // Explicitly set this if needed
+		},
+		"transcription": {
 			Name:        "transcription",
 			Binary:      "event-transcription-handler",
 			Description: "Analyzes transcriptions for engagement",
 			Timeout:     30,
-			EventTypes:  []string{"transcription", "message.transcribed", "user_transcribed"}, // Matches dex-discord-service event types
+			EventTypes:  []string{"transcription", "message.transcribed", "user_transcribed"},
+		},
+	}
+
+	for name, config := range defaults {
+		existing, exists := registry.Handlers[name]
+		if !exists {
+			fmt.Printf("Handler '%s' missing, adding default configuration\n", name)
+			registry.Handlers[name] = config
+			updated = true
+			continue
 		}
-		updated = true
+
+		// Check if key fields match (simple update check)
+		// For now, we just force update the critical fields to match code definition
+		// This ensures that if we change the binary name or event types in code, it propagates to config
+
+		// Force update of defaults to ensure they match code expectations
+		// This effectively makes the code the source of truth for these handlers
+		if existing.Binary != config.Binary ||
+			existing.Description != config.Description ||
+			existing.Timeout != config.Timeout {
+
+			fmt.Printf("Handler '%s' configuration outdated, updating to default\n", name)
+			// Merge/Overwrite
+			// Preserve things the user might have changed?
+			// For "managed" handlers, we probably want to enforce our config.
+			registry.Handlers[name] = config
+			updated = true
+		} else {
+			// Check event types specifically
+			if !equalStringSlices(existing.EventTypes, config.EventTypes) {
+				fmt.Printf("Handler '%s' event types outdated, updating\n", name)
+				registry.Handlers[name] = config
+				updated = true
+			}
+		}
 	}
 
 	return updated
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	// this is O(N^2) but N is tiny
+	for i, v := range a {
+		if v != b[i] { // strict order check
+			return false
+		}
+	}
+	return true
 }
 
 // saveRegistry writes the registry back to disk
