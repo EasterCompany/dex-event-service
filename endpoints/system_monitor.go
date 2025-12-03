@@ -443,7 +443,7 @@ func checkHTTPStatus(baseReport ServiceReport) ServiceReport {
 
 	host := report.Domain
 	if report.Domain == "0.0.0.0" {
-		host = "localhost" // Adjust for client-side access
+		host = "127.0.0.1" // Adjust for client-side access
 	}
 	url := fmt.Sprintf("http://%s:%s/service", host, report.Port)
 
@@ -506,7 +506,7 @@ func checkRedisStatus(baseReport ServiceReport, creds *config.ServiceCredentials
 
 	host := report.Domain
 	if report.Domain == "0.0.0.0" {
-		host = "localhost"
+		host = "127.0.0.1"
 	}
 	addr := fmt.Sprintf("%s:%s", host, report.Port)
 
@@ -665,7 +665,7 @@ func checkOllamaStatus(baseReport ServiceReport) ServiceReport {
 
 	host := report.Domain
 	if report.Domain == "0.0.0.0" {
-		host = "localhost"
+		host = "127.0.0.1"
 	}
 
 	// Check version endpoint

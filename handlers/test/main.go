@@ -49,7 +49,7 @@ func testEvent(service, eventType string, data map[string]interface{}) (bool, st
 	}
 
 	jsonData, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", "http://localhost:8100/events", bytes.NewBuffer(jsonData))
+	req, _ := http.NewRequest("POST", "http://127.0.0.1:8100/events", bytes.NewBuffer(jsonData))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Service-Name", "dex-test-suite")
 
@@ -69,7 +69,7 @@ func testEvent(service, eventType string, data map[string]interface{}) (bool, st
 }
 
 func testLanguageFormat(lang string) (bool, string) {
-	url := fmt.Sprintf("http://localhost:8100/events?ml=3&format=text&lang=%s", lang)
+	url := fmt.Sprintf("http://127.0.0.1:8100/events?ml=3&format=text&lang=%s", lang)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("X-Service-Name", "dex-test-suite")
 
@@ -221,7 +221,7 @@ func main() {
 		},
 	}
 	jsonData, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", "http://localhost:8100/events", bytes.NewBuffer(jsonData))
+	req, _ := http.NewRequest("POST", "http://127.0.0.1:8100/events", bytes.NewBuffer(jsonData))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Service-Name", "dex-test-suite")
 
@@ -312,7 +312,7 @@ func main() {
 	output.Events = append(output.Events, logEvent("📋 PHASE 4: Testing formats"))
 
 	// Test text format
-	req, _ = http.NewRequest("GET", "http://localhost:8100/events?ml=5&format=text", nil)
+	req, _ = http.NewRequest("GET", "http://127.0.0.1:8100/events?ml=5&format=text", nil)
 	req.Header.Set("X-Service-Name", "dex-test-suite")
 	resp, _ = client.Do(req)
 	body, _ := io.ReadAll(resp.Body)
@@ -326,7 +326,7 @@ func main() {
 	_ = resp.Body.Close()
 
 	// Test timezone
-	req, _ = http.NewRequest("GET", "http://localhost:8100/events?ml=5&format=text&timezone=Europe/Paris", nil)
+	req, _ = http.NewRequest("GET", "http://127.0.0.1:8100/events?ml=5&format=text&timezone=Europe/Paris", nil)
 	req.Header.Set("X-Service-Name", "dex-test-suite")
 	resp, _ = client.Do(req)
 	body, _ = io.ReadAll(resp.Body)

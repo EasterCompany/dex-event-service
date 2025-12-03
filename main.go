@@ -257,7 +257,7 @@ func RunTestSuite() error {
 
 	// Wait for the event service to be available
 	log.Println("Waiting for event service to be available...")
-	serviceURL := "http://localhost:8100/service"
+	serviceURL := "http://127.0.0.1:8100/service"
 	client := &http.Client{Timeout: 2 * time.Second}
 
 	maxRetries := 10
@@ -294,7 +294,7 @@ func RunTestSuite() error {
 	}
 
 	jsonData, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", "http://localhost:8100/events", bytes.NewBuffer(jsonData))
+	req, _ := http.NewRequest("POST", "http://127.0.0.1:8100/events", bytes.NewBuffer(jsonData))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Service-Name", "dex-event-service")
 
