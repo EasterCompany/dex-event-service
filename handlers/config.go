@@ -42,7 +42,12 @@ func Initialize() error {
 		}
 
 		// Populate with defaults immediately
-		ensureDefaultHandlers()
+		fmt.Println("DEBUG: Populating defaults for new file...")
+		if ensureDefaultHandlers() {
+			fmt.Printf("DEBUG: ensureDefaultHandlers returned true. Registry has %d handlers.\n", len(registry.Handlers))
+		} else {
+			fmt.Printf("DEBUG: ensureDefaultHandlers returned false. Registry has %d handlers.\n", len(registry.Handlers))
+		}
 
 		// Write config
 		if err := saveRegistry(configPath); err != nil {
@@ -63,6 +68,8 @@ func Initialize() error {
 	if err := json.Unmarshal(data, registry); err != nil {
 		return fmt.Errorf("failed to parse handler config: %v", err)
 	}
+
+	fmt.Printf("DEBUG: Loaded existing config with %d handlers.\n", len(registry.Handlers))
 
 	// Ensure defaults exist (migrations)
 	if ensureDefaultHandlers() {
@@ -103,6 +110,8 @@ func ensureDefaultHandlers() bool {
 			EventTypes:  []string{"transcription", "message.transcribed", "user_transcribed"},
 		},
 	}
+
+	fmt.Printf("DEBUG: checking %d defaults against %d existing.\n", len(defaults), len(registry.Handlers))
 
 	for name, config := range defaults {
 		existing, exists := registry.Handlers[name]
