@@ -103,6 +103,11 @@ func readLastNLines(filePath string, n int) ([]string, error) {
 
 	var lines []string
 	scanner := bufio.NewScanner(file)
+	// Create a larger buffer to handle long log lines (e.g., stack traces)
+	// 10MB max token size should be sufficient
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 	}
