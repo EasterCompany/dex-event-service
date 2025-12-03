@@ -41,12 +41,15 @@ func Initialize() error {
 			return fmt.Errorf("failed to create config directory: %v", err)
 		}
 
-		// Write empty config
+		// Populate with defaults immediately
+		ensureDefaultHandlers()
+
+		// Write config
 		if err := saveRegistry(configPath); err != nil {
 			return err
 		}
 
-		fmt.Println("Created empty handler registry at", configPath)
+		fmt.Println("Created handler registry with defaults at", configPath)
 		return nil
 	}
 
