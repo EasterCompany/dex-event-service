@@ -170,6 +170,13 @@ func main() {
 				"source_channel": input.EventData["channel_id"],
 			})
 			output.Events = append(output.Events, childEvent)
+			// Debug event for engagement
+			engagedEvent := createEvent("log_entry", map[string]interface{}{
+				"level":   "debug",
+				"message": "Dexter decided to engage",
+				"context": "Engagement model returned TRUE",
+			})
+			output.Events = append(output.Events, engagedEvent)
 		} else {
 			// Debug event for no engagement
 			debugEvent := createEvent("log_entry", map[string]interface{}{
