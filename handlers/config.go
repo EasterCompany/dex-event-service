@@ -61,8 +61,51 @@ func Initialize() error {
 		return fmt.Errorf("failed to parse handler config: %v", err)
 	}
 
+	// Ensure defaults exist (migrations)
+	if ensureDefaultHandlers() {
+		if err := saveRegistry(configPath); err != nil {
+			fmt.Printf("Warning: Failed to save updated handler registry: %v\n", err)
+		} else {
+			fmt.Println("Updated handler registry with new defaults")
+		}
+	}
+
 	fmt.Printf("Loaded %d handlers from config\n", len(registry.Handlers))
 	return nil
+}
+
+// ensureDefaultHandlers adds missing default handlers to the registry. Returns true if changes were made.
+func ensureDefaultHandlers() bool {
+	if registry.Handlers == nil {
+		registry.Handlers = make(map[string]types.HandlerConfig)
+	}
+
+	updated := false
+
+	// Test Handler
+	if _, exists := registry.Handlers["test"]; !exists {
+		registry.Handlers["test"] = types.HandlerConfig{
+			Name:        "test",
+			Binary:      "event-test-handler",
+			Description: "Test handler for verification",
+			Timeout:     10,
+		}
+		updated = true
+	}
+
+	// Transcription Handler
+	if _, exists := registry.Handlers["transcription"]; !exists {
+		registry.Handlers["transcription"] = types.HandlerConfig{
+			Name:        "transcription",
+			Binary:      "event-transcription-handler",
+			Description: "Analyzes transcriptions for engagement",
+			Timeout:     30,
+			EventTypes:  []string{"transcription", "message.transcribed", "user_transcribed"}, // Matches dex-discord-service event types
+		}
+		updated = true
+	}
+
+	return updated
 }
 
 // saveRegistry writes the registry back to disk
