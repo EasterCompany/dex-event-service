@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -45,7 +46,21 @@ func logEvent(msg string) HandlerOutputEvent {
 	})
 }
 
-func checkEngagement(text string) (bool, error) {
+func getRecentEvents() string {
+	resp, err := http.Get("http://localhost:8100/events?ml=50&format=text")
+	if err != nil {
+		return "" // Fail silently, just no context
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ""
+	}
+	return string(body)
+}
+
+func checkEngagement(text string, context string) (bool, error) {
 	// Call 'dex ollama generate' (we can assume this command exists or use raw API)
 	// Wait, dex-cli has 'dex ollama' but 'generate' isn't a subcommand I implemented recently?
 	// 'dex ollama' has 'pull'. 'generate' might be useful to add to dex-cli, or I can use curl.
@@ -60,7 +75,7 @@ func checkEngagement(text string) (bool, error) {
 	// For now, I'll use `curl` to talk to Ollama directly. It's safer than relying on CLI features I haven't built yet.
 	// Ollama URL: http://127.0.0.1:11434/api/generate
 
-	prompt := text // The system prompt is baked into the model 'dex-engagement-model'
+	prompt := fmt.Sprintf("Recent Context:\n%s\n\nNew Input: %s", context, text)
 	// JSON body
 	body := map[string]interface{}{
 		"model":  "dex-engagement-model",
@@ -134,8 +149,9 @@ func main() {
 	}
 
 	// Check engagement
+	recentEvents := getRecentEvents()
 	start := time.Now()
-	engaged, err := checkEngagement(transcription)
+	engaged, err := checkEngagement(transcription, recentEvents)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -154,6 +170,14 @@ func main() {
 				"source_channel": input.EventData["channel_id"],
 			})
 			output.Events = append(output.Events, childEvent)
+		} else {
+			// Debug event for no engagement
+			debugEvent := createEvent("log_entry", map[string]interface{}{
+				"level":   "debug",
+				"message": "Dexter decided not to engage",
+				"context": "Engagement model returned FALSE",
+			})
+			output.Events = append(output.Events, debugEvent)
 		}
 	}
 
