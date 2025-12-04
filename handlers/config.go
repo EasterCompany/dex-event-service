@@ -107,7 +107,7 @@ func ensureDefaultHandlers() bool {
 			Binary:      "event-transcription-handler",
 			Description: "Analyzes transcriptions for engagement",
 			Timeout:     30,
-			EventTypes:  []string{"transcription", "message.transcribed", "user_transcribed"},
+			EventTypes:  []string{"transcription", "message.transcribed", "user_transcribed", "messaging.user.transcribed"},
 		},
 	}
 

@@ -130,6 +130,8 @@ func main() {
 
 	// Verify event type
 	if input.EventType != "transcription" && input.EventType != "message.transcribed" && input.EventType != "voice_transcribed" && input.EventType != "messaging.user.transcribed" {
+		// Log why we are skipping
+		// output.Events = append(output.Events, logEvent(fmt.Sprintf("Skipping unhandled event type: %s", input.EventType)))
 		_ = json.NewEncoder(os.Stdout).Encode(output)
 		return
 	}
