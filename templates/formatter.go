@@ -44,9 +44,13 @@ func FormatEventAsText(eventType string, eventData map[string]interface{}, servi
 		// Check for translation
 		detectedLang, _ := eventData["detected_language"].(string)
 		englishTranslation, _ := eventData["english_translation"].(string)
+		transcription, _ := eventData["transcription"].(string)
 
+		// Only show translation if it exists, is not English, and is NOT identical to the original transcription
 		if detectedLang != "" && detectedLang != "en" && englishTranslation != "" {
-			message += fmt.Sprintf(" (Translation: %s)", englishTranslation)
+			if !strings.EqualFold(strings.TrimSpace(englishTranslation), strings.TrimSpace(transcription)) {
+				message += fmt.Sprintf(" (Translation: %s)", englishTranslation)
+			}
 		}
 
 		if audioKey, ok := eventData["audio_key"].(string); ok {
