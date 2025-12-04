@@ -511,11 +511,6 @@ func GetTemplates() map[string]EventTemplate {
 					Required:    true,
 					Description: "Discord voice channel ID",
 				},
-				"redis_key": {
-					Type:        "string",
-					Required:    false,
-					Description: "Redis key where the audio data is stored (empty if recording was too short)",
-				},
 			},
 		},
 

@@ -83,7 +83,6 @@ type UserSpeakingEvent struct {
 type UserTranscribedEvent struct {
 	GenericMessagingEvent
 	Transcription string `json:"transcription"`
-	AudioKey      string `json:"audio_key"` // e.g., redis key
 }
 
 // CreateEventRequest is the request body for creating an event
