@@ -44,13 +44,10 @@ func FormatEventAsText(eventType string, eventData map[string]interface{}, servi
 		// Check for translation
 		detectedLang, _ := eventData["detected_language"].(string)
 		englishTranslation, _ := eventData["english_translation"].(string)
-		transcription, _ := eventData["transcription"].(string)
 
-		// Only show translation if it exists, is not English, and is NOT identical to the original transcription
-		if detectedLang != "" && detectedLang != "en" && englishTranslation != "" {
-			if !strings.EqualFold(strings.TrimSpace(englishTranslation), strings.TrimSpace(transcription)) {
-				message += fmt.Sprintf(" (Translation: %s)", englishTranslation)
-			}
+		// Only show translation if it exists and is not English
+		if detectedLang != "en" && englishTranslation != "" {
+			message += fmt.Sprintf(" (Translation: %s)", englishTranslation)
 		}
 	}
 	return fmt.Sprintf("%s%s | %s | %s", prefix, timeStr, service, message)
