@@ -40,7 +40,15 @@ func FormatEventAsText(eventType string, eventData map[string]interface{}, servi
 	}
 
 	// Combine all parts
-	if eventType == "user_transcribed" {
+	if eventType == "messaging.user.transcribed" || eventType == "voice_transcribed" || eventType == "user_transcribed" {
+		// Check for translation
+		detectedLang, _ := eventData["detected_language"].(string)
+		englishTranslation, _ := eventData["english_translation"].(string)
+
+		if detectedLang != "" && detectedLang != "en" && englishTranslation != "" {
+			message += fmt.Sprintf(" (Translation: %s)", englishTranslation)
+		}
+
 		if audioKey, ok := eventData["audio_key"].(string); ok {
 			message += fmt.Sprintf(" 🔊 (http://127.0.0.1:8300/audio/%s)", audioKey)
 		}
