@@ -6,6 +6,7 @@ type HandlerConfig struct {
 	Binary      string   `json:"binary"`                 // Path to binary (relative to ~/Dexter/bin/)
 	Description string   `json:"description,omitempty"`  // What this handler does
 	Timeout     int      `json:"timeout,omitempty"`      // Timeout in seconds (default: 30)
+	DebounceKey string   `json:"debounce_key,omitempty"` // Key to extract from event data for single-task execution (e.g. "channel_id")
 	EventTypes  []string `json:"event_types,omitempty"`  // Event types this handler applies to (if empty, must be specified per-event)
 	OutputEvent string   `json:"output_event,omitempty"` // Event type for child events (if empty, handler determines it)
 }

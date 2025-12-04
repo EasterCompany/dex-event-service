@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/templates"
@@ -19,6 +21,16 @@ const (
 	defaultTimeout = 30 // seconds
 	eventKeyPrefix = "event:"
 	timelineKey    = "events:timeline"
+)
+
+type runningTask struct {
+	id     string
+	cancel context.CancelFunc
+}
+
+var (
+	runningTasks = make(map[string]runningTask)
+	taskMutex    sync.Mutex
 )
 
 // ExecuteHandler runs a handler for an event (sync or async)
@@ -87,6 +99,36 @@ func executeHandlerSync(
 	// Create context with timeout
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
+
+	// Check for debounce key
+	if handlerConfig.DebounceKey != "" {
+		keyVal := getDebounceKey(eventData, handlerConfig.DebounceKey)
+		if keyVal != "" {
+			// Construct unique key for this handler + value
+			taskKey := fmt.Sprintf("%s:%s", handlerConfig.Name, keyVal)
+
+			taskMutex.Lock()
+			if existing, ok := runningTasks[taskKey]; ok {
+				log.Printf("Debounce: Cancelling existing task for key %s (Event ID: %s)", taskKey, existing.id)
+				existing.cancel()
+			}
+			runningTasks[taskKey] = runningTask{
+				id:     event.ID,
+				cancel: cancel,
+			}
+			taskMutex.Unlock()
+
+			// Cleanup on completion
+			defer func() {
+				taskMutex.Lock()
+				// Only remove if it's still this specific task (by ID)
+				if existing, ok := runningTasks[taskKey]; ok && existing.id == event.ID {
+					delete(runningTasks, taskKey)
+				}
+				taskMutex.Unlock()
+			}()
+		}
+	}
 
 	// Execute handler
 	cmd := exec.CommandContext(execCtx, binaryPath)
@@ -160,6 +202,21 @@ func executeHandlerSync(
 
 	log.Printf("Handler '%s' completed in %v, created %d child events", handlerConfig.Name, duration, len(childIDs))
 	return childIDs, nil
+}
+
+// getDebounceKey extracts a value from the event data using dot notation
+func getDebounceKey(eventData map[string]interface{}, keyPath string) string {
+	fields := strings.Split(keyPath, ".")
+	var currentValue interface{} = eventData
+
+	for _, field := range fields {
+		if currentMap, ok := currentValue.(map[string]interface{}); ok {
+			currentValue = currentMap[field]
+		} else {
+			return ""
+		}
+	}
+	return fmt.Sprintf("%v", currentValue)
 }
 
 // createChildEvent creates a child event in Redis

@@ -107,6 +107,7 @@ func ensureDefaultHandlers() bool {
 			Binary:      "event-transcription-handler",
 			Description: "Analyzes transcriptions for engagement",
 			Timeout:     300,
+			DebounceKey: "channel_id",
 			EventTypes:  []string{"transcription", "message.transcribed", "user_transcribed", "messaging.user.transcribed"},
 		},
 	}
@@ -130,7 +131,8 @@ func ensureDefaultHandlers() bool {
 		// This effectively makes the code the source of truth for these handlers
 		if existing.Binary != config.Binary ||
 			existing.Description != config.Description ||
-			existing.Timeout != config.Timeout {
+			existing.Timeout != config.Timeout ||
+			existing.DebounceKey != config.DebounceKey {
 
 			fmt.Printf("Handler '%s' configuration outdated, updating to default\n", name)
 			// Merge/Overwrite
