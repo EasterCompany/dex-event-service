@@ -181,7 +181,7 @@ func TestGetTemplateList(t *testing.T) {
 		"voice_speaking_started": true,
 		"voice_speaking_stopped": true,
 		"voice_transcribed":      true,
-		"engagement_decision":    true,
+		"engagement.decision":    true,
 		"bot_response":           true,
 		string(types.EventTypeMessagingUserJoinedVoice):     true,
 		string(types.EventTypeMessagingUserLeftVoice):       true,

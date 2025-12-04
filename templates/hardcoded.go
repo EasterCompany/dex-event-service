@@ -539,14 +539,14 @@ func GetTemplates() map[string]EventTemplate {
 			},
 		},
 
-		"engagement_decision": {
+		"engagement.decision": {
 			Description: "The system decided whether to engage with a user",
 			Format:      "Engagement decision: {decision} (Reason: {reason})",
 			Fields: map[string]FieldSpec{
 				"decision": {
 					Type:        "string",
 					Required:    true,
-					Description: "The decision made (TRUE/FALSE)",
+					Description: "The decision made (engage/ignore/defer)",
 				},
 				"reason": {
 					Type:        "string",
@@ -557,6 +557,36 @@ func GetTemplates() map[string]EventTemplate {
 					Type:        "string",
 					Required:    false,
 					Description: "Context used for the decision",
+				},
+				"handler": {
+					Type:        "string",
+					Required:    true,
+					Description: "The handler that made the decision",
+				},
+				"event_id": {
+					Type:        "string",
+					Required:    true,
+					Description: "ID of the triggering event",
+				},
+				"channel_id": {
+					Type:        "string",
+					Required:    false,
+					Description: "Channel ID where the trigger occurred",
+				},
+				"user_id": {
+					Type:        "string",
+					Required:    false,
+					Description: "User ID who triggered the event",
+				},
+				"message_content": {
+					Type:        "string",
+					Required:    false,
+					Description: "Content of the triggering message",
+				},
+				"timestamp": {
+					Type:        "number",
+					Required:    true,
+					Description: "Timestamp of the decision",
 				},
 			},
 		},
