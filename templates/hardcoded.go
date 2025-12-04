@@ -443,7 +443,6 @@ func GetTemplates() map[string]EventTemplate {
 				"server_name":   {Type: "string", Required: false},
 				"timestamp":     {Type: "string", Required: true},
 				"transcription": {Type: "string", Required: true},
-				"audio_key":     {Type: "string", Required: true},
 			},
 		},
 
@@ -531,11 +530,6 @@ func GetTemplates() map[string]EventTemplate {
 					Type:        "string",
 					Required:    true,
 					Description: "Transcribed text from the voice audio",
-				},
-				"redis_key": {
-					Type:        "string",
-					Required:    false,
-					Description: "Redis key where the original audio data was stored",
 				},
 			},
 		},
