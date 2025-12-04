@@ -443,6 +443,16 @@ func GetTemplates() map[string]EventTemplate {
 				"server_name":   {Type: "string", Required: false},
 				"timestamp":     {Type: "string", Required: true},
 				"transcription": {Type: "string", Required: true},
+				"detected_language": {
+					Type:        "string",
+					Required:    false,
+					Description: "Language code detected by Whisper",
+				},
+				"english_translation": {
+					Type:        "string",
+					Required:    false,
+					Description: "English translation if source was not English",
+				},
 			},
 		},
 
