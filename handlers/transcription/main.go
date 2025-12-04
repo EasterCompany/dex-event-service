@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 
 	"golang.org/x/term"
 )
@@ -60,48 +59,45 @@ func getRecentEvents() string {
 	return string(body)
 }
 
-func checkEngagement(text string, context string) (bool, error) {
-	// Call 'dex ollama generate' (we can assume this command exists or use raw API)
-	// Wait, dex-cli has 'dex ollama' but 'generate' isn't a subcommand I implemented recently?
-	// 'dex ollama' has 'pull'. 'generate' might be useful to add to dex-cli, or I can use curl.
-	// Actually, I can use the raw API via curl, OR I can use the 'dex' CLI if I add 'generate' or 'ask'.
-
-	// Current dex-cli has 'ollama' command with 'pull'.
-	// It does NOT have a generic 'ask' command exposed to CLI users easily?
-	// dex-discord-service used `dex whisper transcribe`.
-
-	// Let's check dex-cli/cmd/ollama.go.
-
-	// For now, I'll use `curl` to talk to Ollama directly. It's safer than relying on CLI features I haven't built yet.
-	// Ollama URL: http://127.0.0.1:11434/api/generate
-
-	prompt := fmt.Sprintf("Recent Context:\n%s\n\nNew Input: %s", context, text)
-	// JSON body
+func queryOllama(model string, prompt string) (string, error) {
 	body := map[string]interface{}{
-		"model":  "dex-engagement-model",
+		"model":  model,
 		"prompt": prompt,
 		"stream": false,
 	}
 	jsonBody, _ := json.Marshal(body)
 
-	// Use curl
-	// curl -X POST http://127.0.0.1:11434/api/generate -d '...'
 	cmd := exec.Command("curl", "-s", "-X", "POST", "http://127.0.0.1:11434/api/generate", "-d", string(jsonBody))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return false, fmt.Errorf("ollama request failed: %v", err)
+		return "", fmt.Errorf("ollama request failed: %w", err)
 	}
 
-	// Parse response
 	var resp struct {
 		Response string `json:"response"`
 	}
 	if err := json.Unmarshal(output, &resp); err != nil {
-		return false, fmt.Errorf("failed to parse ollama response: %v", err)
+		return "", fmt.Errorf("failed to parse ollama response: %v", err)
+	}
+	return resp.Response, nil
+}
+
+func checkEngagement(text string, context string) (bool, string, error) {
+	prompt := fmt.Sprintf("Recent Context:\n%s\n\nNew Input: %s\n\nShould I engage? Reply only TRUE or FALSE.", context, text)
+	response, err := queryOllama("dex-engagement-model", prompt)
+	if err != nil {
+		return false, "", err
 	}
 
-	cleaned := strings.TrimSpace(strings.ToUpper(resp.Response))
-	return cleaned == "TRUE", nil
+	cleaned := strings.TrimSpace(strings.ToUpper(response))
+	// Basic robust parsing
+	engaged := strings.Contains(cleaned, "TRUE")
+	return engaged, response, nil
+}
+
+func generateResponse(text string, context string) (string, error) {
+	prompt := fmt.Sprintf("Recent Context:\n%s\n\nUser Input: %s\n\nGenerate a response as Dexter:", context, text)
+	return queryOllama("dex-chat-model", prompt)
 }
 
 func main() {
@@ -133,9 +129,7 @@ func main() {
 	}
 
 	// Verify event type
-	if input.EventType != "transcription" && input.EventType != "message.transcribed" {
-		// Maybe log that we ignored it? But usually filters handle this.
-		// We'll just exit successfully with no events.
+	if input.EventType != "transcription" && input.EventType != "message.transcribed" && input.EventType != "voice_transcribed" && input.EventType != "messaging.user.transcribed" {
 		_ = json.NewEncoder(os.Stdout).Encode(output)
 		return
 	}
@@ -150,41 +144,39 @@ func main() {
 
 	// Check engagement
 	recentEvents := getRecentEvents()
-	start := time.Now()
-	engaged, err := checkEngagement(transcription, recentEvents)
-	duration := time.Since(start)
+	engaged, reason, err := checkEngagement(transcription, recentEvents)
 
 	if err != nil {
 		output.Events = append(output.Events, createEvent("error_occurred", map[string]interface{}{
 			"error": fmt.Sprintf("Engagement check failed: %v", err),
 		}))
 	} else {
-		output.Events = append(output.Events, logEvent(fmt.Sprintf("Engagement check: %v (took %v)", engaged, duration)))
+		// Create engagement decision event
+		decisionStr := "FALSE"
+		if engaged {
+			decisionStr = "TRUE"
+		}
+		output.Events = append(output.Events, createEvent("engagement_decision", map[string]interface{}{
+			"decision": decisionStr,
+			"reason":   reason, // Raw output from model can serve as reason/debug
+			"context":  "Analyzed recent events vs new transcription",
+		}))
 
 		if engaged {
-			// Create child event
-			childEvent := createEvent("chat_response_requested", map[string]interface{}{
-				"input_text":     transcription,
-				"source_event":   input.EventID,
-				"source_user":    input.EventData["user_id"], // Assuming these fields exist
-				"source_channel": input.EventData["channel_id"],
-			})
-			output.Events = append(output.Events, childEvent)
-			// Debug event for engagement
-			engagedEvent := createEvent("log_entry", map[string]interface{}{
-				"level":   "debug",
-				"message": "Dexter decided to engage",
-				"context": "Engagement model returned TRUE",
-			})
-			output.Events = append(output.Events, engagedEvent)
-		} else {
-			// Debug event for no engagement
-			debugEvent := createEvent("log_entry", map[string]interface{}{
-				"level":   "debug",
-				"message": "Dexter decided not to engage",
-				"context": "Engagement model returned FALSE",
-			})
-			output.Events = append(output.Events, debugEvent)
+			// Generate response
+			response, err := generateResponse(transcription, recentEvents)
+			if err != nil {
+				output.Events = append(output.Events, createEvent("error_occurred", map[string]interface{}{
+					"error": fmt.Sprintf("Response generation failed: %v", err),
+				}))
+			} else {
+				// Create bot response event
+				output.Events = append(output.Events, createEvent("bot_response", map[string]interface{}{
+					"response":       response,
+					"target_user":    input.EventData["user_id"],
+					"target_channel": input.EventData["channel_id"],
+				}))
+			}
 		}
 	}
 
