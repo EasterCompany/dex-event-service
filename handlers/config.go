@@ -110,6 +110,24 @@ func ensureDefaultHandlers() bool {
 			DebounceKey: "channel_id",
 			EventTypes:  []string{"transcription", "message.transcribed", "user_transcribed", "messaging.user.transcribed"},
 		},
+		"public-message-handler": {
+			Name:        "public-message-handler",
+			Binary:      "event-public-message-handler",
+			Description: "Handles public channel messages for engagement",
+			Timeout:     60,
+			DebounceKey: "channel_id",
+			EventTypes:  []string{"messaging.user.sent_message"},
+			Filters:     map[string]string{"server_id": "!empty"},
+		},
+		"private-message-handler": {
+			Name:        "private-message-handler",
+			Binary:      "event-private-message-handler",
+			Description: "Handles private messages (DMs) for engagement",
+			Timeout:     60,
+			DebounceKey: "user_id",
+			EventTypes:  []string{"messaging.user.sent_message"},
+			Filters:     map[string]string{"server_id": "empty"},
+		},
 	}
 
 	fmt.Printf("DEBUG: checking %d defaults against %d existing.\n", len(defaults), len(registry.Handlers))
@@ -132,7 +150,9 @@ func ensureDefaultHandlers() bool {
 		if existing.Binary != config.Binary ||
 			existing.Description != config.Description ||
 			existing.Timeout != config.Timeout ||
-			existing.DebounceKey != config.DebounceKey {
+			existing.DebounceKey != config.DebounceKey ||
+			!equalStringSlices(existing.EventTypes, config.EventTypes) ||
+			!equalMapStrings(existing.Filters, config.Filters) {
 
 			fmt.Printf("Handler '%s' configuration outdated, updating to default\n", name)
 			// Merge/Overwrite
@@ -141,7 +161,8 @@ func ensureDefaultHandlers() bool {
 			registry.Handlers[name] = config
 			updated = true
 		} else {
-			// Check event types specifically
+			// Check event types specifically (already checked above for equality of structs)
+			// Now only check if some custom field was added
 			if !equalStringSlices(existing.EventTypes, config.EventTypes) {
 				fmt.Printf("Handler '%s' event types outdated, updating\n", name)
 				registry.Handlers[name] = config
@@ -157,9 +178,20 @@ func equalStringSlices(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	// this is O(N^2) but N is tiny
 	for i, v := range a {
 		if v != b[i] { // strict order check
+			return false
+		}
+	}
+	return true
+}
+
+func equalMapStrings(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
 			return false
 		}
 	}

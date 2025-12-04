@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -44,14 +45,30 @@ func matchesEventFilters(eventData json.RawMessage, filters map[string]string) b
 				currentValue = currentMap[field]
 			} else {
 				// Field doesn't exist or isn't a map
-				return false
+				currentValue = nil // Treat as nil if path doesn't exist
+				break
 			}
 		}
 
-		// Convert the value to string and compare
-		actualValue := fmt.Sprintf("%v", currentValue)
-		if actualValue != expectedValue {
-			return false
+		// Convert the value to string for comparison
+		actualValueStr := fmt.Sprintf("%v", currentValue)
+		if actualValueStr == "<nil>" { // Normalize Go's nil representation
+			actualValueStr = ""
+		}
+
+		switch expectedValue {
+		case "empty":
+			if actualValueStr != "" && actualValueStr != "0" { // Consider "0" as empty for IDs
+				return false
+			}
+		case "!empty":
+			if actualValueStr == "" || actualValueStr == "0" {
+				return false
+			}
+		default:
+			if actualValueStr != expectedValue {
+				return false
+			}
 		}
 	}
 
@@ -190,47 +207,65 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 			return
 		}
 
-		// Check for handlers
-		var handlerConfig *types.HandlerConfig
-		var childIDs []string
+		// Find handlers to execute
+		var handlersToExecute []types.HandlerConfig
 
-		// First check if client specified a handler
+		// 1. If a specific handler is requested by `req.Handler`
 		if req.Handler != "" {
 			config, exists := handlers.GetHandler(req.Handler)
 			if !exists {
 				http.Error(w, fmt.Sprintf("Handler '%s' not found", req.Handler), http.StatusBadRequest)
 				return
 			}
-			handlerConfig = config
+			// Apply filter for the explicitly requested handler
+			if len(config.Filters) > 0 {
+				if !matchesEventFilters(req.Event, config.Filters) {
+					log.Printf("Requested handler '%s' did not match event filters for event %s. No action taken.", req.Handler, eventID)
+					// Still return success, event was created.
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusCreated)
+					_ = json.NewEncoder(w).Encode(types.CreateEventResponse{
+						ID:       eventID,
+						ChildIDs: []string{},
+					})
+					return
+				}
+			}
+			handlersToExecute = append(handlersToExecute, *config)
 		} else {
-			// Check for default handlers for this event type
-			defaultHandlers := handlers.GetHandlersForEventType(eventType)
-			if len(defaultHandlers) > 0 {
-				// Use the first default handler
-				handlerConfig = &defaultHandlers[0]
+			// 2. If no specific handler is requested, find all default handlers for the event type
+			potentialHandlers := handlers.GetHandlersForEventType(eventType)
+			for _, h := range potentialHandlers {
+				if len(h.Filters) > 0 {
+					if matchesEventFilters(req.Event, h.Filters) {
+						handlersToExecute = append(handlersToExecute, h)
+					}
+				} else {
+					// No filters defined, always matches
+					handlersToExecute = append(handlersToExecute, h)
+				}
 			}
 		}
 
-		// Execute handler if one was found
-		if handlerConfig != nil {
-			// Determine sync vs async mode
-			isSync := req.HandlerMode == "sync"
+		// Execute all identified handlers
+		var allChildIDs []string
+		isSyncMode := req.HandlerMode == "sync" // Determine sync vs async once
 
-			// Execute handler
-			var err error
-			childIDs, err = handlers.ExecuteHandler(redisClient, &event, handlerConfig, isSync)
+		for _, hConfig := range handlersToExecute {
+			currentChildIDs, err := handlers.ExecuteHandler(redisClient, &event, &hConfig, isSyncMode)
 			if err != nil {
-				// Log error but don't fail the request - the event was already created
-				fmt.Printf("Handler execution error: %v\n", err)
+				// Log error but don't fail the overall request.
+				log.Printf("Error executing handler '%s' for event %s: %v", hConfig.Name, eventID, err)
 			}
+			allChildIDs = append(allChildIDs, currentChildIDs...)
 		}
 
-		// Return response with the event ID and child IDs (if sync)
+		// Return response with the event ID and all child IDs
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(types.CreateEventResponse{
 			ID:       eventID,
-			ChildIDs: childIDs,
+			ChildIDs: allChildIDs,
 		})
 	}
 }
