@@ -166,34 +166,6 @@ func fetchContext(channelID string) (string, error) {
 	return string(body), nil
 }
 
-func emitEvent(eventData map[string]interface{}) error {
-	serviceURL := getEventServiceURL()
-	reqBody := map[string]interface{}{
-		"service": "dex-event-service",
-		"event":   eventData,
-	}
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		return err
-	}
-
-	resp, err := http.Post(serviceURL+"/events", "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			log.Printf("Error closing event service response body: %v", err)
-		}
-	}()
-
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("event service error %d: %s", resp.StatusCode, string(body))
-	}
-	return nil
-}
-
 type UserContext struct {
 	Username string `json:"username"`
 	Status   string `json:"status"`
@@ -246,6 +218,51 @@ func fetchChannelMembers(channelID string) (string, error) {
 	return sb.String(), nil
 }
 
+func updateBotStatus(text string, status string, activityType int) {
+	serviceURL := getDiscordServiceURL()
+	reqBody := map[string]interface{}{
+		"status_text":   text,
+		"online_status": status,
+		"activity_type": activityType,
+	}
+	jsonData, _ := json.Marshal(reqBody)
+
+	go func() {
+		resp, err := http.Post(serviceURL+"/status", "application/json", bytes.NewBuffer(jsonData))
+		if err == nil {
+			defer func() { _ = resp.Body.Close() }()
+		}
+	}()
+}
+
+func emitEvent(eventData map[string]interface{}) error {
+	serviceURL := getEventServiceURL()
+	reqBody := map[string]interface{}{
+		"service": "dex-event-service",
+		"event":   eventData,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.Post(serviceURL+"/events", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing event service response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("event service error %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
 func main() {
 	// Read HandlerInput from stdin
 	inputBytes, err := io.ReadAll(os.Stdin)
@@ -264,6 +281,9 @@ func main() {
 	mentionedBot, _ := input.EventData["mentioned_bot"].(bool)
 
 	log.Printf("public-message-handler processing for user %s in channel %s: %s (mentioned: %v)", userID, channelID, content, mentionedBot)
+
+	updateBotStatus("Thinking...", "online", 3)
+	defer updateBotStatus("Listening for events...", "online", 2)
 
 	shouldEngage := false
 	engagementReason := "Evaluated by dex-engagement-model"
@@ -330,6 +350,8 @@ func main() {
 
 	// 2. Engage if needed
 	if shouldEngage {
+		updateBotStatus("Typing response...", "online", 0)
+
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
 		var err error
 		responseModel := "dex-public-message-model"

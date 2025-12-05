@@ -90,6 +90,42 @@ func getEventServiceURL() string {
 	return "http://localhost:8082" // Fallback
 }
 
+func getDiscordServiceURL() string {
+	// Try to read service-map.json
+	homeDir, _ := os.UserHomeDir()
+	mapPath := filepath.Join(homeDir, "Dexter", "config", "service-map.json")
+
+	data, err := os.ReadFile(mapPath)
+	if err == nil {
+		var sm ServiceMap
+		if err := json.Unmarshal(data, &sm); err == nil {
+			for _, service := range sm.Services["th"] { // Discord is usually 'th' (Third Party?) or 'cs'
+				if service.ID == "dex-discord-service" {
+					return fmt.Sprintf("http://localhost:%s", service.Port)
+				}
+			}
+		}
+	}
+	return "http://localhost:8081" // Fallback
+}
+
+func updateBotStatus(text string, status string, activityType int) {
+	serviceURL := getDiscordServiceURL()
+	reqBody := map[string]interface{}{
+		"status_text":   text,
+		"online_status": status,
+		"activity_type": activityType,
+	}
+	jsonData, _ := json.Marshal(reqBody)
+
+	go func() {
+		resp, err := http.Post(serviceURL+"/status", "application/json", bytes.NewBuffer(jsonData))
+		if err == nil {
+			defer func() { _ = resp.Body.Close() }()
+		}
+	}()
+}
+
 func fetchContext(channelID string) (string, error) {
 	if channelID == "" {
 		return "", nil
@@ -168,6 +204,9 @@ func main() {
 
 	log.Printf("transcription-handler processing for user %s: %s", userID, transcription)
 
+	updateBotStatus("Thinking...", "online", 3)
+	defer updateBotStatus("Listening for events...", "online", 2)
+
 	// Fetch context
 	contextHistory, err := fetchContext(channelID)
 	if err != nil {
@@ -214,6 +253,8 @@ func main() {
 
 	// 2. Engage if needed
 	if shouldEngage {
+		updateBotStatus("Thinking of response...", "online", 0) // Changed from Speaking to Thinking as TTS isn't instant yet
+
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser (%s) Said: %s", contextHistory, userName, transcription)
 		var err error
 		responseModel := "dex-transcription-model"

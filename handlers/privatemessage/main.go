@@ -167,6 +167,24 @@ func fetchContext(channelID string) (string, error) {
 	return string(body), nil
 }
 
+func updateBotStatus(text string, status string, activityType int) {
+	serviceURL := getDiscordServiceURL()
+	reqBody := map[string]interface{}{
+		"status_text":   text,
+		"online_status": status,
+		"activity_type": activityType,
+	}
+	jsonData, _ := json.Marshal(reqBody)
+
+	// Fire and forget
+	go func() {
+		resp, err := http.Post(serviceURL+"/status", "application/json", bytes.NewBuffer(jsonData))
+		if err == nil {
+			defer func() { _ = resp.Body.Close() }()
+		}
+	}()
+}
+
 func emitEvent(eventData map[string]interface{}) error {
 	serviceURL := getEventServiceURL()
 	reqBody := map[string]interface{}{
@@ -213,6 +231,10 @@ func main() {
 
 	log.Printf("private-message-handler processing for user %s: %s", userID, content)
 
+	// Set status: Thinking
+	updateBotStatus("Thinking...", "online", 3)                   // 3 = Watching
+	defer updateBotStatus("Listening for events...", "online", 2) // 2 = Listening
+
 	// Fetch context
 	contextHistory, err := fetchContext(channelID)
 	if err != nil {
@@ -255,6 +277,8 @@ func main() {
 	// 2. Engage if needed
 	var response string
 	if shouldEngage {
+		updateBotStatus("Typing response...", "online", 0) // 0 = Playing (Game)
+
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
 		var err error
 		responseModel := "dex-private-message-model"
