@@ -204,35 +204,73 @@ func main() {
 	log.Printf("Engagement decision: %s (%v)", engagementDecision, shouldEngage)
 
 	// 2. Engage if needed
+
+	var response string
+
 	if shouldEngage {
+
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
-		response, err := generateOllamaResponse("dex-private-message-model", prompt)
+
+		var err error
+
+		response, err = generateOllamaResponse("dex-private-message-model", prompt)
+
 		if err != nil {
+
 			log.Printf("Response generation failed: %v", err)
+
 		} else {
+
 			log.Printf("Generated response: %s", response)
+
 			if err := postToDiscord(channelID, response); err != nil {
+
 				log.Printf("Failed to post to discord: %v", err)
+
 			}
+
 		}
+
 	}
 
 	// Construct a child event for engagement decision
+
 	engagementEvent := types.HandlerOutputEvent{
+
 		Type: "engagement.decision",
+
 		Data: map[string]interface{}{
-			"decision":        engagementDecision,
-			"reason":          "Evaluated by dex-engagement-model",
-			"handler":         "private-message-handler",
-			"event_id":        input.EventID,
-			"channel_id":      channelID,
-			"user_id":         userID,
+
+			"decision": engagementDecision,
+
+			"reason": "Evaluated by dex-engagement-model",
+
+			"handler": "private-message-handler",
+
+			"event_id": input.EventID,
+
+			"channel_id": channelID,
+
+			"user_id": userID,
+
 			"message_content": content,
-			"timestamp":       time.Now().Unix(),
+
+			"timestamp": time.Now().Unix(),
+
+			"engagement_model": "dex-engagement-model",
+
+			"response_model": "dex-private-message-model",
+
+			"context_history": contextHistory,
+
+			"engagement_raw": engagementRaw,
+
+			"response_raw": response,
 		},
 	}
 
 	// Construct HandlerOutput
+
 	output := types.HandlerOutput{
 		Success: true,
 		Events:  []types.HandlerOutputEvent{engagementEvent},

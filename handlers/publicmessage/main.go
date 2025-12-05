@@ -186,6 +186,7 @@ func main() {
 
 	shouldEngage := false
 	engagementReason := "Evaluated by dex-engagement-model"
+	var engagementRaw string
 
 	// Fetch context
 	contextHistory, err := fetchContext(channelID)
@@ -200,7 +201,8 @@ func main() {
 	} else {
 		// 1. Check Engagement
 		prompt := fmt.Sprintf("Context:\n%s\n\nCurrent Message:\n%s", contextHistory, content)
-		engagementRaw, err := generateOllamaResponse("dex-engagement-model", prompt)
+		var err error
+		engagementRaw, err = generateOllamaResponse("dex-engagement-model", prompt)
 		if err != nil {
 			log.Printf("Engagement check failed: %v", err)
 			// Fail gracefully, maybe don't engage if model fails
@@ -212,40 +214,81 @@ func main() {
 	}
 
 	// 2. Engage if needed
+
+	var response string
+
 	if shouldEngage {
+
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
-		response, err := generateOllamaResponse("dex-public-message-model", prompt)
+
+		var err error
+
+		response, err = generateOllamaResponse("dex-public-message-model", prompt)
+
 		if err != nil {
+
 			log.Printf("Response generation failed: %v", err)
+
 		} else {
+
 			log.Printf("Generated response: %s", response)
+
 			if err := postToDiscord(channelID, response); err != nil {
+
 				log.Printf("Failed to post to discord: %v", err)
+
 			}
+
 		}
+
 	}
 
 	// Construct a child event for engagement decision
+
 	decisionStr := "FALSE"
+
 	if shouldEngage {
+
 		decisionStr = "TRUE"
+
 	}
 
 	engagementEvent := types.HandlerOutputEvent{
+
 		Type: "engagement.decision",
+
 		Data: map[string]interface{}{
-			"decision":        decisionStr,
-			"reason":          engagementReason,
-			"handler":         "public-message-handler",
-			"event_id":        input.EventID,
-			"channel_id":      channelID,
-			"user_id":         userID,
+
+			"decision": decisionStr,
+
+			"reason": engagementReason,
+
+			"handler": "public-message-handler",
+
+			"event_id": input.EventID,
+
+			"channel_id": channelID,
+
+			"user_id": userID,
+
 			"message_content": content,
-			"timestamp":       time.Now().Unix(),
+
+			"timestamp": time.Now().Unix(),
+
+			"engagement_model": "dex-engagement-model",
+
+			"response_model": "dex-public-message-model",
+
+			"context_history": contextHistory,
+
+			"engagement_raw": engagementRaw,
+
+			"response_raw": response,
 		},
 	}
 
 	// Construct HandlerOutput
+
 	output := types.HandlerOutput{
 		Success: true,
 		Events:  []types.HandlerOutputEvent{engagementEvent},

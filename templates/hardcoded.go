@@ -593,6 +593,31 @@ func GetTemplates() map[string]EventTemplate {
 					Required:    true,
 					Description: "Timestamp of the decision",
 				},
+				"engagement_model": {
+					Type:        "string",
+					Required:    false,
+					Description: "Model used for engagement decision",
+				},
+				"response_model": {
+					Type:        "string",
+					Required:    false,
+					Description: "Model used for generating response",
+				},
+				"context_history": {
+					Type:        "string",
+					Required:    false,
+					Description: "Context history used in prompt",
+				},
+				"engagement_raw": {
+					Type:        "string",
+					Required:    false,
+					Description: "Raw output from engagement model",
+				},
+				"response_raw": {
+					Type:        "string",
+					Required:    false,
+					Description: "Raw output from response model",
+				},
 			},
 		},
 
