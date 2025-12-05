@@ -118,12 +118,10 @@ func updateBotStatus(text string, status string, activityType int) {
 	}
 	jsonData, _ := json.Marshal(reqBody)
 
-	go func() {
-		resp, err := http.Post(serviceURL+"/status", "application/json", bytes.NewBuffer(jsonData))
-		if err == nil {
-			defer func() { _ = resp.Body.Close() }()
-		}
-	}()
+	resp, err := http.Post(serviceURL+"/status", "application/json", bytes.NewBuffer(jsonData))
+	if err == nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 }
 
 func fetchContext(channelID string) (string, error) {

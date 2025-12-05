@@ -176,13 +176,11 @@ func updateBotStatus(text string, status string, activityType int) {
 	}
 	jsonData, _ := json.Marshal(reqBody)
 
-	// Fire and forget
-	go func() {
-		resp, err := http.Post(serviceURL+"/status", "application/json", bytes.NewBuffer(jsonData))
-		if err == nil {
-			defer func() { _ = resp.Body.Close() }()
-		}
-	}()
+	// Synchronous call to ensure it completes before process exit
+	resp, err := http.Post(serviceURL+"/status", "application/json", bytes.NewBuffer(jsonData))
+	if err == nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 }
 
 func emitEvent(eventData map[string]interface{}) error {
