@@ -109,11 +109,12 @@ func getEventServiceURL() string {
 	return "http://localhost:8082" // Fallback
 }
 
-func postToDiscord(channelID, content string) error {
+func postToDiscord(channelID, content string, metadata map[string]interface{}) error {
 	serviceURL := getDiscordServiceURL()
-	reqBody := map[string]string{
+	reqBody := map[string]interface{}{
 		"channel_id": channelID,
 		"content":    content,
+		"metadata":   metadata,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -169,7 +170,7 @@ func fetchContext(channelID string) (string, error) {
 func emitEvent(eventData map[string]interface{}) error {
 	serviceURL := getEventServiceURL()
 	reqBody := map[string]interface{}{
-		"service": "dex-event-service", // Or handler name? Service implies origin.
+		"service": "dex-event-service",
 		"event":   eventData,
 	}
 	jsonData, err := json.Marshal(reqBody)
@@ -256,17 +257,20 @@ func main() {
 	if shouldEngage {
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
 		var err error
-		response, err = generateOllamaResponse("dex-private-message-model", prompt)
+		responseModel := "dex-private-message-model"
+		response, err = generateOllamaResponse(responseModel, prompt)
 
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
 		} else {
 			log.Printf("Generated response: %s", response)
-			// Note: We can't update the already-emitted engagement event with the response info easily.
-			// Ideally, we'd emit a separate "response.generated" event or update the previous one if we had its ID.
-			// For now, we proceed. The postToDiscord will trigger "messaging.bot.sent_message".
 
-			if err := postToDiscord(channelID, response); err != nil {
+			metadata := map[string]interface{}{
+				"response_model": responseModel,
+				"response_raw":   response,
+			}
+
+			if err := postToDiscord(channelID, response, metadata); err != nil {
 				log.Printf("Failed to post to discord: %v", err)
 			}
 		}

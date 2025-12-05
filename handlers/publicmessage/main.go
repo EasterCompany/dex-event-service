@@ -109,11 +109,12 @@ func getEventServiceURL() string {
 	return "http://localhost:8082" // Fallback
 }
 
-func postToDiscord(channelID, content string) error {
+func postToDiscord(channelID, content string, metadata map[string]interface{}) error {
 	serviceURL := getDiscordServiceURL()
-	reqBody := map[string]string{
+	reqBody := map[string]interface{}{
 		"channel_id": channelID,
 		"content":    content,
+		"metadata":   metadata,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -271,13 +272,20 @@ func main() {
 	if shouldEngage {
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
 		var err error
-		response, err := generateOllamaResponse("dex-public-message-model", prompt)
+		responseModel := "dex-public-message-model"
+		response, err := generateOllamaResponse(responseModel, prompt)
 
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
 		} else {
 			log.Printf("Generated response: %s", response)
-			if err := postToDiscord(channelID, response); err != nil {
+
+			metadata := map[string]interface{}{
+				"response_model": responseModel,
+				"response_raw":   response,
+			}
+
+			if err := postToDiscord(channelID, response, metadata); err != nil {
 				log.Printf("Failed to post to discord: %v", err)
 			}
 		}

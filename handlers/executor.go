@@ -147,7 +147,7 @@ func executeHandlerSync(
 	// Check for timeout
 	if execCtx.Err() == context.DeadlineExceeded {
 		log.Printf("Handler '%s' timed out after %d seconds", handlerConfig.Name, timeout)
-		return createErrorEvent(redisClient, event, handlerConfig.Name, fmt.Sprintf("Handler timed out after %d seconds", timeout))
+		return createErrorEvent(redisClient, event, handlerConfig.Name, fmt.Sprintf("Handler '%s' timed out after %d seconds", handlerConfig.Name, timeout))
 	}
 
 	// Check for execution error
