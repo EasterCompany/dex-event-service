@@ -166,6 +166,34 @@ func fetchContext(channelID string) (string, error) {
 	return string(body), nil
 }
 
+func emitEvent(eventData map[string]interface{}) error {
+	serviceURL := getEventServiceURL()
+	reqBody := map[string]interface{}{
+		"service": "dex-event-service", // Or handler name? Service implies origin.
+		"event":   eventData,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.Post(serviceURL+"/events", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing event service response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("event service error %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
 func main() {
 	// Read HandlerInput from stdin
 	inputBytes, err := io.ReadAll(os.Stdin)
@@ -203,77 +231,52 @@ func main() {
 
 	log.Printf("Engagement decision: %s (%v)", engagementDecision, shouldEngage)
 
+	// Construct and emit engagement decision event immediately
+	engagementEventData := map[string]interface{}{
+		"type":             "engagement.decision",
+		"decision":         engagementDecision,
+		"reason":           "Evaluated by dex-engagement-model",
+		"handler":          "private-message-handler",
+		"event_id":         input.EventID,
+		"channel_id":       channelID,
+		"user_id":          userID,
+		"message_content":  content,
+		"timestamp":        time.Now().Unix(),
+		"engagement_model": "dex-engagement-model",
+		"context_history":  contextHistory,
+		"engagement_raw":   engagementRaw,
+	}
+
+	if err := emitEvent(engagementEventData); err != nil {
+		log.Printf("Failed to emit engagement decision event: %v", err)
+	}
+
 	// 2. Engage if needed
-
 	var response string
-
 	if shouldEngage {
-
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
-
 		var err error
-
 		response, err = generateOllamaResponse("dex-private-message-model", prompt)
 
 		if err != nil {
-
 			log.Printf("Response generation failed: %v", err)
-
 		} else {
-
 			log.Printf("Generated response: %s", response)
+			// Note: We can't update the already-emitted engagement event with the response info easily.
+			// Ideally, we'd emit a separate "response.generated" event or update the previous one if we had its ID.
+			// For now, we proceed. The postToDiscord will trigger "messaging.bot.sent_message".
 
 			if err := postToDiscord(channelID, response); err != nil {
-
 				log.Printf("Failed to post to discord: %v", err)
-
 			}
-
 		}
-
-	}
-
-	// Construct a child event for engagement decision
-
-	engagementEvent := types.HandlerOutputEvent{
-
-		Type: "engagement.decision",
-
-		Data: map[string]interface{}{
-
-			"decision": engagementDecision,
-
-			"reason": "Evaluated by dex-engagement-model",
-
-			"handler": "private-message-handler",
-
-			"event_id": input.EventID,
-
-			"channel_id": channelID,
-
-			"user_id": userID,
-
-			"message_content": content,
-
-			"timestamp": time.Now().Unix(),
-
-			"engagement_model": "dex-engagement-model",
-
-			"response_model": "dex-private-message-model",
-
-			"context_history": contextHistory,
-
-			"engagement_raw": engagementRaw,
-
-			"response_raw": response,
-		},
 	}
 
 	// Construct HandlerOutput
-
+	// We don't need to return events here anymore as we emitted them directly.
 	output := types.HandlerOutput{
 		Success: true,
-		Events:  []types.HandlerOutputEvent{engagementEvent},
+		Events:  []types.HandlerOutputEvent{},
 	}
 
 	// Marshal HandlerOutput to JSON and print to stdout
