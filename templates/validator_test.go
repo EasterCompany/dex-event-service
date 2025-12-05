@@ -167,8 +167,8 @@ func TestGetTemplateList(t *testing.T) {
 	// Need to import types to use the constants
 	eventTypes := GetTemplateList()
 
-	if len(eventTypes) != 19 {
-		t.Errorf("Expected 19 event types, got %d", len(eventTypes))
+	if len(eventTypes) != 20 {
+		t.Errorf("Expected 20 event types, got %d", len(eventTypes))
 	}
 
 	expectedTypes := map[string]bool{
@@ -186,6 +186,7 @@ func TestGetTemplateList(t *testing.T) {
 		string(types.EventTypeMessagingUserJoinedVoice):     true,
 		string(types.EventTypeMessagingUserLeftVoice):       true,
 		string(types.EventTypeMessagingUserSentMessage):     true,
+		string(types.EventTypeMessagingBotSentMessage):      true,
 		string(types.EventTypeMessagingBotStatusUpdate):     true,
 		string(types.EventTypeMessagingUserSpeakingStarted): true,
 		string(types.EventTypeMessagingUserSpeakingStopped): true,

@@ -24,6 +24,7 @@ const (
 	EventTypeMessagingUserJoinedVoice     EventType = "messaging.user.joined_voice"
 	EventTypeMessagingUserLeftVoice       EventType = "messaging.user.left_voice"
 	EventTypeMessagingUserSentMessage     EventType = "messaging.user.sent_message"
+	EventTypeMessagingBotSentMessage      EventType = "messaging.bot.sent_message"
 	EventTypeMessagingBotStatusUpdate     EventType = "messaging.bot.status_update"
 	EventTypeMessagingUserSpeakingStarted EventType = "messaging.user.speaking.started"
 	EventTypeMessagingUserSpeakingStopped EventType = "messaging.user.speaking.stopped"

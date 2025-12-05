@@ -388,6 +388,24 @@ func GetTemplates() map[string]EventTemplate {
 			},
 		},
 
+		string(types.EventTypeMessagingBotSentMessage): {
+			Description: "The bot sent a message in a text channel",
+			Format:      "Bot sent in {channel_name}: {content}",
+			Fields: map[string]FieldSpec{
+				"type":         {Type: "string", Required: true},
+				"source":       {Type: "string", Required: true},
+				"user_id":      {Type: "string", Required: true},
+				"user_name":    {Type: "string", Required: true},
+				"channel_id":   {Type: "string", Required: true},
+				"channel_name": {Type: "string", Required: true},
+				"server_id":    {Type: "string", Required: true},
+				"server_name":  {Type: "string", Required: false},
+				"timestamp":    {Type: "string", Required: true},
+				"message_id":   {Type: "string", Required: true},
+				"content":      {Type: "string", Required: true},
+			},
+		},
+
 		string(types.EventTypeMessagingBotStatusUpdate): {
 			Description: "The bot's status has changed",
 			Format:      "Bot status changed to {status}: {details}",
