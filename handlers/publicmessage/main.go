@@ -194,6 +194,58 @@ func emitEvent(eventData map[string]interface{}) error {
 	return nil
 }
 
+type UserContext struct {
+	Username string `json:"username"`
+	Status   string `json:"status"`
+	Activity string `json:"activity"`
+}
+
+type ChannelContextResponse struct {
+	ChannelName string        `json:"channel_name"`
+	GuildName   string        `json:"guild_name"`
+	Users       []UserContext `json:"users"`
+}
+
+func fetchChannelMembers(channelID string) (string, error) {
+	if channelID == "" {
+		return "", nil
+	}
+	serviceURL := getDiscordServiceURL()
+	url := fmt.Sprintf("%s/context/channel?channel_id=%s", serviceURL, channelID)
+
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("X-Service-Name", "dex-event-service")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	var ctxResp ChannelContextResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ctxResp); err != nil {
+		return "", err
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Channel Context (%s in %s):\n", ctxResp.ChannelName, ctxResp.GuildName))
+	sb.WriteString("Active Users:\n")
+	for _, u := range ctxResp.Users {
+		statusLine := fmt.Sprintf("- %s: %s", u.Username, u.Status)
+		if u.Activity != "" {
+			statusLine += fmt.Sprintf(" (%s)", u.Activity)
+		}
+		sb.WriteString(statusLine + "\n")
+	}
+
+	return sb.String(), nil
+}
+
 func main() {
 	// Read HandlerInput from stdin
 	inputBytes, err := io.ReadAll(os.Stdin)
@@ -221,6 +273,14 @@ func main() {
 	contextHistory, err := fetchContext(channelID)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch context: %v", err)
+	}
+
+	// Fetch channel members (active users)
+	channelMembers, err := fetchChannelMembers(channelID)
+	if err != nil {
+		log.Printf("Warning: Failed to fetch channel members: %v", err)
+	} else if channelMembers != "" {
+		contextHistory += "\n\n" + channelMembers
 	}
 
 	if mentionedBot {
