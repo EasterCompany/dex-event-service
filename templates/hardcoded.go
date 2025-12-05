@@ -380,6 +380,11 @@ func GetTemplates() map[string]EventTemplate {
 				"timestamp":    {Type: "string", Required: true},
 				"message_id":   {Type: "string", Required: true},
 				"content":      {Type: "string", Required: true},
+				"mentioned_bot": {
+					Type:        "boolean",
+					Required:    false,
+					Description: "Whether the bot was mentioned in the message",
+				},
 			},
 		},
 
