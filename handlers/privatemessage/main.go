@@ -268,6 +268,7 @@ func main() {
 			metadata := map[string]interface{}{
 				"response_model": responseModel,
 				"response_raw":   response,
+				"raw_input":      prompt,
 			}
 
 			if err := postToDiscord(channelID, response, metadata); err != nil {
