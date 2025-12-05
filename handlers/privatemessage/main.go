@@ -1,15 +1,119 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/types"
 )
+
+const OllamaURL = "http://127.0.0.1:11434"
+
+type OllamaGenerateRequest struct {
+	Model  string `json:"model"`
+	Prompt string `json:"prompt"`
+	Stream bool   `json:"stream"`
+}
+
+type OllamaGenerateResponse struct {
+	Response string `json:"response"`
+}
+
+func generateOllamaResponse(model, prompt string) (string, error) {
+	reqBody := OllamaGenerateRequest{
+		Model:  model,
+		Prompt: prompt,
+		Stream: false,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := http.Post(OllamaURL+"/api/generate", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing ollama response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ollama returned status: %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	var response OllamaGenerateResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return "", err
+	}
+	return response.Response, nil
+}
+
+// ServiceMap minimal structure for reading port
+type ServiceMap struct {
+	Services map[string][]struct {
+		ID   string `json:"id"`
+		Port string `json:"port"`
+	} `json:"services"`
+}
+
+func getDiscordServiceURL() string {
+	// Try to read service-map.json
+	homeDir, _ := os.UserHomeDir()
+	mapPath := filepath.Join(homeDir, "Dexter", "config", "service-map.json")
+
+	data, err := os.ReadFile(mapPath)
+	if err == nil {
+		var sm ServiceMap
+		if err := json.Unmarshal(data, &sm); err == nil {
+			for _, service := range sm.Services["th"] { // Discord is usually 'th' (Third Party?) or 'cs'
+				if service.ID == "dex-discord-service" {
+					return fmt.Sprintf("http://localhost:%s", service.Port)
+				}
+			}
+		}
+	}
+	return "http://localhost:8081" // Fallback
+}
+
+func postToDiscord(channelID, content string) error {
+	serviceURL := getDiscordServiceURL()
+	reqBody := map[string]string{
+		"channel_id": channelID,
+		"content":    content,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.Post(serviceURL+"/post", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing discord response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("discord service error %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
 
 func main() {
 	// Read HandlerInput from stdin
@@ -23,24 +127,48 @@ func main() {
 		log.Fatalf("Error unmarshaling HandlerInput: %v", err)
 	}
 
-	log.Printf("private-message-handler received event %s (Type: %s) from service %s. Content: %s",
-		input.EventID, input.EventType, input.Service, input.EventData["content"])
+	content, _ := input.EventData["content"].(string)
+	channelID, _ := input.EventData["channel_id"].(string)
+	userID, _ := input.EventData["user_id"].(string)
 
-	// Simulate processing and decision for engagement
-	engagementDecision := "engage" // Placeholder: could be "engage", "ignore", "defer"
-	reason := "New message in private channel"
+	log.Printf("private-message-handler processing for user %s: %s", userID, content)
+
+	// 1. Check Engagement
+	engagementRaw, err := generateOllamaResponse("dex-engagement-model", content)
+	if err != nil {
+		log.Printf("Engagement check failed: %v", err)
+		return // Or return error event
+	}
+
+	engagementDecision := strings.ToUpper(strings.TrimSpace(engagementRaw))
+	shouldEngage := strings.Contains(engagementDecision, "TRUE")
+
+	log.Printf("Engagement decision: %s (%v)", engagementDecision, shouldEngage)
+
+	// 2. Engage if needed
+	if shouldEngage {
+		response, err := generateOllamaResponse("dex-private-message-model", content)
+		if err != nil {
+			log.Printf("Response generation failed: %v", err)
+		} else {
+			log.Printf("Generated response: %s", response)
+			if err := postToDiscord(channelID, response); err != nil {
+				log.Printf("Failed to post to discord: %v", err)
+			}
+		}
+	}
 
 	// Construct a child event for engagement decision
 	engagementEvent := types.HandlerOutputEvent{
 		Type: "engagement.decision",
 		Data: map[string]interface{}{
 			"decision":        engagementDecision,
-			"reason":          reason,
+			"reason":          "Evaluated by dex-engagement-model",
 			"handler":         "private-message-handler",
 			"event_id":        input.EventID,
-			"channel_id":      input.EventData["channel_id"],
-			"user_id":         input.EventData["user_id"],
-			"message_content": input.EventData["content"],
+			"channel_id":      channelID,
+			"user_id":         userID,
+			"message_content": content,
 			"timestamp":       time.Now().Unix(),
 		},
 	}
