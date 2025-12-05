@@ -87,6 +87,28 @@ func getDiscordServiceURL() string {
 	return "http://localhost:8081" // Fallback
 }
 
+func getEventServiceURL() string {
+	// Try to read service-map.json
+	homeDir, _ := os.UserHomeDir()
+	mapPath := filepath.Join(homeDir, "Dexter", "config", "service-map.json")
+
+	data, err := os.ReadFile(mapPath)
+	if err == nil {
+		var sm ServiceMap
+		if err := json.Unmarshal(data, &sm); err == nil {
+			// Check all categories
+			for _, cat := range sm.Services {
+				for _, service := range cat {
+					if service.ID == "dex-event-service" {
+						return fmt.Sprintf("http://localhost:%s", service.Port)
+					}
+				}
+			}
+		}
+	}
+	return "http://localhost:8082" // Fallback
+}
+
 func postToDiscord(channelID, content string) error {
 	serviceURL := getDiscordServiceURL()
 	reqBody := map[string]string{
@@ -115,6 +137,34 @@ func postToDiscord(channelID, content string) error {
 	return nil
 }
 
+func fetchContext(channelID string) (string, error) {
+	if channelID == "" {
+		return "", nil
+	}
+	url := fmt.Sprintf("%s/events?channel=%s&max_length=10&order=asc&format=text", getEventServiceURL(), channelID)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing event service response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to fetch context: status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return string(body), nil
+}
+
 func main() {
 	// Read HandlerInput from stdin
 	inputBytes, err := io.ReadAll(os.Stdin)
@@ -137,13 +187,20 @@ func main() {
 	shouldEngage := false
 	engagementReason := "Evaluated by dex-engagement-model"
 
+	// Fetch context
+	contextHistory, err := fetchContext(channelID)
+	if err != nil {
+		log.Printf("Warning: Failed to fetch context: %v", err)
+	}
+
 	if mentionedBot {
 		log.Printf("Bot was mentioned, forcing engagement.")
 		shouldEngage = true
 		engagementReason = "Direct mention"
 	} else {
 		// 1. Check Engagement
-		engagementRaw, err := generateOllamaResponse("dex-engagement-model", content)
+		prompt := fmt.Sprintf("Context:\n%s\n\nCurrent Message:\n%s", contextHistory, content)
+		engagementRaw, err := generateOllamaResponse("dex-engagement-model", prompt)
 		if err != nil {
 			log.Printf("Engagement check failed: %v", err)
 			// Fail gracefully, maybe don't engage if model fails
@@ -156,7 +213,8 @@ func main() {
 
 	// 2. Engage if needed
 	if shouldEngage {
-		response, err := generateOllamaResponse("dex-public-message-model", content)
+		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
+		response, err := generateOllamaResponse("dex-public-message-model", prompt)
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
 		} else {

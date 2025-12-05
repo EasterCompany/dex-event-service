@@ -201,6 +201,22 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 			Member: eventID,
 		})
 
+		// Add event ID to channel-specific sorted set if channel_id or target_channel is present
+		var channelID string
+		if cid, ok := eventData["channel_id"].(string); ok {
+			channelID = cid
+		} else if tid, ok := eventData["target_channel"].(string); ok {
+			channelID = tid
+		}
+
+		if channelID != "" {
+			channelTimelineKey := fmt.Sprintf("events:channel:%s", channelID)
+			pipe.ZAdd(ctx, channelTimelineKey, redis.Z{
+				Score:  float64(timestamp),
+				Member: eventID,
+			})
+		}
+
 		// Execute pipeline
 		if _, err := pipe.Exec(ctx); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to store event: %v", err), http.StatusInternalServerError)
@@ -358,6 +374,12 @@ func GetTimelineHandler(redisClient *redis.Client) http.HandlerFunc {
 		// Parse optional service filter
 		serviceFilter := query.Get("service")
 
+		// Parse optional channel filter
+		channelFilter := query.Get("channel")
+		if channelFilter == "" {
+			channelFilter = query.Get("channel_id")
+		}
+
 		// Parse event field filters (any query param starting with "event.")
 		eventFilters := make(map[string]string)
 		for key, values := range query {
@@ -369,7 +391,10 @@ func GetTimelineHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		// Determine which timeline key to use
 		var queryKey string
-		if serviceFilter != "" {
+		if channelFilter != "" {
+			// Use channel-specific timeline
+			queryKey = fmt.Sprintf("events:channel:%s", channelFilter)
+		} else if serviceFilter != "" {
 			// Use service-specific timeline
 			queryKey = fmt.Sprintf("events:service:%s", serviceFilter)
 		} else {
@@ -611,6 +636,22 @@ func deleteEventByID(redisClient *redis.Client, ctx context.Context, eventID str
 	// Remove from service timeline
 	serviceTimelineKey := fmt.Sprintf("events:service:%s", event.Service)
 	pipe.ZRem(ctx, serviceTimelineKey, eventID)
+
+	// Remove from channel timeline if applicable
+	var eventData map[string]interface{}
+	if err := json.Unmarshal(event.Event, &eventData); err == nil {
+		var channelID string
+		if cid, ok := eventData["channel_id"].(string); ok {
+			channelID = cid
+		} else if tid, ok := eventData["target_channel"].(string); ok {
+			channelID = tid
+		}
+
+		if channelID != "" {
+			channelTimelineKey := fmt.Sprintf("events:channel:%s", channelID)
+			pipe.ZRem(ctx, channelTimelineKey, eventID)
+		}
+	}
 
 	// Execute pipeline
 	if _, err := pipe.Exec(ctx); err != nil {
