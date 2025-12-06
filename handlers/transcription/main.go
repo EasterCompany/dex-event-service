@@ -213,7 +213,7 @@ func main() {
 
 	// 1. Check Engagement
 	prompt := fmt.Sprintf("Context:\n%s\n\nCurrent Transcription:\n%s", contextHistory, transcription)
-	engagementRaw, err := generateOllamaResponse("dex-engagement-model", prompt)
+	engagementRaw, err := generateOllamaResponse("dex-small-engagement-model", prompt)
 	if err != nil {
 		log.Printf("Engagement check failed: %v", err)
 		return // Fail gracefully
@@ -240,7 +240,7 @@ func main() {
 		"user_id":          userID,
 		"message_content":  transcription,
 		"timestamp":        time.Now().Unix(),
-		"engagement_model": "dex-engagement-model",
+		"engagement_model": "dex-small-engagement-model",
 		"context_history":  contextHistory,
 		"engagement_raw":   engagementRaw,
 	}
@@ -255,7 +255,7 @@ func main() {
 
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser (%s) Said: %s", contextHistory, userName, transcription)
 		var err error
-		responseModel := "dex-transcription-model"
+		responseModel := "dex-small-transcription-model"
 		response, err := generateOllamaResponse(responseModel, prompt)
 
 		if err != nil {
