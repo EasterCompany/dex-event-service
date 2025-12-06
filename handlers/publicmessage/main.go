@@ -388,7 +388,7 @@ func main() {
 		// 1. Check Engagement
 		prompt := fmt.Sprintf("Context:\n%s\n\nCurrent Message:\n%s", contextHistory, content)
 		var err error
-		engagementRaw, err = generateOllamaResponse("dex-engagement-model", prompt, nil)
+		engagementRaw, err = generateOllamaResponse("dex-fast-engagement-model", prompt, nil)
 		if err != nil {
 			log.Printf("Engagement check failed: %v", err)
 			// Fail gracefully, maybe don't engage if model fails
@@ -415,7 +415,7 @@ func main() {
 		"user_id":          userID,
 		"message_content":  content,
 		"timestamp":        time.Now().Unix(),
-		"engagement_model": "dex-engagement-model",
+		"engagement_model": "dex-fast-engagement-model",
 		"context_history":  contextHistory,
 		"engagement_raw":   engagementRaw,
 	}
