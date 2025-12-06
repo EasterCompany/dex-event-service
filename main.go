@@ -148,19 +148,12 @@ func main() {
 		log.Fatalf("FATAL: Failed to initialize handlers: %v", err)
 	}
 
-	// Load global options
-	_, err = config.LoadOptions()
-	if err != nil {
-		log.Fatalf("FATAL: Could not load global options: %v", err)
-	}
-
 	// Create a context for graceful shutdown for HTTP server
 	_, httpCancel := context.WithCancel(context.Background())
 	defer httpCancel()
 
 	// Setup HTTP server
 	router := mux.NewRouter()
-	// router.Use(middleware.RequestLogger) // RequestLogger not available
 
 	// API Endpoints
 	router.HandleFunc("/service", endpoints.ServiceHandler).Methods("GET")
