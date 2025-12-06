@@ -530,31 +530,25 @@ func main() {
 	}
 
 	// 1. Check Engagement
-	reportProcessStatus(channelID, "Checking Engagement", 0, startTime)
-	prompt := fmt.Sprintf("Context:\n%s\n\nCurrent Message:\n%s", contextHistory, content)
-	engagementRaw, err := generateOllamaResponse("dex-engagement-model", prompt, nil)
-	if err != nil {
-		log.Printf("Engagement check failed: %v", err)
-		return // Or return error event
-	}
+	// For Private Messages, we ALWAYS engage.
+	shouldEngage := true
+	engagementDecision := "TRUE"
+	engagementRaw := "Forced engagement for Private Message"
 
-	engagementDecision := strings.ToUpper(strings.TrimSpace(engagementRaw))
-	shouldEngage := strings.Contains(engagementDecision, "TRUE")
-
-	log.Printf("Engagement decision: %s (%v)", engagementDecision, shouldEngage)
+	log.Printf("Engagement decision: %s (Forced)", engagementDecision)
 
 	// Construct and emit engagement decision event immediately
 	engagementEventData := map[string]interface{}{
 		"type":             "engagement.decision",
 		"decision":         engagementDecision,
-		"reason":           "Evaluated by dex-engagement-model",
+		"reason":           "Private Message (Always Engage)",
 		"handler":          "private-message-handler",
 		"event_id":         input.EventID,
 		"channel_id":       channelID,
 		"user_id":          userID,
 		"message_content":  content,
 		"timestamp":        time.Now().Unix(),
-		"engagement_model": "dex-engagement-model",
+		"engagement_model": "none",
 		"context_history":  contextHistory,
 		"engagement_raw":   engagementRaw,
 	}
