@@ -128,7 +128,7 @@ func fetchContext(channelID string) (string, error) {
 	if channelID == "" {
 		return "", nil
 	}
-	url := fmt.Sprintf("%s/events?channel=%s&max_length=10&order=asc&format=text", getEventServiceURL(), channelID)
+	url := fmt.Sprintf("%s/events?channel=%s&max_length=10&order=asc&format=text&exclude_types=engagement.decision", getEventServiceURL(), channelID)
 
 	resp, err := http.Get(url)
 	if err != nil {

@@ -389,6 +389,15 @@ func GetTimelineHandler(redisClient *redis.Client) http.HandlerFunc {
 			}
 		}
 
+		// Parse optional exclude_types filter
+		excludeTypes := query.Get("exclude_types")
+		excludedTypesMap := make(map[string]bool)
+		if excludeTypes != "" {
+			for _, t := range strings.Split(excludeTypes, ",") {
+				excludedTypesMap[strings.TrimSpace(t)] = true
+			}
+		}
+
 		// Determine which timeline key to use
 		var queryKey string
 		if channelFilter != "" {
@@ -442,6 +451,16 @@ func GetTimelineHandler(redisClient *redis.Client) http.HandlerFunc {
 			if err := json.Unmarshal([]byte(eventJSON), &event); err != nil {
 				// Skip malformed events
 				continue
+			}
+
+			// Check for excluded types
+			if len(excludedTypesMap) > 0 {
+				var eventData map[string]interface{}
+				if err := json.Unmarshal(event.Event, &eventData); err == nil {
+					if t, ok := eventData["type"].(string); ok && excludedTypesMap[t] {
+						continue
+					}
+				}
 			}
 
 			// Apply event field filters if any are specified

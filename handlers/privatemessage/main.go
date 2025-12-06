@@ -165,7 +165,7 @@ func fetchContext(channelID string) (string, error) {
 		return "", nil
 	}
 	// Use channel_id to filter DM context as well (since we set it in event)
-	url := fmt.Sprintf("%s/events?channel=%s&max_length=10&order=asc&format=text", getEventServiceURL(), channelID)
+	url := fmt.Sprintf("%s/events?channel=%s&max_length=10&order=asc&format=text&exclude_types=engagement.decision", getEventServiceURL(), channelID)
 
 	resp, err := http.Get(url)
 	if err != nil {
