@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -14,9 +15,12 @@ import (
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/types"
+	"github.com/redis/go-redis/v9"
 )
 
 const OllamaURL = "http://127.0.0.1:11434"
+
+var redisClient *redis.Client
 
 type OllamaGenerateRequest struct {
 	Model  string   `json:"model"`
@@ -88,6 +92,30 @@ type ServiceMap struct {
 		ID   string `json:"id"`
 		Port string `json:"port"`
 	} `json:"services"`
+}
+
+func getRedisClient() (*redis.Client, error) {
+	homeDir, _ := os.UserHomeDir()
+	mapPath := filepath.Join(homeDir, "Dexter", "config", "service-map.json")
+
+	data, err := os.ReadFile(mapPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var sm ServiceMap
+	if err := json.Unmarshal(data, &sm); err != nil {
+		return nil, err
+	}
+
+	for _, service := range sm.Services["os"] {
+		if service.ID == "local-cache-0" {
+			return redis.NewClient(&redis.Options{
+				Addr: fmt.Sprintf("localhost:%s", service.Port),
+			}), nil
+		}
+	}
+	return nil, fmt.Errorf("redis service not found")
 }
 
 func getDiscordServiceURL() string {
@@ -245,77 +273,176 @@ func emitEvent(eventData map[string]interface{}) error {
 }
 
 func main() {
-	// Read HandlerInput from stdin
-	inputBytes, err := io.ReadAll(os.Stdin)
+
+	// Initialize Redis
+
+	var err error
+
+	redisClient, err = getRedisClient()
+
 	if err != nil {
+
+		log.Printf("Warning: Failed to connect to Redis: %v. Visual analysis caching disabled.", err)
+
+	} else {
+
+		defer func() { _ = redisClient.Close() }()
+
+	}
+
+	// Read HandlerInput from stdin
+
+	inputBytes, err := io.ReadAll(os.Stdin)
+
+	if err != nil {
+
 		log.Fatalf("Error reading stdin: %v", err)
+
 	}
 
 	var input types.HandlerInput
+
 	if err := json.Unmarshal(inputBytes, &input); err != nil {
+
 		log.Fatalf("Error unmarshaling HandlerInput: %v", err)
+
 	}
 
 	content, _ := input.EventData["content"].(string)
+
 	channelID, _ := input.EventData["channel_id"].(string)
+
 	userID, _ := input.EventData["user_id"].(string)
 
 	// Process attachments
+
 	var attachments []map[string]interface{}
+
 	if att, ok := input.EventData["attachments"].([]interface{}); ok {
+
 		for _, a := range att {
+
 			if m, ok := a.(map[string]interface{}); ok {
+
 				attachments = append(attachments, m)
+
 			}
+
 		}
+
 	}
 
 	log.Printf("private-message-handler processing for user %s: %s (attachments: %d)", userID, content, len(attachments))
 
 	// Set status: Thinking
-	updateBotStatus("Thinking...", "online", 3)                   // 3 = Watching
+
+	updateBotStatus("Thinking...", "online", 3) // 3 = Watching
+
 	defer updateBotStatus("Listening for events...", "online", 2) // 2 = Listening
 
 	// --- Visual Analysis Phase ---
+
 	visualContext := ""
+
 	if len(attachments) > 0 {
+
 		for _, att := range attachments {
+
 			contentType, _ := att["content_type"].(string)
+
 			url, _ := att["url"].(string)
+
 			filename, _ := att["filename"].(string)
 
+			id, _ := att["id"].(string) // Discord Attachment ID
+
 			// Check if image
+
 			if strings.HasPrefix(contentType, "image/") {
+
 				updateBotStatus("Analyzing image...", "online", 3)
-				log.Printf("Downloading image: %s", filename)
-				base64Img, err := downloadImageAsBase64(url)
-				if err != nil {
-					log.Printf("Failed to download image %s: %v", filename, err)
-					continue
+
+				// Check Cache
+
+				var description string
+
+				cacheKey := fmt.Sprintf("analysis:visual:%s", id)
+
+				if redisClient != nil {
+
+					if cached, err := redisClient.Get(context.Background(), cacheKey).Result(); err == nil {
+
+						description = cached
+
+						log.Printf("Using cached visual description for %s", filename)
+
+					}
+
 				}
 
-				log.Printf("Generating visual description for %s...", filename)
-				description, err := generateOllamaResponse("dex-vision-model", "Describe this image concisely.", []string{base64Img})
-				if err != nil {
-					log.Printf("Vision model failed for %s: %v", filename, err)
-					continue
+				if description == "" {
+
+					log.Printf("Downloading image: %s", filename)
+
+					base64Img, err := downloadImageAsBase64(url)
+
+					if err != nil {
+
+						log.Printf("Failed to download image %s: %v", filename, err)
+
+						continue
+
+					}
+
+					log.Printf("Generating visual description for %s...", filename)
+
+					description, err = generateOllamaResponse("dex-vision-model", "Describe this image concisely.", []string{base64Img})
+
+					if err != nil {
+
+						log.Printf("Vision model failed for %s: %v", filename, err)
+
+						continue
+
+					}
+
+					// Cache the result
+
+					if redisClient != nil {
+
+						redisClient.Set(context.Background(), cacheKey, description, 24*time.Hour)
+
+					}
+
 				}
 
 				log.Printf("Visual description for %s: %s", filename, description)
+
 				visualContext += fmt.Sprintf("\n[Attachment: %s (Image) - Description: %s]", filename, description)
 
 				// Emit child event for analysis
+
 				analysisEvent := map[string]interface{}{
-					"type":            "analysis.visual.completed",
+
+					"type": "analysis.visual.completed",
+
 					"parent_event_id": input.EventID,
-					"handler":         "private-message-handler",
-					"filename":        filename,
-					"description":     description,
-					"timestamp":       time.Now().Unix(),
+
+					"handler": "private-message-handler",
+
+					"filename": filename,
+
+					"description": description,
+
+					"timestamp": time.Now().Unix(),
 				}
+
 				_ = emitEvent(analysisEvent)
+
 			}
+
 		}
+
 	}
 
 	// Append visual context to content
