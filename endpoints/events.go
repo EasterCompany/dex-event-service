@@ -476,6 +476,14 @@ func GetTimelineHandler(redisClient *redis.Client) http.HandlerFunc {
 		// Check format parameter
 		format := query.Get("format")
 		if format == "text" {
+			// If we fetched descending (newest first) to get the latest N items,
+			// we typically want to read them chronologically (oldest first) in a text log.
+			if !ascending {
+				for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+					events[i], events[j] = events[j], events[i]
+				}
+			}
+
 			// Render as human-readable text
 			w.Header().Set("Content-Type", "text/plain")
 			w.WriteHeader(http.StatusOK)
