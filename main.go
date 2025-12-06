@@ -160,6 +160,7 @@ func main() {
 	router.HandleFunc("/events", endpoints.EventsHandler(redisClient)).Methods("POST", "GET", "DELETE")
 	router.HandleFunc("/system_monitor", endpoints.SystemMonitorHandler).Methods("GET")
 	router.HandleFunc("/processes", endpoints.ListProcessesHandler).Methods("GET")
+	router.HandleFunc("/logs", endpoints.LogsHandler).Methods("GET")
 
 	// Mount the static web UI
 	webDir := filepath.Join(os.ExpandEnv("$HOME"), "Dexter", "web", "dist")

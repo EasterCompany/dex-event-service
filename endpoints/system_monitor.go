@@ -72,7 +72,7 @@ func ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var activeProcesses []ProcessInfo
+	activeProcesses := []ProcessInfo{}
 	ctx := context.Background()
 
 	// Scan for all process:info:* keys
