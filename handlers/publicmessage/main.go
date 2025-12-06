@@ -299,6 +299,25 @@ func getLatestMessageID(channelID string) (string, error) {
 	return result["last_message_id"], nil
 }
 
+func reportProcessStatus(channelID, state string, retryCount int, startTime time.Time) {
+	if redisClient == nil {
+		return
+	}
+
+	key := fmt.Sprintf("process:info:%s", channelID)
+	data := map[string]interface{}{
+		"channel_id": channelID,
+		"state":      state,
+		"retries":    retryCount,
+		"start_time": startTime.Unix(),
+		"pid":        os.Getpid(),
+		"updated_at": time.Now().Unix(),
+	}
+
+	jsonBytes, _ := json.Marshal(data)
+	redisClient.Set(context.Background(), key, jsonBytes, 60*time.Second)
+}
+
 func updateBotStatus(text string, status string, activityType int) {
 	serviceURL := getDiscordServiceURL()
 	reqBody := map[string]interface{}{
@@ -391,6 +410,14 @@ func main() {
 
 	log.Printf("public-message-handler processing for user %s in channel %s: %s (mentioned: %v, attachments: %d)", userID, channelID, content, mentionedBot, len(attachments))
 
+	startTime := time.Now()
+	reportProcessStatus(channelID, "Initializing", 0, startTime)
+	defer func() {
+		if redisClient != nil {
+			redisClient.Del(context.Background(), fmt.Sprintf("process:info:%s", channelID))
+		}
+	}()
+
 	updateBotStatus("Thinking...", "online", 3)
 	defer updateBotStatus("Listening for events...", "online", 2)
 
@@ -406,6 +433,7 @@ func main() {
 			// Check if image
 			if strings.HasPrefix(contentType, "image/") {
 				updateBotStatus("Analyzing image...", "online", 3)
+				reportProcessStatus(channelID, fmt.Sprintf("Analyzing Image: %s", filename), 0, startTime)
 
 				// Check Cache
 				var description string
@@ -505,6 +533,7 @@ func main() {
 		engagementReason = "Direct mention"
 	} else {
 		// 1. Check Engagement
+		reportProcessStatus(channelID, "Checking Engagement", 0, startTime)
 		prompt := fmt.Sprintf("Context:\n%s\n\nCurrent Message:\n%s", contextHistory, content)
 		var err error
 		engagementRaw, err = generateOllamaResponse("dex-engagement-model", prompt, nil)
@@ -552,6 +581,12 @@ func main() {
 		for {
 			updateBotStatus("Typing response...", "online", 0)
 			triggerTyping(channelID)
+
+			statusMsg := "Generating Response"
+			if retryCount > 0 {
+				statusMsg = fmt.Sprintf("Regenerating (Interruption %d)", retryCount)
+			}
+			reportProcessStatus(channelID, statusMsg, retryCount, startTime)
 
 			// Refresh the lock TTL to keep other handlers away while we work
 			if redisClient != nil {
