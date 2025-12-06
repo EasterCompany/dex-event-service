@@ -274,6 +274,31 @@ func fetchChannelMembers(channelID string) (string, error) {
 	return sb.String(), nil
 }
 
+func getLatestMessageID(channelID string) (string, error) {
+	serviceURL := getDiscordServiceURL()
+	url := fmt.Sprintf("%s/channel/latest?channel_id=%s", serviceURL, channelID)
+
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("X-Service-Name", "dex-event-service")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	return result["last_message_id"], nil
+}
+
 func updateBotStatus(text string, status string, activityType int) {
 	serviceURL := getDiscordServiceURL()
 	reqBody := map[string]interface{}{
@@ -435,6 +460,27 @@ func main() {
 		content += visualContext
 	}
 
+	// --- Aggregating Lock Check ---
+	// Check if another handler is already processing this channel.
+	// If so, we exit immediately. The active handler will pick up our message via the aggregation loop.
+	lockKey := fmt.Sprintf("engagement:processing:%s", channelID)
+	if redisClient != nil {
+		// Use SetNX to acquire lock. If false, someone else has it.
+		// We set a 60s TTL to prevent deadlocks if the handler crashes.
+		// Note: If this is the VERY SAME handler restarting? No, handlers are new processes.
+		locked, err := redisClient.SetNX(context.Background(), lockKey, "1", 60*time.Second).Result()
+		if err == nil && !locked {
+			log.Printf("Channel %s is already being processed by another handler. Exiting to allow aggregation.", channelID)
+			// We return success effectively "absorbing" this event into the running process
+			output := types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}
+			outputBytes, _ := json.Marshal(output)
+			fmt.Println(string(outputBytes))
+			return
+		}
+		// Ensure we release the lock when we are done (or if we crash/exit early)
+		defer redisClient.Del(context.Background(), lockKey)
+	}
+
 	shouldEngage := false
 	engagementReason := "Evaluated by dex-engagement-model"
 	var engagementRaw string
@@ -498,21 +544,67 @@ func main() {
 		log.Printf("Failed to emit engagement decision event: %v", err)
 	}
 
-	// 2. Engage if needed
+	// 2. Engage if needed (Aggregating Loop)
 	if shouldEngage {
-		updateBotStatus("Typing response...", "online", 0)
-		triggerTyping(channelID)
+		maxRetries := 3 // Prevent infinite loops
+		retryCount := 0
 
-		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
-		var err error
-		responseModel := "dex-public-message-model"
-		response, err := generateOllamaResponse(responseModel, prompt, nil)
+		for {
+			updateBotStatus("Typing response...", "online", 0)
+			triggerTyping(channelID)
 
-		if err != nil {
-			log.Printf("Response generation failed: %v", err)
-		} else {
+			// Refresh the lock TTL to keep other handlers away while we work
+			if redisClient != nil {
+				redisClient.Expire(context.Background(), lockKey, 60*time.Second)
+			}
+
+			// If this is a retry, we need to refresh context to capture the interruption
+			if retryCount > 0 {
+				log.Printf("Refreshing context for aggregation (Attempt %d)...", retryCount)
+				newContext, err := fetchContext(channelID)
+				if err == nil {
+					contextHistory = newContext
+					if channelMembers != "" {
+						contextHistory += "\n\n" + channelMembers
+					}
+				}
+			}
+
+			prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
+
+			// If retrying, we might just prompt with context history as 'content' is old?
+			// Actually, 'contextHistory' from `fetchContext` includes the latest messages.
+			// 'content' variable holds the *original* trigger message.
+			// If we are retrying, the context is what matters most.
+			// We should probably rely on Context mostly.
+
+			// Capture the state of the channel BEFORE we start thinking hard.
+			snapshotMessageID, _ := getLatestMessageID(channelID)
+
+			var err error
+			responseModel := "dex-public-message-model"
+			response, err := generateOllamaResponse(responseModel, prompt, nil)
+
+			if err != nil {
+				log.Printf("Response generation failed: %v", err)
+				break // Exit loop on error
+			}
+
 			log.Printf("Generated response: %s", response)
 
+			// Check for interruption (Has the world changed while we were thinking?)
+			currentLatestID, err := getLatestMessageID(channelID)
+			if err == nil && snapshotMessageID != "" && currentLatestID != "" && snapshotMessageID != currentLatestID {
+				if retryCount < maxRetries {
+					log.Printf("INTERRUPTION DETECTED: Snapshot ID %s != Current ID %s. Re-aggregating...", snapshotMessageID, currentLatestID)
+					retryCount++
+					continue // Loop again!
+				} else {
+					log.Printf("Max retries reached. Sending despite interruption.")
+				}
+			}
+
+			// If we are here, either no interruption or max retries.
 			metadata := map[string]interface{}{
 				"response_model": responseModel,
 				"response_raw":   response,
@@ -522,6 +614,7 @@ func main() {
 			if err := postToDiscord(channelID, response, metadata); err != nil {
 				log.Printf("Failed to post to discord: %v", err)
 			}
+			break // Done!
 		}
 	}
 
