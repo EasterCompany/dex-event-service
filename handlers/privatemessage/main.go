@@ -205,6 +205,17 @@ func updateBotStatus(text string, status string, activityType int) {
 	}
 }
 
+func triggerTyping(channelID string) {
+	serviceURL := getDiscordServiceURL()
+	reqBody := map[string]string{"channel_id": channelID}
+	jsonData, _ := json.Marshal(reqBody)
+
+	resp, err := http.Post(serviceURL+"/typing", "application/json", bytes.NewBuffer(jsonData))
+	if err == nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
+}
+
 func emitEvent(eventData map[string]interface{}) error {
 	serviceURL := getEventServiceURL()
 	reqBody := map[string]interface{}{
@@ -355,6 +366,7 @@ func main() {
 	var response string
 	if shouldEngage {
 		updateBotStatus("Typing response...", "online", 0) // 0 = Playing (Game)
+		triggerTyping(channelID)
 
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
 		var err error
