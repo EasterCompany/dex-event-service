@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,19 +19,21 @@ import (
 const OllamaURL = "http://127.0.0.1:11434"
 
 type OllamaGenerateRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-	Stream bool   `json:"stream"`
+	Model  string   `json:"model"`
+	Prompt string   `json:"prompt"`
+	Images []string `json:"images,omitempty"`
+	Stream bool     `json:"stream"`
 }
 
 type OllamaGenerateResponse struct {
 	Response string `json:"response"`
 }
 
-func generateOllamaResponse(model, prompt string) (string, error) {
+func generateOllamaResponse(model, prompt string, images []string) (string, error) {
 	reqBody := OllamaGenerateRequest{
 		Model:  model,
 		Prompt: prompt,
+		Images: images,
 		Stream: false,
 	}
 	jsonData, err := json.Marshal(reqBody)
@@ -58,6 +61,25 @@ func generateOllamaResponse(model, prompt string) (string, error) {
 		return "", err
 	}
 	return response.Response, nil
+}
+
+func downloadImageAsBase64(url string) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download image: status %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return base64.StdEncoding.EncodeToString(data), nil
 }
 
 // ServiceMap minimal structure for reading port
@@ -278,10 +300,67 @@ func main() {
 	userID, _ := input.EventData["user_id"].(string)
 	mentionedBot, _ := input.EventData["mentioned_bot"].(bool)
 
-	log.Printf("public-message-handler processing for user %s in channel %s: %s (mentioned: %v)", userID, channelID, content, mentionedBot)
+	// Process attachments
+	var attachments []map[string]interface{}
+	if att, ok := input.EventData["attachments"].([]interface{}); ok {
+		for _, a := range att {
+			if m, ok := a.(map[string]interface{}); ok {
+				attachments = append(attachments, m)
+			}
+		}
+	}
+
+	log.Printf("public-message-handler processing for user %s in channel %s: %s (mentioned: %v, attachments: %d)", userID, channelID, content, mentionedBot, len(attachments))
 
 	updateBotStatus("Thinking...", "online", 3)
 	defer updateBotStatus("Listening for events...", "online", 2)
+
+	// --- Visual Analysis Phase ---
+	visualContext := ""
+	if len(attachments) > 0 {
+		for _, att := range attachments {
+			contentType, _ := att["content_type"].(string)
+			url, _ := att["url"].(string)
+			filename, _ := att["filename"].(string)
+
+			// Check if image
+			if strings.HasPrefix(contentType, "image/") {
+				updateBotStatus("Analyzing image...", "online", 3)
+				log.Printf("Downloading image: %s", filename)
+				base64Img, err := downloadImageAsBase64(url)
+				if err != nil {
+					log.Printf("Failed to download image %s: %v", filename, err)
+					continue
+				}
+
+				log.Printf("Generating visual description for %s...", filename)
+				description, err := generateOllamaResponse("dex-vision-model", "Describe this image concisely.", []string{base64Img})
+				if err != nil {
+					log.Printf("Vision model failed for %s: %v", filename, err)
+					continue
+				}
+
+				log.Printf("Visual description for %s: %s", filename, description)
+				visualContext += fmt.Sprintf("\n[Attachment: %s (Image) - Description: %s]", filename, description)
+
+				// Emit child event for analysis
+				analysisEvent := map[string]interface{}{
+					"type":            "analysis.visual.completed",
+					"parent_event_id": input.EventID,
+					"handler":         "public-message-handler",
+					"filename":        filename,
+					"description":     description,
+					"timestamp":       time.Now().Unix(),
+				}
+				_ = emitEvent(analysisEvent)
+			}
+		}
+	}
+
+	// Append visual context to content for engagement/response models
+	if visualContext != "" {
+		content += visualContext
+	}
 
 	shouldEngage := false
 	engagementReason := "Evaluated by dex-engagement-model"
@@ -309,7 +388,7 @@ func main() {
 		// 1. Check Engagement
 		prompt := fmt.Sprintf("Context:\n%s\n\nCurrent Message:\n%s", contextHistory, content)
 		var err error
-		engagementRaw, err = generateOllamaResponse("dex-engagement-model", prompt)
+		engagementRaw, err = generateOllamaResponse("dex-engagement-model", prompt, nil)
 		if err != nil {
 			log.Printf("Engagement check failed: %v", err)
 			// Fail gracefully, maybe don't engage if model fails
@@ -353,7 +432,7 @@ func main() {
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
 		var err error
 		responseModel := "dex-public-message-model"
-		response, err := generateOllamaResponse(responseModel, prompt)
+		response, err := generateOllamaResponse(responseModel, prompt, nil)
 
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
