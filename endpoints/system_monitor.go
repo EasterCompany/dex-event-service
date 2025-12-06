@@ -18,6 +18,23 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+var redisClient *redis.Client
+
+// SetRedisClient sets the Redis client for endpoints
+func SetRedisClient(client *redis.Client) {
+	redisClient = client
+}
+
+// ProcessInfo represents the data stored by a handler in Redis for the processes tab
+type ProcessInfo struct {
+	ChannelID string `json:"channel_id"`
+	State     string `json:"state"`
+	Retries   int    `json:"retries"`
+	StartTime int64  `json:"start_time"`
+	PID       int    `json:"pid"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
 // ServiceReport for a single service, adapted for JSON output to frontend
 type ServiceReport struct {
 	ID            string        `json:"id"`
@@ -46,6 +63,45 @@ type SystemMonitorResponse struct {
 	Services []ServiceReport      `json:"services"`
 	Models   []ModelReport        `json:"models"`
 	Whisper  *WhisperStatusReport `json:"whisper,omitempty"`
+}
+
+// ListProcessesHandler fetches and returns information about active event handler processes
+func ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
+	if redisClient == nil {
+		http.Error(w, "Redis client not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	var activeProcesses []ProcessInfo
+	ctx := context.Background()
+
+	// Scan for all process:info:* keys
+	iter := redisClient.Scan(ctx, 0, "process:info:*", 0).Iterator()
+	for iter.Next(ctx) {
+		key := iter.Val()
+		val, err := redisClient.Get(ctx, key).Result()
+		if err != nil {
+			// Log error but continue with other keys
+			fmt.Printf("Error fetching process info for key %s: %v\n", key, err)
+			continue
+		}
+
+		var pi ProcessInfo
+		if err := json.Unmarshal([]byte(val), &pi); err != nil {
+			fmt.Printf("Error unmarshaling process info for key %s: %v\n", key, err)
+			continue
+		}
+		activeProcesses = append(activeProcesses, pi)
+	}
+	if err := iter.Err(); err != nil {
+		http.Error(w, fmt.Sprintf("Error scanning Redis keys: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(activeProcesses); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+	}
 }
 
 // WhisperStatusReport provides status for the Whisper model environment

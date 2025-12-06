@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/EasterCompany/dex-event-service/handlers"
 	"github.com/EasterCompany/dex-event-service/middleware"
 	"github.com/EasterCompany/dex-event-service/utils"
+	"github.com/gorilla/mux"
 )
 
 const ServiceName = "dex-event-service"
@@ -70,6 +72,23 @@ func main() {
 
 	// Set the version for the service.
 	utils.SetVersion(version, branch, commit, buildDate, buildYear, buildHash, arch)
+
+	// Create a context for graceful shutdown for redis client
+	ctx, redisClientCancel := context.WithCancel(context.Background())
+	defer redisClientCancel()
+
+	// Initialize Redis Client for the main service
+	redisClient, err := utils.GetRedisClient(ctx)
+	if err != nil {
+		log.Printf("Warning: Failed to connect to Redis: %v. Event storage and process monitoring will be disabled.", err)
+	} else {
+		defer func() {
+			if err := redisClient.Close(); err != nil {
+				log.Printf("Error closing Redis client: %v", err)
+			}
+		}()
+		endpoints.SetRedisClient(redisClient) // Set for endpoints
+	}
 
 	// Handle delete mode
 	if *deleteCmd {
@@ -123,66 +142,43 @@ func main() {
 		log.Fatalf("FATAL: Invalid port '%s' for service '%s' in service-map.json: %v", selfConfig.Port, ServiceName, err)
 	}
 
-	// Find the Redis service configuration from the service map.
-	// For now, we'll hardcode to "local-cache-0" for consistency in local development.
-	var redisConfig *config.ServiceEntry
-	if osServices, ok := serviceMap.Services["os"]; ok {
-		for _, service := range osServices {
-			if service.ID == "local-cache-0" { // Using local-cache-0 as default Redis service
-				redisConfig = &service
-				break
-			}
-		}
-	}
-
-	if redisConfig == nil {
-		log.Fatalf("FATAL: Redis service 'local-cache-0' not found in service-map.json. Shutting down.")
-	}
-
-	// Initialize Redis before starting services
-	log.Println("Initializing Redis connection...")
-	if err := initializeRedis(redisConfig); err != nil {
-		log.Fatalf("FATAL: Failed to initialize Redis: %v", err)
-	}
-	log.Println("Redis connected successfully")
-
 	// Initialize handler registry
 	log.Println("Loading event handlers...")
 	if err := handlers.Initialize(); err != nil {
 		log.Fatalf("FATAL: Failed to initialize handlers: %v", err)
 	}
 
-	// Create a context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Load global options
+	_, err = config.LoadOptions()
+	if err != nil {
+		log.Fatalf("FATAL: Could not load global options: %v", err)
+	}
 
-	// Start the core event logic in a goroutine
-	go func() {
-		log.Println("Core Event Logic: Starting...")
-		if err := RunCoreLogic(ctx); err != nil {
-			log.Printf("Core Logic Error: %v", err)
-			// Trigger shutdown if core logic fails
-			cancel()
-		}
-		log.Println("Core Event Logic: Stopped")
-	}()
+	// Create a context for graceful shutdown for HTTP server
+	_, httpCancel := context.WithCancel(context.Background())
+	defer httpCancel()
 
-	// Configure HTTP server
-	mux := http.NewServeMux()
+	// Setup HTTP server
+	router := mux.NewRouter()
+	// router.Use(middleware.RequestLogger) // RequestLogger not available
 
-	// Register handlers
-	// /service endpoint is public (for health checks)
-	mux.HandleFunc("/service", endpoints.ServiceHandler)
+	// API Endpoints
+	router.HandleFunc("/service", endpoints.ServiceHandler).Methods("GET")
+	router.HandleFunc("/events", endpoints.EventsHandler(redisClient)).Methods("POST", "GET", "DELETE")
+	router.HandleFunc("/system_monitor", endpoints.SystemMonitorHandler).Methods("GET")
+	router.HandleFunc("/processes", endpoints.ListProcessesHandler).Methods("GET")
 
-	// /events endpoints require authentication
-	mux.HandleFunc("/events", middleware.ServiceAuthMiddleware(endpoints.EventsHandler(RedisClient)))
-	mux.HandleFunc("/events/", middleware.ServiceAuthMiddleware(endpoints.EventsHandler(RedisClient)))
-	mux.HandleFunc("/system_monitor_metrics", endpoints.SystemMonitorHandler)
-	mux.HandleFunc("/logs", middleware.ServiceAuthMiddleware(endpoints.LogsHandler))
+	// Mount the static web UI
+	webDir := filepath.Join(os.ExpandEnv("$HOME"), "Dexter", "web", "dist")
+	if _, err := os.Stat(webDir); os.IsNotExist(err) {
+		log.Printf("Warning: Web UI directory not found at %s. Serving only API endpoints.", webDir)
+	} else {
+		router.PathPrefix("/").Handler(http.FileServer(http.Dir(webDir)))
+	}
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
-		Handler:      middleware.CorsMiddleware(mux),
+		Handler:      middleware.CorsMiddleware(router),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -206,11 +202,12 @@ func main() {
 
 	// Graceful cleanup
 	utils.SetHealthStatus("SHUTTING_DOWN", "Service is shutting down")
-	cancel() // Signals the core logic to stop
 
-	// Give the HTTP server 5 seconds to finish current requests
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
+
+	// Close httpCtx to signal any other background tasks
+	httpCancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("HTTP shutdown error: %v", err)
@@ -224,34 +221,22 @@ func RunTestSuite() error {
 	log.Println("Loading service configuration...")
 
 	// Load the service map to get Redis configuration
-	serviceMap, err := config.LoadServiceMap()
+	_, err := config.LoadServiceMap()
 	if err != nil {
 		return fmt.Errorf("could not load service-map.json: %w", err)
 	}
 
-	// Find Redis configuration
-	var redisConfig *config.ServiceEntry
-	if osServices, ok := serviceMap.Services["os"]; ok {
-		for _, service := range osServices {
-			if service.ID == "local-cache-0" {
-				redisConfig = &service
-				break
-			}
-		}
-	}
+	// Initialize Redis for the test suite
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	if redisConfig == nil {
-		return fmt.Errorf("redis service 'local-cache-0' not found in service-map.json")
-	}
-
-	// Initialize Redis
-	log.Println("Connecting to Redis...")
-	if err := initializeRedis(redisConfig); err != nil {
-		return fmt.Errorf("failed to initialize Redis: %w", err)
+	testRedisClient, err := utils.GetRedisClient(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to initialize Redis client for test suite: %w", err)
 	}
 	defer func() {
-		if RedisClient != nil {
-			_ = RedisClient.Close()
+		if testRedisClient != nil {
+			_ = testRedisClient.Close()
 		}
 	}()
 
