@@ -200,7 +200,7 @@ func main() {
 	serverID, _ := input.EventData["server_id"].(string)
 	serverName, _ := input.EventData["server_name"].(string)
 
-	log.Printf("transcription-handler processing for user %s: %s", userID, transcription)
+	log.Printf("transcription-handler processing for user %s: %s", userName, transcription)
 
 	updateBotStatus("Thinking...", "online", 3)
 	defer updateBotStatus("Listening for events...", "online", 2)
