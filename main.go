@@ -178,6 +178,9 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
+	// Mark service as ready
+	utils.SetHealthStatus("OK", "Service is running")
+
 	// Start HTTP server in a goroutine
 	go func() {
 		fmt.Printf("Starting %s on :%d\n", ServiceName, port)
