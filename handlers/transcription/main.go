@@ -306,6 +306,28 @@ func main() {
 		} else {
 			log.Printf("Generated response: %s", response)
 
+			// Emit messaging.bot.sent_message directly to the event service for logging
+			// Emit BEFORE audio playback so it appears in logs immediately
+			botResponseEventData := map[string]interface{}{
+				"type":           "messaging.bot.sent_message",
+				"source":         "discord",    // Indicate it originated from Discord context
+				"user_id":        "dexter-bot", // Placeholder ID - better would be dynamic from discord service
+				"user_name":      "Dexter",
+				"channel_id":     channelID,
+				"channel_name":   channelName,
+				"server_id":      serverID,
+				"server_name":    serverName,
+				"content":        response,
+				"timestamp":      time.Now().Format(time.RFC3339),
+				"response_model": responseModel,
+				"response_raw":   response,
+				"raw_input":      prompt,
+			}
+
+			if err := emitEvent(botResponseEventData); err != nil {
+				log.Printf("Failed to emit bot response event: %v", err)
+			}
+
 			// Generate Audio via TTS
 			updateBotStatus("Generating speech...", "online", 0)
 
@@ -329,27 +351,6 @@ func main() {
 				} else {
 					log.Printf("TTS service error: %d", ttsResp.StatusCode)
 				}
-			}
-
-			// Emit messaging.bot.sent_message directly to the event service for logging
-			botResponseEventData := map[string]interface{}{
-				"type":           "messaging.bot.sent_message",
-				"source":         "discord",    // Indicate it originated from Discord context
-				"user_id":        "dexter-bot", // Placeholder ID - better would be dynamic from discord service
-				"user_name":      "Dexter",
-				"channel_id":     channelID,
-				"channel_name":   channelName,
-				"server_id":      serverID,
-				"server_name":    serverName,
-				"content":        response,
-				"timestamp":      time.Now().Format(time.RFC3339),
-				"response_model": responseModel,
-				"response_raw":   response,
-				"raw_input":      prompt,
-			}
-
-			if err := emitEvent(botResponseEventData); err != nil {
-				log.Printf("Failed to emit bot response event: %v", err)
 			}
 		}
 	}
