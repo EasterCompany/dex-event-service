@@ -81,13 +81,13 @@ func getEventServiceURL() string {
 			for _, cat := range sm.Services {
 				for _, service := range cat {
 					if service.ID == "dex-event-service" {
-						return fmt.Sprintf("http://localhost:%s", service.Port)
+						return fmt.Sprintf("http://127.0.0.1:%s", service.Port)
 					}
 				}
 			}
 		}
 	}
-	return "http://localhost:8082" // Fallback
+	return "http://127.0.0.1:8100" // Fallback
 }
 
 func getDiscordServiceURL() string {
@@ -101,12 +101,12 @@ func getDiscordServiceURL() string {
 		if err := json.Unmarshal(data, &sm); err == nil {
 			for _, service := range sm.Services["th"] { // Discord is usually 'th' (Third Party?) or 'cs'
 				if service.ID == "dex-discord-service" {
-					return fmt.Sprintf("http://localhost:%s", service.Port)
+					return fmt.Sprintf("http://127.0.0.1:%s", service.Port)
 				}
 			}
 		}
 	}
-	return "http://localhost:8081" // Fallback
+	return "http://127.0.0.1:8300" // Fallback
 }
 
 func getTTSServiceURL() string {
@@ -120,12 +120,12 @@ func getTTSServiceURL() string {
 		if err := json.Unmarshal(data, &sm); err == nil {
 			for _, service := range sm.Services["be"] { // TTS is 'be'
 				if service.ID == "dex-tts-service" {
-					return fmt.Sprintf("http://localhost:%s", service.Port)
+					return fmt.Sprintf("http://127.0.0.1:%s", service.Port)
 				}
 			}
 		}
 	}
-	return "http://localhost:8200" // Fallback
+	return "http://127.0.0.1:8200" // Fallback
 }
 
 func playAudioInDiscord(audioData []byte) error {
@@ -147,7 +147,7 @@ func playAudioInDiscord(audioData []byte) error {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("discord service returned %d", resp.StatusCode)
+		return fmt.Errorf("discord service returned %d: %s", resp.StatusCode, resp.Status)
 	}
 	return nil
 }
@@ -331,12 +331,11 @@ func main() {
 				}
 			}
 
-			// Emit messaging.bot.sent_message (even though it's not sent to Discord text channel yet)
-			// This acts as the log for the response.
+			// Emit messaging.bot.sent_message directly to the event service for logging
 			botResponseEventData := map[string]interface{}{
 				"type":           "messaging.bot.sent_message",
-				"source":         "dex-transcription-handler",
-				"user_id":        "dexter-bot", // Placeholder ID
+				"source":         "discord",    // Indicate it originated from Discord context
+				"user_id":        "dexter-bot", // Placeholder ID - better would be dynamic from discord service
 				"user_name":      "Dexter",
 				"channel_id":     channelID,
 				"channel_name":   channelName,
@@ -354,7 +353,6 @@ func main() {
 			}
 		}
 	}
-
 	// Construct HandlerOutput (empty as we emitted manually)
 	output := types.HandlerOutput{
 		Success: true,
