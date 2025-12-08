@@ -167,6 +167,38 @@ func updateBotStatus(text string, status string, activityType int) {
 	}
 }
 
+func getVoiceChannelUserCount(channelID string) (int, error) {
+	serviceURL := getDiscordServiceURL()
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/channel/voice/count?id=%s", serviceURL, channelID), nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("X-Service-Name", "dex-event-service")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("failed to get user count: %s", resp.Status)
+	}
+
+	var result struct {
+		UserCount int `json:"user_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, err
+	}
+	return result.UserCount, nil
+}
+
 func fetchContext(channelID string) (string, error) {
 	if channelID == "" {
 		return "", nil
@@ -265,6 +297,38 @@ func main() {
 	engagementDecision := strings.ToUpper(strings.TrimSpace(engagementRaw))
 	shouldEngage := strings.Contains(engagementDecision, "TRUE")
 
+	engagementReason := "Evaluated by dex-engagement-model"
+
+	// Force engagement if user count is 1 (meaning just the user + bot, effectively 1 human)
+	// Or usually, discordgo VoiceStates include the bot.
+	// So "1 person in channel with Dexter" means Total Users = 2 (User + Bot).
+	// Or if the user meant "Only 1 person", implying just the speaker.
+	// Let's check user count.
+	// The user requirement: "if only 1 person is in a channel with Dexter"
+	// This implies (User + Dexter) = 2 total participants.
+	// Let's fetch the count.
+	userCount, err := getVoiceChannelUserCount(channelID)
+	if err != nil {
+		log.Printf("Failed to get voice channel user count: %v", err)
+	} else {
+		log.Printf("Voice channel user count: %d", userCount)
+		// If count is 2 (The speaker + Dexter), force engagement.
+		// Wait, if I am alone with Dexter, count is 2.
+		// If I am alone (count 1) Dexter isn't there? No, Dexter is connected.
+		// So if count <= 2, force engage.
+		// Actually, if count == 1, it means ONLY Dexter is there (user left?), or ONLY user is there (Dexter not connected?).
+		// If Dexter receives audio, Dexter is connected.
+		// So count should be at least 2 (Speaker + Dexter).
+		// If count == 2, we force engagement.
+		if userCount <= 2 {
+			if !shouldEngage {
+				log.Printf("Forcing engagement because user is alone with Dexter (count: %d)", userCount)
+				shouldEngage = true
+				engagementReason = fmt.Sprintf("Forced engagement: User count is %d (Alone with Dexter)", userCount)
+			}
+		}
+	}
+
 	log.Printf("Engagement decision: %s (%v)", engagementDecision, shouldEngage)
 
 	// Construct and emit engagement decision event immediately
@@ -276,7 +340,7 @@ func main() {
 	engagementEventData := map[string]interface{}{
 		"type":             "engagement.decision",
 		"decision":         decisionStr,
-		"reason":           "Evaluated by dex-engagement-model",
+		"reason":           engagementReason,
 		"handler":          "transcription-handler",
 		"event_id":         input.EventID,
 		"channel_id":       channelID,
@@ -286,6 +350,7 @@ func main() {
 		"engagement_model": "dex-fast-engagement-model",
 		"context_history":  contextHistory,
 		"engagement_raw":   engagementRaw,
+		"user_count":       userCount,
 	}
 
 	if err := emitEvent(engagementEventData); err != nil {
