@@ -109,6 +109,49 @@ func getDiscordServiceURL() string {
 	return "http://localhost:8081" // Fallback
 }
 
+func getTTSServiceURL() string {
+	// Try to read service-map.json
+	homeDir, _ := os.UserHomeDir()
+	mapPath := filepath.Join(homeDir, "Dexter", "config", "service-map.json")
+
+	data, err := os.ReadFile(mapPath)
+	if err == nil {
+		var sm ServiceMap
+		if err := json.Unmarshal(data, &sm); err == nil {
+			for _, service := range sm.Services["be"] { // TTS is 'be'
+				if service.ID == "dex-tts-service" {
+					return fmt.Sprintf("http://localhost:%s", service.Port)
+				}
+			}
+		}
+	}
+	return "http://localhost:8200" // Fallback
+}
+
+func playAudioInDiscord(audioData []byte) error {
+	serviceURL := getDiscordServiceURL()
+
+	// POST the raw audio data to /audio/play
+	req, err := http.NewRequest("POST", serviceURL+"/audio/play", bytes.NewBuffer(audioData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "audio/wav")
+	req.Header.Set("X-Service-Name", "dex-event-service") // Auth
+
+	client := &http.Client{Timeout: 30 * time.Second} // Give time for playback setup
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("discord service returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func updateBotStatus(text string, status string, activityType int) {
 	serviceURL := getDiscordServiceURL()
 	reqBody := map[string]interface{}{
@@ -262,6 +305,31 @@ func main() {
 			log.Printf("Response generation failed: %v", err)
 		} else {
 			log.Printf("Generated response: %s", response)
+
+			// Generate Audio via TTS
+			updateBotStatus("Generating speech...", "online", 0)
+
+			ttsURL := getTTSServiceURL()
+			ttsPayload := map[string]string{"text": response, "language": "en"}
+			ttsJson, _ := json.Marshal(ttsPayload)
+
+			ttsResp, ttsErr := http.Post(ttsURL+"/generate", "application/json", bytes.NewBuffer(ttsJson))
+			if ttsErr != nil {
+				log.Printf("TTS generation failed: %v", ttsErr)
+			} else {
+				defer func() { _ = ttsResp.Body.Close() }()
+				if ttsResp.StatusCode == 200 {
+					audioBytes, _ := io.ReadAll(ttsResp.Body)
+
+					// Play in Discord
+					updateBotStatus("Speaking...", "online", 0)
+					if playErr := playAudioInDiscord(audioBytes); playErr != nil {
+						log.Printf("Failed to play audio in Discord: %v", playErr)
+					}
+				} else {
+					log.Printf("TTS service error: %d", ttsResp.StatusCode)
+				}
+			}
 
 			// Emit messaging.bot.sent_message (even though it's not sent to Discord text channel yet)
 			// This acts as the log for the response.
