@@ -198,7 +198,7 @@ func fetchContext(channelID string) (string, error) {
 func emitEvent(eventData map[string]interface{}) error {
 	serviceURL := getEventServiceURL()
 	reqBody := map[string]interface{}{
-		"service": "dex-event-service",
+		"service": "dex-discord-service", // Attribute to discord service for consistency
 		"event":   eventData,
 	}
 	jsonData, err := json.Marshal(reqBody)
