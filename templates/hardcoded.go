@@ -406,6 +406,16 @@ func GetTemplates() map[string]EventTemplate {
 			},
 		},
 
+		"messaging.bot.joined_voice": {
+			Description: "The bot joined a voice channel",
+			Format:      "Bot joined voice channel {channel_name}",
+			Fields: map[string]FieldSpec{
+				"channel_name": {Type: "string", Required: true},
+				"channel_id":   {Type: "string", Required: true},
+				"server_id":    {Type: "string", Required: true},
+			},
+		},
+
 		string(types.EventTypeMessagingBotStatusUpdate): {
 			Description: "The bot's status has changed",
 			Format:      "Bot status changed to {status}: {details}",
