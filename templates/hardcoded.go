@@ -408,7 +408,7 @@ func GetTemplates() map[string]EventTemplate {
 
 		"messaging.bot.joined_voice": {
 			Description: "The bot joined a voice channel",
-			Format:      "Bot joined voice channel {channel_name}",
+			Format:      "Dexter joined voice channel {channel_name}",
 			Fields: map[string]FieldSpec{
 				"channel_name": {Type: "string", Required: true},
 				"channel_id":   {Type: "string", Required: true},
@@ -418,10 +418,25 @@ func GetTemplates() map[string]EventTemplate {
 
 		string(types.EventTypeMessagingBotVoiceResponse): {
 			Description: "The bot responded via voice",
-			Format:      "{user_name} said: {content}",
+			Format:      "Dexter said: {content}",
 			Fields: map[string]FieldSpec{
 				"user_name": {Type: "string", Required: true},
 				"content":   {Type: "string", Required: true},
+				"response_model": {
+					Type:        "string",
+					Required:    false,
+					Description: "Model used for generating response",
+				},
+				"response_raw": {
+					Type:        "string",
+					Required:    false,
+					Description: "Raw output from response model",
+				},
+				"raw_input": {
+					Type:        "string",
+					Required:    false,
+					Description: "Raw input prompt to the model",
+				},
 			},
 		},
 
