@@ -371,10 +371,10 @@ func main() {
 		} else {
 			log.Printf("Generated response: %s", response)
 
-			// Emit messaging.bot.sent_message directly to the event service for logging
+			// Emit messaging.bot.voice_response directly to the event service for logging
 			// Emit BEFORE audio playback so it appears in logs immediately
 			botResponseEventData := map[string]interface{}{
-				"type":           "messaging.bot.sent_message",
+				"type":           "messaging.bot.voice_response",
 				"source":         "discord",    // Indicate it originated from Discord context
 				"user_id":        "dexter-bot", // Placeholder ID - better would be dynamic from discord service
 				"user_name":      "Dexter",

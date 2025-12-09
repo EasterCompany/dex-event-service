@@ -416,6 +416,15 @@ func GetTemplates() map[string]EventTemplate {
 			},
 		},
 
+		string(types.EventTypeMessagingBotVoiceResponse): {
+			Description: "The bot responded via voice",
+			Format:      "{user_name} said: {content}",
+			Fields: map[string]FieldSpec{
+				"user_name": {Type: "string", Required: true},
+				"content":   {Type: "string", Required: true},
+			},
+		},
+
 		string(types.EventTypeMessagingBotStatusUpdate): {
 			Description: "The bot's status has changed",
 			Format:      "Bot status changed to {status}: {details}",
