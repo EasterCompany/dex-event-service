@@ -119,14 +119,13 @@ func ensureDefaultHandlers() bool {
 			EventTypes:  []string{"messaging.user.sent_message"},
 			Filters:     map[string]string{"server_id": "!empty"},
 		},
-		"private-message-handler": {
-			Name:        "private-message-handler",
-			Binary:      "event-private-message-handler",
-			Description: "Handles private messages (DMs) for engagement",
-			Timeout:     300,
-			DebounceKey: "user_id",
-			EventTypes:  []string{"messaging.user.sent_message"},
-			Filters:     map[string]string{"server_id": "empty"},
+		"greeting-handler": {
+			Name:        "greeting-handler",
+			Binary:      "event-greeting-handler",
+			Description: "Greets users when bot joins a voice channel",
+			Timeout:     60,
+			DebounceKey: "channel_id",
+			EventTypes:  []string{"messaging.bot.joined_voice"},
 		},
 	}
 
