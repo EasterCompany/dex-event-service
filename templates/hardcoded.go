@@ -529,6 +529,40 @@ func GetTemplates() map[string]EventTemplate {
 			},
 		},
 
+		string(types.EventTypeMessagingWebhookMessage): {
+			Description: "A message received from a webhook",
+			Format:      "{user_name} (Webhook) in {channel_name}: {content}",
+			Fields: map[string]FieldSpec{
+				"type":         {Type: "string", Required: true},
+				"source":       {Type: "string", Required: true},
+				"user_id":      {Type: "string", Required: true},
+				"user_name":    {Type: "string", Required: true},
+				"channel_id":   {Type: "string", Required: true},
+				"channel_name": {Type: "string", Required: true},
+				"server_id":    {Type: "string", Required: true},
+				"server_name":  {Type: "string", Required: false},
+				"timestamp":    {Type: "string", Required: true},
+				"message_id":   {Type: "string", Required: true},
+				"content":      {Type: "string", Required: true},
+				"mentioned_bot": {
+					Type:        "boolean",
+					Required:    false,
+					Description: "Whether the bot was mentioned in the message",
+				},
+			},
+		},
+
+		"webhook.processed": {
+			Description: "A webhook event has been processed by the handler",
+			Format:      "Webhook processed by {handler}: {status}",
+			Fields: map[string]FieldSpec{
+				"type":            {Type: "string", Required: true},
+				"parent_event_id": {Type: "string", Required: true},
+				"handler":         {Type: "string", Required: true},
+				"status":          {Type: "string", Required: true},
+			},
+		},
+
 		// END NEW MESSAGING EVENTS
 
 		"voice_speaking_started": {
