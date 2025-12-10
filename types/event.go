@@ -31,6 +31,7 @@ const (
 	EventTypeMessagingUserTranscribed     EventType = "messaging.user.transcribed"
 	EventTypeMessagingUserJoinedServer    EventType = "messaging.user.joined_server"
 	EventTypeMessagingBotVoiceResponse    EventType = "messaging.bot.voice_response"
+	EventTypeMessagingWebhookMessage      EventType = "messaging.webhook.message"
 
 	// System Events
 	EventTypeSystemStatusChange EventType = "system.status.change"

@@ -127,6 +127,13 @@ func ensureDefaultHandlers() bool {
 			DebounceKey: "channel_id",
 			EventTypes:  []string{"messaging.bot.joined_voice"},
 		},
+		"webhook-handler": {
+			Name:        "webhook-handler",
+			Binary:      "event-webhook-handler",
+			Description: "Handles webhook messages",
+			Timeout:     60,
+			EventTypes:  []string{"messaging.webhook.message"},
+		},
 	}
 
 	fmt.Printf("DEBUG: checking %d defaults against %d existing.\n", len(defaults), len(registry.Handlers))

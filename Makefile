@@ -16,6 +16,8 @@ TEST_HANDLER := event-test-handler
 TRANSCRIPTION_HANDLER := event-transcription-handler
 PUBLIC_MESSAGE_HANDLER := event-public-message-handler
 PRIVATE_MESSAGE_HANDLER := event-private-message-handler
+WEBHOOK_HANDLER := event-webhook-handler
+GREETING_HANDLER := event-greeting-handler
 
 # Build information
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
@@ -29,7 +31,7 @@ BUILD_HASH := $(shell cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 8 | head -n 1
 # Go build flags (compatible with dex-cli build system)
 GOFLAGS := -ldflags="-s -w -X main.version=$(VERSION) -X main.branch=$(BRANCH) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE) -X main.buildYear=$(BUILD_YEAR) -X main.buildHash=$(BUILD_HASH) -X main.arch=$(BUILD_ARCH)"
 
-.PHONY: all service handlers clean install build deps check format lint test test-handler transcription-handler public-message-handler private-message-handler
+.PHONY: all service handlers clean install build deps check format lint test test-handler transcription-handler public-message-handler private-message-handler webhook-handler greeting-handler
 
 # Ensure modules are downloaded and go.sum is correct
 deps:
@@ -60,7 +62,7 @@ service: check
 	@echo "✓ $(SERVICE_NAME) built successfully"
 
 # Build all handlers
-handlers: test-handler transcription-handler public-message-handler private-message-handler
+handlers: test-handler transcription-handler public-message-handler private-message-handler webhook-handler greeting-handler
 
 # Build test handler
 test-handler:
@@ -86,6 +88,18 @@ private-message-handler:
 	@$(GOBUILD) $(GOFLAGS) -o $(PRIVATE_MESSAGE_HANDLER) ./handlers/privatemessage
 	@echo "✓ $(PRIVATE_MESSAGE_HANDLER) built successfully"
 
+# Build webhook handler
+webhook-handler:
+	@echo "Building $(WEBHOOK_HANDLER)..."
+	@$(GOBUILD) $(GOFLAGS) -o $(WEBHOOK_HANDLER) ./handlers/webhook
+	@echo "✓ $(WEBHOOK_HANDLER) built successfully"
+
+# Build greeting handler
+greeting-handler:
+	@echo "Building $(GREETING_HANDLER)..."
+	@$(GOBUILD) $(GOFLAGS) -o $(GREETING_HANDLER) ./handlers/greeting
+	@echo "✓ $(GREETING_HANDLER) built successfully"
+
 # Install binaries to Dexter bin directory
 install: all
 	@echo "Installing binaries to $(BIN_DIR)..."
@@ -95,21 +109,29 @@ install: all
 	@cp $(TRANSCRIPTION_HANDLER) $(BIN_DIR)/$(TRANSCRIPTION_HANDLER)
 	@cp $(PUBLIC_MESSAGE_HANDLER) $(BIN_DIR)/$(PUBLIC_MESSAGE_HANDLER)
 	@cp $(PRIVATE_MESSAGE_HANDLER) $(BIN_DIR)/$(PRIVATE_MESSAGE_HANDLER)
+	@cp $(WEBHOOK_HANDLER) $(BIN_DIR)/$(WEBHOOK_HANDLER)
+	@cp $(GREETING_HANDLER) $(BIN_DIR)/$(GREETING_HANDLER)
 	@chmod +x $(BIN_DIR)/$(SERVICE_NAME)
 	@chmod +x $(BIN_DIR)/$(TEST_HANDLER)
 	@chmod +x $(BIN_DIR)/$(TRANSCRIPTION_HANDLER)
 	@chmod +x $(BIN_DIR)/$(PUBLIC_MESSAGE_HANDLER)
 	@chmod +x $(BIN_DIR)/$(PRIVATE_MESSAGE_HANDLER)
+	@chmod +x $(BIN_DIR)/$(WEBHOOK_HANDLER)
+	@chmod +x $(BIN_DIR)/$(GREETING_HANDLER)
 	@echo "✓ Installed $(SERVICE_NAME) to $(BIN_DIR)"
 	@echo "✓ Installed $(TEST_HANDLER) to $(BIN_DIR)"
 	@echo "✓ Installed $(TRANSCRIPTION_HANDLER) to $(BIN_DIR)"
 	@echo "✓ Installed $(PUBLIC_MESSAGE_HANDLER) to $(BIN_DIR)"
 	@echo "✓ Installed $(PRIVATE_MESSAGE_HANDLER) to $(BIN_DIR)"
+	@echo "✓ Installed $(WEBHOOK_HANDLER) to $(BIN_DIR)"
+	@echo "✓ Installed $(GREETING_HANDLER) to $(BIN_DIR)"
 	@rm -f $(SERVICE_NAME)
 	@rm -f $(TEST_HANDLER)
 	@rm -f $(TRANSCRIPTION_HANDLER)
 	@rm -f $(PUBLIC_MESSAGE_HANDLER)
 	@rm -f $(PRIVATE_MESSAGE_HANDLER)
+	@rm -f $(WEBHOOK_HANDLER)
+	@rm -f $(GREETING_HANDLER)
 	@echo "✓ Cleaned source directory"
 
 # Clean build artifacts
@@ -120,9 +142,13 @@ clean:
 	@rm -f $(TRANSCRIPTION_HANDLER)
 	@rm -f $(PUBLIC_MESSAGE_HANDLER)
 	@rm -f $(PRIVATE_MESSAGE_HANDLER)
+	@rm -f $(WEBHOOK_HANDLER)
+	@rm -f $(GREETING_HANDLER)
 	@rm -f $(BIN_DIR)/$(SERVICE_NAME)
 	@rm -f $(BIN_DIR)/$(TEST_HANDLER)
 	@rm -f $(BIN_DIR)/$(TRANSCRIPTION_HANDLER)
 	@rm -f $(BIN_DIR)/$(PUBLIC_MESSAGE_HANDLER)
 	@rm -f $(BIN_DIR)/$(PRIVATE_MESSAGE_HANDLER)
+	@rm -f $(BIN_DIR)/$(WEBHOOK_HANDLER)
+	@rm -f $(BIN_DIR)/$(GREETING_HANDLER)
 	@echo "✓ Clean complete"
