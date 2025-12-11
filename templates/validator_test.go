@@ -168,34 +168,61 @@ func TestGetTemplateList(t *testing.T) {
 	eventTypes := GetTemplateList()
 
 	if len(eventTypes) != 25 {
+
 		t.Errorf("Expected 25 event types, got %d", len(eventTypes))
+
 	}
 
 	expectedTypes := map[string]bool{
-		"message_received":       true,
-		"action_performed":       true,
-		"log_entry":              true,
-		"error_occurred":         true,
-		"status_change":          true,
-		"metric_recorded":        true,
+
+		"message_received": true,
+
+		"action_performed": true,
+
+		"log_entry": true,
+
+		"error_occurred": true,
+
+		"status_change": true,
+
+		"metric_recorded": true,
+
 		"voice_speaking_started": true,
+
 		"voice_speaking_stopped": true,
-		"voice_transcribed":      true,
-		"engagement.decision":    true,
-		"bot_response":           true,
-		string(types.EventTypeMessagingUserJoinedVoice):         true,
-		string(types.EventTypeMessagingUserLeftVoice):           true,
-		string(types.EventTypeMessagingUserSentMessage):         true,
-		string(types.EventTypeMessagingBotSentMessage):          true,
-		string(types.EventTypeMessagingBotStatusUpdate):         true,
-		string(types.EventTypeMessagingUserSpeakingStarted):     true,
-		string(types.EventTypeMessagingUserSpeakingStopped):     true,
-		string(types.EventTypeMessagingUserTranscribed):         true,
-		string(types.EventTypeMessagingUserJoinedServer):        true,
-		"messaging.bot.joined_voice":                            true,
-		string(types.EventTypeMessagingBotVoiceResponse):        true,
-		string(types.EventTypeMessagingWebhookMessage):          true,
-		"webhook.processed":                                     true,
+
+		"voice_transcribed": true,
+
+		"engagement.decision": true,
+
+		"bot_response": true,
+
+		string(types.EventTypeMessagingUserJoinedVoice): true,
+
+		string(types.EventTypeMessagingUserLeftVoice): true,
+
+		string(types.EventTypeMessagingUserSentMessage): true,
+
+		string(types.EventTypeMessagingBotSentMessage): true,
+
+		string(types.EventTypeMessagingBotStatusUpdate): true,
+
+		string(types.EventTypeMessagingUserSpeakingStarted): true,
+
+		string(types.EventTypeMessagingUserSpeakingStopped): true,
+
+		string(types.EventTypeMessagingUserTranscribed): true,
+
+		string(types.EventTypeMessagingUserJoinedServer): true,
+
+		"messaging.bot.joined_voice": true,
+
+		string(types.EventTypeMessagingBotVoiceResponse): true,
+
+		string(types.EventTypeMessagingWebhookMessage): true,
+
+		"webhook.processed": true,
+
 		string(types.EventTypeModerationExplicitContentDeleted): true,
 	}
 
