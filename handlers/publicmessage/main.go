@@ -9,8 +9,10 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url" // Import for url.QueryEscape
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -163,6 +165,59 @@ func getEventServiceURL() string {
 		}
 	}
 	return "http://localhost:8082" // Fallback
+}
+
+func getWebServiceURL() string {
+	// Try to read service-map.json
+	homeDir, _ := os.UserHomeDir()
+	mapPath := filepath.Join(homeDir, "Dexter", "config", "service-map.json")
+
+	data, err := os.ReadFile(mapPath)
+	if err == nil {
+		var sm ServiceMap
+		if err := json.Unmarshal(data, &sm); err == nil {
+			for _, service := range sm.Services["be"] { // dex-web-service is a Backend Service
+				if service.ID == "dex-web-service" {
+					return fmt.Sprintf("http://localhost:%s", service.Port)
+				}
+			}
+		}
+	}
+	return "http://localhost:8201" // Fallback
+}
+
+type MetadataResponse struct {
+	URL         string `json:"url"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	ImageURL    string `json:"image_url,omitempty"`
+	ContentType string `json:"content_type,omitempty"`
+	Provider    string `json:"provider,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+func fetchMetadata(linkURL string) (*MetadataResponse, error) {
+	webServiceURL := getWebServiceURL()
+	reqURL := fmt.Sprintf("%s/metadata?url=%s", webServiceURL, url.QueryEscape(linkURL))
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(reqURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call web service: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("web service returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var metaResp MetadataResponse
+	if err := json.NewDecoder(resp.Body).Decode(&metaResp); err != nil {
+		return nil, fmt.Errorf("failed to decode web service response: %w", err)
+	}
+
+	return &metaResp, nil
 }
 
 func deleteMessage(channelID, messageID string) error {
@@ -439,6 +494,37 @@ func main() {
 		for _, a := range att {
 			if m, ok := a.(map[string]interface{}); ok {
 				attachments = append(attachments, m)
+			}
+		}
+	}
+
+	// Link Expansion: Extract URLs from content and fetch metadata
+	urlRegex := `(https?:\/\/[^\s]+)`
+	re := regexp.MustCompile(urlRegex)
+	foundURLs := re.FindAllString(content, -1)
+
+	for _, foundURL := range foundURLs {
+		if !strings.HasPrefix(foundURL, "https://discord.com/attachments/") {
+			log.Printf("Found external URL in message: %s", foundURL)
+			meta, err := fetchMetadata(foundURL)
+			if err != nil {
+				log.Printf("Failed to fetch metadata for %s: %v", foundURL, err)
+				continue
+			}
+
+			if meta.ImageURL != "" {
+				log.Printf("Expanded URL %s to image: %s (Type: %s)", foundURL, meta.ImageURL, meta.ContentType)
+				// Add as a "virtual" attachment for visual analysis
+				attachments = append(attachments, map[string]interface{}{
+					"id":           "virtual_" + foundURL, // Unique ID for caching
+					"url":          meta.ImageURL,
+					"content_type": meta.ContentType,
+					"filename":     fmt.Sprintf("link_expansion_%s.%s", meta.Provider, strings.Split(meta.ContentType, "/")[1]),
+					"size":         0, // Size unknown, vision model doesn't care
+					"proxy_url":    "",
+					"height":       0,
+					"width":        0,
+				})
 			}
 		}
 	}
