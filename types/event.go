@@ -33,6 +33,9 @@ const (
 	EventTypeMessagingBotVoiceResponse    EventType = "messaging.bot.voice_response"
 	EventTypeMessagingWebhookMessage      EventType = "messaging.webhook.message"
 
+	// Moderation Events
+	EventTypeModerationExplicitContentDeleted EventType = "moderation.explicit_content.deleted"
+
 	// System Events
 	EventTypeSystemStatusChange EventType = "system.status.change"
 )

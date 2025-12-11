@@ -165,6 +165,41 @@ func getEventServiceURL() string {
 	return "http://localhost:8082" // Fallback
 }
 
+func deleteMessage(channelID, messageID string) error {
+	serviceURL := getDiscordServiceURL()
+	reqBody := map[string]string{
+		"channel_id": channelID,
+		"message_id": messageID,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, serviceURL+"/message/delete", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing delete response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
 func postToDiscord(channelID, content string, metadata map[string]interface{}) error {
 	serviceURL := getDiscordServiceURL()
 	reqBody := map[string]interface{}{
@@ -454,10 +489,53 @@ func main() {
 					}
 
 					log.Printf("Generating visual description for %s...", filename)
-					description, err = generateOllamaResponse("dex-vision-model", "Describe this image concisely.", []string{base64Img})
+					prompt := "Describe this image concisely. If the image contains sexual content or nudity, output ONLY the tag <EXPLICIT_CONTENT_DETECTED/> and nothing else."
+					description, err = generateOllamaResponse("dex-vision-model", prompt, []string{base64Img})
 					if err != nil {
 						log.Printf("Vision model failed for %s: %v", filename, err)
 						continue
+					}
+
+					// Check for explicit content tag
+					if strings.Contains(description, "<EXPLICIT_CONTENT_DETECTED/>") {
+						log.Printf("EXPLICIT CONTENT DETECTED in %s. Deleting message...", filename)
+
+						// Delete the message
+						messageID, _ := input.EventData["message_id"].(string)
+						if messageID != "" {
+							if err := deleteMessage(channelID, messageID); err != nil {
+								log.Printf("Failed to delete explicit message: %v", err)
+							} else {
+								log.Printf("Successfully deleted explicit message %s", messageID)
+							}
+						}
+
+						// Emit moderation event
+						modEvent := map[string]interface{}{
+							"type":         types.EventTypeModerationExplicitContentDeleted,
+							"source":       "dex-event-service",
+							"user_id":      userID,
+							"user_name":    input.EventData["user_name"],
+							"channel_id":   channelID,
+							"channel_name": input.EventData["channel_name"],
+							"server_id":    input.EventData["server_id"],
+							"server_name":  input.EventData["server_name"],
+							"timestamp":    time.Now().Format(time.RFC3339), // Use string format for validation
+							"message_id":   messageID,
+							"reason":       "Explicit content detected in attachment: " + filename,
+							"handler":      "public-message-handler",
+							"raw_output":   description,
+						}
+						if err := emitEvent(modEvent); err != nil {
+							log.Printf("Failed to emit moderation event: %v", err)
+						}
+
+						// Stop processing immediately
+						// Return success to ack the event processing
+						output := types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}
+						outputBytes, _ := json.Marshal(output)
+						fmt.Println(string(outputBytes))
+						return
 					}
 
 					// Cache the result

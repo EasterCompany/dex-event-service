@@ -167,8 +167,8 @@ func TestGetTemplateList(t *testing.T) {
 	// Need to import types to use the constants
 	eventTypes := GetTemplateList()
 
-	if len(eventTypes) != 24 {
-		t.Errorf("Expected 24 event types, got %d", len(eventTypes))
+	if len(eventTypes) != 25 {
+		t.Errorf("Expected 25 event types, got %d", len(eventTypes))
 	}
 
 	expectedTypes := map[string]bool{
@@ -183,19 +183,20 @@ func TestGetTemplateList(t *testing.T) {
 		"voice_transcribed":      true,
 		"engagement.decision":    true,
 		"bot_response":           true,
-		string(types.EventTypeMessagingUserJoinedVoice):     true,
-		string(types.EventTypeMessagingUserLeftVoice):       true,
-		string(types.EventTypeMessagingUserSentMessage):     true,
-		string(types.EventTypeMessagingBotSentMessage):      true,
-		string(types.EventTypeMessagingBotStatusUpdate):     true,
-		string(types.EventTypeMessagingUserSpeakingStarted): true,
-		string(types.EventTypeMessagingUserSpeakingStopped): true,
-		string(types.EventTypeMessagingUserTranscribed):     true,
-		string(types.EventTypeMessagingUserJoinedServer):    true,
-		"messaging.bot.joined_voice":                        true,
-		string(types.EventTypeMessagingBotVoiceResponse):    true,
-		string(types.EventTypeMessagingWebhookMessage):      true,
-		"webhook.processed":                                 true,
+		string(types.EventTypeMessagingUserJoinedVoice):         true,
+		string(types.EventTypeMessagingUserLeftVoice):           true,
+		string(types.EventTypeMessagingUserSentMessage):         true,
+		string(types.EventTypeMessagingBotSentMessage):          true,
+		string(types.EventTypeMessagingBotStatusUpdate):         true,
+		string(types.EventTypeMessagingUserSpeakingStarted):     true,
+		string(types.EventTypeMessagingUserSpeakingStopped):     true,
+		string(types.EventTypeMessagingUserTranscribed):         true,
+		string(types.EventTypeMessagingUserJoinedServer):        true,
+		"messaging.bot.joined_voice":                            true,
+		string(types.EventTypeMessagingBotVoiceResponse):        true,
+		string(types.EventTypeMessagingWebhookMessage):          true,
+		"webhook.processed":                                     true,
+		string(types.EventTypeModerationExplicitContentDeleted): true,
 	}
 
 	for _, typeName := range eventTypes {

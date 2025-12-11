@@ -563,6 +563,26 @@ func GetTemplates() map[string]EventTemplate {
 			},
 		},
 
+		string(types.EventTypeModerationExplicitContentDeleted): {
+			Description: "A message was deleted due to explicit content",
+			Format:      "Explicit content deleted in {channel_name} from {user_name}: {reason}",
+			Fields: map[string]FieldSpec{
+				"type":         {Type: "string", Required: true},
+				"source":       {Type: "string", Required: true},
+				"user_id":      {Type: "string", Required: true},
+				"user_name":    {Type: "string", Required: true},
+				"channel_id":   {Type: "string", Required: true},
+				"channel_name": {Type: "string", Required: true},
+				"server_id":    {Type: "string", Required: true},
+				"server_name":  {Type: "string", Required: false},
+				"timestamp":    {Type: "string", Required: true},
+				"message_id":   {Type: "string", Required: true},
+				"reason":       {Type: "string", Required: true},
+				"handler":      {Type: "string", Required: true},
+				"raw_output":   {Type: "string", Required: false}, // Model output that triggered it
+			},
+		},
+
 		// END NEW MESSAGING EVENTS
 
 		"voice_speaking_started": {
