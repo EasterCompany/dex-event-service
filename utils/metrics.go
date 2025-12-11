@@ -45,29 +45,10 @@ func getCPUUsage() float64 {
 	return cpuPercent
 }
 
-// getMemoryUsage calculates memory usage percentage
+// getMemoryUsage returns memory usage in Megabytes (MB)
 func getMemoryUsage() float64 {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-
-	// Get allocated memory in bytes
-	allocMB := float64(m.Alloc) / 1024 / 1024
-
-	// Estimate total available memory (this is simplified)
-	// For production, you'd want to read from /proc/meminfo on Linux
-	// For now, use system memory if available, otherwise estimate based on allocations
-	totalMB := float64(m.Sys) / 1024 / 1024
-
-	if totalMB == 0 {
-		return 0
-	}
-
-	memPercent := (allocMB / totalMB) * 100
-
-	// Cap at 100%
-	if memPercent > 100 {
-		memPercent = 100
-	}
-
-	return memPercent
+	// Return total system memory obtained from the OS in MB
+	return float64(m.Sys) / 1024.0 / 1024.0
 }
