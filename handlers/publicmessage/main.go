@@ -525,6 +525,18 @@ func main() {
 					linkContext += fmt.Sprintf(" - Description: %s", meta.Description)
 				}
 				linkContext += "]"
+
+				// Emit child event for link analysis
+				linkEvent := map[string]interface{}{
+					"type":            types.EventTypeAnalysisLinkCompleted,
+					"parent_event_id": input.EventID,
+					"handler":         "public-message-handler",
+					"url":             foundURL,
+					"title":           meta.Title,
+					"description":     meta.Description,
+					"timestamp":       time.Now().Unix(),
+				}
+				_ = emitEvent(linkEvent)
 			}
 
 			if meta.ImageURL != "" {

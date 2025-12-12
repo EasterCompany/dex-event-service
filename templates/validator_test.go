@@ -167,9 +167,9 @@ func TestGetTemplateList(t *testing.T) {
 	// Need to import types to use the constants
 	eventTypes := GetTemplateList()
 
-	if len(eventTypes) != 25 {
+	if len(eventTypes) != 27 {
 
-		t.Errorf("Expected 25 event types, got %d", len(eventTypes))
+		t.Errorf("Expected 27 event types, got %d", len(eventTypes))
 
 	}
 
@@ -224,6 +224,10 @@ func TestGetTemplateList(t *testing.T) {
 		"webhook.processed": true,
 
 		string(types.EventTypeModerationExplicitContentDeleted): true,
+
+		string(types.EventTypeAnalysisVisualCompleted): true,
+
+		string(types.EventTypeAnalysisLinkCompleted): true,
 	}
 
 	for _, typeName := range eventTypes {

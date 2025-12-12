@@ -583,6 +583,33 @@ func GetTemplates() map[string]EventTemplate {
 			},
 		},
 
+		string(types.EventTypeAnalysisVisualCompleted): {
+			Description: "Visual analysis of an attachment is completed",
+			Format:      "Analyzed image {filename}: {description}",
+			Fields: map[string]FieldSpec{
+				"type":            {Type: "string", Required: true},
+				"parent_event_id": {Type: "string", Required: true},
+				"handler":         {Type: "string", Required: true},
+				"filename":        {Type: "string", Required: true},
+				"description":     {Type: "string", Required: true},
+				"timestamp":       {Type: "number", Required: true},
+			},
+		},
+
+		string(types.EventTypeAnalysisLinkCompleted): {
+			Description: "Link analysis/unfurling is completed",
+			Format:      "Analyzed link {url}: {title} - {description}",
+			Fields: map[string]FieldSpec{
+				"type":            {Type: "string", Required: true},
+				"parent_event_id": {Type: "string", Required: true},
+				"handler":         {Type: "string", Required: true},
+				"url":             {Type: "string", Required: true},
+				"title":           {Type: "string", Required: false},
+				"description":     {Type: "string", Required: false},
+				"timestamp":       {Type: "number", Required: true},
+			},
+		},
+
 		// END NEW MESSAGING EVENTS
 
 		"voice_speaking_started": {

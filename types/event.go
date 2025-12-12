@@ -36,6 +36,10 @@ const (
 	// Moderation Events
 	EventTypeModerationExplicitContentDeleted EventType = "moderation.explicit_content.deleted"
 
+	// Analysis Events
+	EventTypeAnalysisVisualCompleted EventType = "analysis.visual.completed"
+	EventTypeAnalysisLinkCompleted   EventType = "analysis.link.completed"
+
 	// System Events
 	EventTypeSystemStatusChange EventType = "system.status.change"
 )
