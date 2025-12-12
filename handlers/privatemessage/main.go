@@ -196,6 +196,7 @@ type MetadataResponse struct {
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
 	ImageURL    string `json:"image_url,omitempty"`
+	Content     string `json:"content,omitempty"`
 	ContentType string `json:"content_type,omitempty"`
 	Provider    string `json:"provider,omitempty"`
 	Error       string `json:"error,omitempty"`
@@ -460,13 +461,29 @@ func main() {
 			}
 
 			// Build textual context
-			if meta.Title != "" || meta.Description != "" {
+			var summary string
+			if meta.Content != "" {
+				// Summarize content
+				// Truncate content if too long to avoid context window issues
+				contentToSummarize := meta.Content
+				if len(contentToSummarize) > 12000 {
+					contentToSummarize = contentToSummarize[:12000]
+				}
+
+				summary, _ = generateOllamaResponse("dex-scraper-model", contentToSummarize, nil)
+				summary = strings.TrimSpace(summary)
+			}
+
+			if meta.Title != "" || meta.Description != "" || summary != "" {
 				linkContext += fmt.Sprintf("\n[Link: %s", foundURL)
 				if meta.Title != "" {
 					linkContext += fmt.Sprintf(" - Title: %s", meta.Title)
 				}
 				if meta.Description != "" {
 					linkContext += fmt.Sprintf(" - Description: %s", meta.Description)
+				}
+				if summary != "" {
+					linkContext += fmt.Sprintf("\n - Content Summary: %s", summary)
 				}
 				linkContext += "]"
 
@@ -478,6 +495,7 @@ func main() {
 					"url":             foundURL,
 					"title":           meta.Title,
 					"description":     meta.Description,
+					"summary":         summary,
 					"timestamp":       time.Now().Unix(),
 					"channel_id":      channelID,
 					"user_id":         userID,

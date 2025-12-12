@@ -609,6 +609,7 @@ func GetTemplates() map[string]EventTemplate {
 				"url":             {Type: "string", Required: true},
 				"title":           {Type: "string", Required: false},
 				"description":     {Type: "string", Required: false},
+				"summary":         {Type: "string", Required: false},
 				"timestamp":       {Type: "number", Required: true},
 				"channel_id":      {Type: "string", Required: true},
 				"user_id":         {Type: "string", Required: true},
