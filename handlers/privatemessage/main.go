@@ -333,41 +333,6 @@ func fetchMetadata(linkURL string) (*MetadataResponse, error) {
 	return &metaResp, nil
 }
 
-func deleteMessage(channelID, messageID string) error {
-	serviceURL := getDiscordServiceURL()
-	reqBody := map[string]string{
-		"channel_id": channelID,
-		"message_id": messageID,
-	}
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest(http.MethodDelete, serviceURL+"/message/delete", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			log.Printf("Error closing delete response body: %v", err)
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
-	}
-	return nil
-}
-
 func fetchContext(channelID string) (string, error) {
 	if channelID == "" {
 		return "", nil
@@ -395,33 +360,6 @@ func fetchContext(channelID string) (string, error) {
 
 	return string(body), nil
 }
-
-/*
-func getLatestMessageID(channelID string) (string, error) {
-	serviceURL := getDiscordServiceURL()
-	url := fmt.Sprintf("%s/channel/latest?channel_id=%s", serviceURL, channelID)
-
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("X-Service-Name", "dex-event-service")
-
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("status %d", resp.StatusCode)
-	}
-
-	var result map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
-	}
-	return result["last_message_id"], nil
-}
-*/
 
 func reportProcessStatus(channelID, state string, retryCount int, startTime time.Time) {
 	if redisClient == nil {
@@ -719,72 +657,42 @@ func main() {
 
 					}
 
-					// Check for explicit content tag
-					if strings.Contains(description, "<EXPLICIT_CONTENT_DETECTED/>") {
-						log.Printf("EXPLICIT CONTENT DETECTED in %s. Deleting message...", filename)
-
-						// Delete the message
-						messageID, _ := input.EventData["message_id"].(string)
-						if messageID != "" {
-							if err := deleteMessage(channelID, messageID); err != nil {
-								log.Printf("Failed to delete explicit message: %v", err)
-							} else {
-								log.Printf("Successfully deleted explicit message %s", messageID)
-							}
-						}
-
-						// Emit moderation event
-						modEvent := map[string]interface{}{
-							"type":         types.EventTypeModerationExplicitContentDeleted,
-							"source":       "dex-event-service",
-							"user_id":      userID,
-							"user_name":    input.EventData["user_name"],
-							"channel_id":   channelID,
-							"channel_name": input.EventData["channel_name"],
-							"server_id":    input.EventData["server_id"],
-							"server_name":  input.EventData["server_name"],
-							"timestamp":    time.Now().Format(time.RFC3339), // Use string format for validation
-							"message_id":   messageID,
-							"reason":       "Explicit content detected in attachment: " + filename,
-							"handler":      "public-message-handler",
-							"raw_output":   description,
-						}
-						if err := emitEvent(modEvent); err != nil {
-							log.Printf("Failed to emit moderation event: %v", err)
-						}
-
-						// Stop processing immediately
-						// Return success to ack the event processing
-						output := types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}
-						outputBytes, _ := json.Marshal(output)
-						fmt.Println(string(outputBytes))
-						return
-					}
-
 					// Cache the result
+
 					if redisClient != nil {
-					edisClient.Set(context.Background(), cacheKey, description, 24*time.Hour)
+
+						redisClient.Set(context.Background(), cacheKey, description, 24*time.Hour)
+
 					}
+
 				}
 
 				log.Printf("Visual description for %s: %s", filename, description)
+
 				visualContext += fmt.Sprintf("\n[Attachment: %s (Image) - Description: %s]", filename, description)
 
 				// Emit child event for analysis
+
 				analysisEvent := map[string]interface{}{
-					"type":            "analysis.visual.completed",
+
+					"type": "analysis.visual.completed",
+
 					"parent_event_id": input.EventID,
-					"handler":         "public-message-handler",
-					"filename":        filename,
-					"description":     description,
-					"timestamp":       time.Now().Unix(),
-					"channel_id":      channelID,
-					"user_id":         userID,
-					"server_id":       input.EventData["server_id"],
+
+					"handler": "private-message-handler",
+
+					"filename": filename,
+
+					"description": description,
+
+					"timestamp":  time.Now().Unix(),
+					"channel_id": channelID,
+					"user_id":    userID,
+					"server_id":  input.EventData["server_id"],
 				}
-				if err := emitEvent(analysisEvent); err != nil {
-					log.Printf("Warning: Failed to emit visual event: %v", err)
-				}
+
+				_ = emitEvent(analysisEvent)
+
 			}
 
 		}
@@ -844,7 +752,7 @@ func main() {
 
 						// Refresh the lock TTL to keep other handlers away while we work
 						if redisClient != nil {
-						edisClient.Expire(context.Background(), lockKey, 60*time.Second)
+							redisClient.Expire(context.Background(), lockKey, 60*time.Second)
 						}
 
 		            // Get the ID of the very last message in the channel (from Discord's perspective)
@@ -891,7 +799,7 @@ func main() {
 		reportProcessStatus(channelID, "Generating Response", retryCount, startTime)
 
 		if redisClient != nil {
-		edisClient.Expire(context.Background(), lockKey, 60*time.Second)
+			redisClient.Expire(context.Background(), lockKey, 60*time.Second)
 		}
 
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
@@ -915,7 +823,7 @@ func main() {
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
 			// Try to send a failure message instead of nothing?
-			completeStream(channelID, streamMessageID, "Error: I couldn\'t generate a response. Please try again later.")
+			completeStream(channelID, streamMessageID, "Error: I couldn't generate a response. Please try again later.")
 			return // Exit handler on critical generation error
 		}
 
