@@ -6,6 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif" // Register GIF decoder
+	"image/jpeg"
+	_ "image/png" // Register PNG decoder
 	"io"
 	"log"
 	"net/http"
@@ -69,7 +73,7 @@ func generateOllamaResponse(model, prompt string, images []string) (string, erro
 	return response.Response, nil
 }
 
-func downloadImageAsBase64(url string) (string, error) {
+func downloadImageAndConvertToJPEG(url string) (string, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", err
@@ -80,12 +84,19 @@ func downloadImageAsBase64(url string) (string, error) {
 		return "", fmt.Errorf("failed to download image: status %d", resp.StatusCode)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	// Decode the image (handles GIF, JPEG, PNG automatically if registered)
+	img, _, err := image.Decode(resp.Body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to decode image: %v", err)
 	}
 
-	return base64.StdEncoding.EncodeToString(data), nil
+	// Encode as JPEG
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 80}); err != nil {
+		return "", fmt.Errorf("failed to encode as jpeg: %v", err)
+	}
+
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }
 
 // ServiceMap minimal structure for reading port
@@ -602,7 +613,7 @@ func main() {
 
 				if description == "" {
 					log.Printf("Downloading image: %s", filename)
-					base64Img, err := downloadImageAsBase64(url)
+					base64Img, err := downloadImageAndConvertToJPEG(url)
 					if err != nil {
 						log.Printf("Failed to download image %s: %v", filename, err)
 						continue
