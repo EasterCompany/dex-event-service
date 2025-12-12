@@ -333,6 +333,41 @@ func fetchMetadata(linkURL string) (*MetadataResponse, error) {
 	return &metaResp, nil
 }
 
+func deleteMessage(channelID, messageID string) error {
+	serviceURL := getDiscordServiceURL()
+	reqBody := map[string]string{
+		"channel_id": channelID,
+		"message_id": messageID,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, serviceURL+"/message/delete", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing delete response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
 func fetchContext(channelID string) (string, error) {
 	if channelID == "" {
 		return "", nil
@@ -360,6 +395,85 @@ func fetchContext(channelID string) (string, error) {
 
 	return string(body), nil
 }
+
+type UserContext struct {
+	Username string `json:"username"`
+	Status   string `json:"status"`
+	Activity string `json:"activity"`
+}
+
+type ChannelContextResponse struct {
+	ChannelName string        `json:"channel_name"`
+	GuildName   string        `json:"guild_name"`
+	Users       []UserContext `json:"users"`
+}
+
+func fetchChannelMembers(channelID string) (string, error) {
+	if channelID == "" {
+		return "", nil
+	}
+	serviceURL := getDiscordServiceURL()
+	url := fmt.Sprintf("%s/context/channel?channel_id=%s", serviceURL, channelID)
+
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("X-Service-Name", "dex-event-service")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	var ctxResp ChannelContextResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ctxResp); err != nil {
+		return "", err
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Channel Context (%s in %s):\n", ctxResp.ChannelName, ctxResp.GuildName))
+	sb.WriteString("Active Users:\n")
+	for _, u := range ctxResp.Users {
+		statusLine := fmt.Sprintf("- %s: %s", u.Username, u.Status)
+		if u.Activity != "" {
+			statusLine += fmt.Sprintf(" (%s)", u.Activity)
+		}
+		sb.WriteString(statusLine + "\n")
+	}
+
+	return sb.String(), nil
+}
+
+/*
+func getLatestMessageID(channelID string) (string, error) {
+	serviceURL := getDiscordServiceURL()
+	url := fmt.Sprintf("%s/channel/latest?channel_id=%s", serviceURL, channelID)
+
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("X-Service-Name", "dex-event-service")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	return result["last_message_id"], nil
+}
+*/
 
 func reportProcessStatus(channelID, state string, retryCount int, startTime time.Time) {
 	if redisClient == nil {
@@ -518,7 +632,7 @@ func main() {
 				linkEvent := map[string]interface{}{
 					"type":            types.EventTypeAnalysisLinkCompleted,
 					"parent_event_id": input.EventID,
-					"handler":         "public-message-handler",
+					"handler":         "private-message-handler",
 					"url":             foundURL,
 					"title":           meta.Title,
 					"description":     meta.Description,
@@ -577,6 +691,7 @@ func main() {
 	if redisClient != nil {
 		// Use SetNX to acquire lock. If false, someone else has it.
 		// We set a 60s TTL to prevent deadlocks if the handler crashes.
+		// Note: If this is the VERY SAME handler restarting? No, handlers are new processes.
 		locked, err := redisClient.SetNX(context.Background(), lockKey, "1", 60*time.Second).Result()
 		if err == nil && !locked {
 			log.Printf("Channel %s is already being processed by another handler. Exiting to allow aggregation.", channelID)
@@ -657,42 +772,78 @@ func main() {
 
 					}
 
-					// Cache the result
+					// Check for explicit content tag
+					if strings.Contains(description, "<EXPLICIT_CONTENT_DETECTED/>") {
+						log.Printf("EXPLICIT CONTENT DETECTED in %s. Deleting message...", filename)
 
-					if redisClient != nil {
+						// Delete the message
+						messageID, _ := input.EventData["message_id"].(string)
+						if messageID != "" {
+							if err := deleteMessage(channelID, messageID); err != nil {
+								log.Printf("Failed to delete explicit message: %v", err)
+							} else {
+								log.Printf("Successfully deleted explicit message %s", messageID)
+							}
+						}
 
-						redisClient.Set(context.Background(), cacheKey, description, 24*time.Hour)
+						// Emit moderation event
+						modEvent := map[string]interface{}{
+							"type":         types.EventTypeModerationExplicitContentDeleted,
+							"source":       "dex-event-service",
+							"user_id":      userID,
+							"user_name":    input.EventData["user_name"],
+							"channel_id":   channelID,
+							"channel_name": input.EventData["channel_name"],
+							"server_id":    input.EventData["server_id"],
+							"server_name":  input.EventData["server_name"],
+							"timestamp":    time.Now().Format(time.RFC3339), // Use string format for validation
+							"message_id":   messageID,
+							"reason":       "Explicit content detected in attachment: " + filename,
+							"handler":      "public-message-handler",
+							"raw_output":   description,
+						}
+						if err := emitEvent(modEvent); err != nil {
+							log.Printf("Failed to emit moderation event: %v", err)
+						}
 
+						// Stop processing immediately
+						// Return success to ack the event processing
+						output := types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}
+						outputBytes, _ := json.Marshal(output)
+						fmt.Println(string(outputBytes))
+						return
 					}
 
+					// Cache the result
+					if redisClient != nil {
+					edisClient.Set(context.Background(), cacheKey, description, 24*time.Hour)
+					}
 				}
 
 				log.Printf("Visual description for %s: %s", filename, description)
-
 				visualContext += fmt.Sprintf("\n[Attachment: %s (Image) - Description: %s]", filename, description)
 
 				// Emit child event for analysis
-
 				analysisEvent := map[string]interface{}{
 
-					"type": "analysis.visual.completed",
+					"type":            "analysis.visual.completed",
 
 					"parent_event_id": input.EventID,
 
-					"handler": "private-message-handler",
+					"handler":         "public-message-handler",
 
-					"filename": filename,
+					"filename":        filename,
 
-					"description": description,
+					"description":     description,
 
-					"timestamp":  time.Now().Unix(),
-					"channel_id": channelID,
-					"user_id":    userID,
-					"server_id":  input.EventData["server_id"],
+					"timestamp":       time.Now().Unix(),
+					"channel_id":      channelID,
+					"user_id":         userID,
+					"server_id":       input.EventData["server_id"],
 				}
-
-				_ = emitEvent(analysisEvent)
-
+				if err := emitEvent(analysisEvent); err != nil {
+					log.Printf("Warning: Failed to emit visual event: %v", err)
+				}
 			}
 
 		}
@@ -752,44 +903,13 @@ func main() {
 
 						// Refresh the lock TTL to keep other handlers away while we work
 						if redisClient != nil {
-							redisClient.Expire(context.Background(), lockKey, 60*time.Second)
+						edisClient.Expire(context.Background(), lockKey, 60*time.Second)
 						}
 
 		            // Get the ID of the very last message in the channel (from Discord's perspective)
-		            discordLatestID, err := getLatestMessageID(channelID)
-		            if err != nil {
-		                log.Printf("Warning: Failed to get latest Discord message ID for aggregation: %v", err)
-		                // Proceed, but without perfect aggregation info
-		            }
+		            // discordLatestID, err := getLatestMessageID(channelID)
 
-		            // Decide if we need to re-fetch context
-		            needsContextRefresh := false
-		            if retryCount == 0 && discordLatestID != "" && discordLatestID != input.EventData["message_id"] {
-		                needsContextRefresh = true
-		            } else if retryCount > 0 { // Always refresh if we are already in a retry loop
-		                needsContextRefresh = true
-		            }
-
-		            if needsContextRefresh {
-		                log.Printf("Refreshing context for aggregation (Attempt %d)...", retryCount)
-		                newContext, err := fetchContext(channelID)
-		                if err == nil {
-		                    contextHistory = newContext
-		                    if channelMembers != "" {
-		                        contextHistory += "\n\n" + channelMembers
-		                    }
-		                }
-		                retryCount++
-		                if retryCount <= 3 { // maxRetries
-		                    // Give a small moment for Discord/Event service to settle if messages are spamming
-		                    time.Sleep(500 * time.Millisecond)
-		                    continue // Loop again to check if more messages arrived during this refresh
-		                } else {
-		                    log.Printf("Max aggregation retries reached. Generating response with current context.")
-		                }
-		            }
-		            // If we reached here, context is as fresh as we're going to get it, or max retries hit.
-		            break // Exit aggregation loop and proceed to generation
+		            // ...
 					}
 		*/
 
@@ -799,7 +919,7 @@ func main() {
 		reportProcessStatus(channelID, "Generating Response", retryCount, startTime)
 
 		if redisClient != nil {
-			redisClient.Expire(context.Background(), lockKey, 60*time.Second)
+		edisClient.Expire(context.Background(), lockKey, 60*time.Second)
 		}
 
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
