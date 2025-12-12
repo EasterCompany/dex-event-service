@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/types"
+	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -157,7 +158,7 @@ func updateStream(channelID, messageID, content string) {
 		"content":    content,
 	}
 	jsonData, _ := json.Marshal(reqBody)
-	// Fire and forget (errors logged in discord service or ignored for performance)
+	// Fire and forget
 	go func() {
 		_, _ = http.Post(serviceURL+"/message/stream/update", "application/json", bytes.NewBuffer(jsonData))
 	}()
@@ -222,12 +223,6 @@ func getRedisClient() (*redis.Client, error) {
 		return nil, err
 	}
 
-	// Basic lookup for local-cache-0 in 'os' category (common location)
-	// The ServiceMap struct here is minimal, it might not capture 'os' key if it's map[string][]...
-	// ServiceMap struct definition in this file is:
-	// Services map[string][]struct { ... }
-	// So it matches.
-
 	for _, service := range sm.Services["os"] {
 		if service.ID == "local-cache-0" {
 			return redis.NewClient(&redis.Options{
@@ -239,7 +234,6 @@ func getRedisClient() (*redis.Client, error) {
 }
 
 func getDiscordServiceURL() string {
-	// Try to read service-map.json
 	homeDir, _ := os.UserHomeDir()
 	mapPath := filepath.Join(homeDir, "Dexter", "config", "service-map.json")
 
@@ -247,18 +241,17 @@ func getDiscordServiceURL() string {
 	if err == nil {
 		var sm ServiceMap
 		if err := json.Unmarshal(data, &sm); err == nil {
-			for _, service := range sm.Services["th"] { // Discord is usually 'th' (Third Party?) or 'cs'
+			for _, service := range sm.Services["th"] {
 				if service.ID == "dex-discord-service" {
 					return fmt.Sprintf("http://localhost:%s", service.Port)
 				}
 			}
 		}
 	}
-	return "http://localhost:8081" // Fallback
+	return "http://localhost:8081"
 }
 
 func getEventServiceURL() string {
-	// Try to read service-map.json
 	homeDir, _ := os.UserHomeDir()
 	mapPath := filepath.Join(homeDir, "Dexter", "config", "service-map.json")
 
@@ -266,7 +259,6 @@ func getEventServiceURL() string {
 	if err == nil {
 		var sm ServiceMap
 		if err := json.Unmarshal(data, &sm); err == nil {
-			// Check all categories
 			for _, cat := range sm.Services {
 				for _, service := range cat {
 					if service.ID == "dex-event-service" {
@@ -276,11 +268,10 @@ func getEventServiceURL() string {
 			}
 		}
 	}
-	return "http://localhost:8082" // Fallback
+	return "http://localhost:8082"
 }
 
 func getWebServiceURL() string {
-	// Try to read service-map.json
 	homeDir, _ := os.UserHomeDir()
 	mapPath := filepath.Join(homeDir, "Dexter", "config", "service-map.json")
 
@@ -288,14 +279,14 @@ func getWebServiceURL() string {
 	if err == nil {
 		var sm ServiceMap
 		if err := json.Unmarshal(data, &sm); err == nil {
-			for _, service := range sm.Services["be"] { // dex-web-service is a Backend Service
+			for _, service := range sm.Services["be"] {
 				if service.ID == "dex-web-service" {
 					return fmt.Sprintf("http://localhost:%s", service.Port)
 				}
 			}
 		}
 	}
-	return "http://localhost:8201" // Fallback
+	return "http://localhost:8201"
 }
 
 type MetadataResponse struct {
@@ -397,6 +388,7 @@ func fetchContext(channelID string) (string, error) {
 }
 
 type UserContext struct {
+	ID       string `json:"id"`
 	Username string `json:"username"`
 	Status   string `json:"status"`
 	Activity string `json:"activity"`
@@ -408,9 +400,9 @@ type ChannelContextResponse struct {
 	Users       []UserContext `json:"users"`
 }
 
-func fetchChannelMembers(channelID string) (string, error) {
+func fetchChannelMembers(channelID string) ([]UserContext, string, error) {
 	if channelID == "" {
-		return "", nil
+		return nil, "", nil
 	}
 	serviceURL := getDiscordServiceURL()
 	url := fmt.Sprintf("%s/context/channel?channel_id=%s", serviceURL, channelID)
@@ -421,17 +413,17 @@ func fetchChannelMembers(channelID string) (string, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("status %d", resp.StatusCode)
+		return nil, "", fmt.Errorf("status %d", resp.StatusCode)
 	}
 
 	var ctxResp ChannelContextResponse
 	if err := json.NewDecoder(resp.Body).Decode(&ctxResp); err != nil {
-		return "", err
+		return nil, "", err
 	}
 
 	var sb strings.Builder
@@ -445,7 +437,7 @@ func fetchChannelMembers(channelID string) (string, error) {
 		sb.WriteString(statusLine + "\n")
 	}
 
-	return sb.String(), nil
+	return ctxResp.Users, sb.String(), nil
 }
 
 /*
@@ -549,7 +541,6 @@ func emitEvent(eventData map[string]interface{}) error {
 }
 
 func main() {
-	// Initialize Redis
 	var err error
 	redisClient, err = getRedisClient()
 	if err != nil {
@@ -558,7 +549,6 @@ func main() {
 		defer func() { _ = redisClient.Close() }()
 	}
 
-	// Read HandlerInput from stdin
 	inputBytes, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		log.Fatalf("Error reading stdin: %v", err)
@@ -574,7 +564,6 @@ func main() {
 	userID, _ := input.EventData["user_id"].(string)
 	mentionedBot, _ := input.EventData["mentioned_bot"].(bool)
 
-	// Process attachments
 	var attachments []map[string]interface{}
 	if att, ok := input.EventData["attachments"].([]interface{}); ok {
 		for _, a := range att {
@@ -584,7 +573,6 @@ func main() {
 		}
 	}
 
-	// Link Expansion: Extract URLs from content and fetch metadata
 	urlRegex := `(https?://[^\s]+)`
 	re := regexp.MustCompile(urlRegex)
 	foundURLs := re.FindAllString(content, -1)
@@ -601,16 +589,12 @@ func main() {
 				continue
 			}
 
-			// Build textual context
 			var summary string
 			if meta.Content != "" {
-				// Summarize content
-				// Truncate content if too long to avoid context window issues (e.g. 12000 chars)
 				contentToSummarize := meta.Content
 				if len(contentToSummarize) > 12000 {
 					contentToSummarize = contentToSummarize[:12000]
 				}
-
 				summary, _ = generateOllamaResponse("dex-scraper-model", contentToSummarize, nil)
 				summary = strings.TrimSpace(summary)
 			}
@@ -628,7 +612,6 @@ func main() {
 				}
 				linkContext += "]"
 
-				// Emit child event for link analysis
 				linkEvent := map[string]interface{}{
 					"type":            types.EventTypeAnalysisLinkCompleted,
 					"parent_event_id": input.EventID,
@@ -649,13 +632,12 @@ func main() {
 
 			if meta.ImageURL != "" {
 				log.Printf("Expanded URL %s to image: %s (Type: %s)", foundURL, meta.ImageURL, meta.ContentType)
-				// Add as a "virtual" attachment for visual analysis
 				attachments = append(attachments, map[string]interface{}{
-					"id":           "virtual_" + foundURL, // Unique ID for caching
+					"id":           "virtual_" + foundURL,
 					"url":          meta.ImageURL,
 					"content_type": meta.ContentType,
 					"filename":     fmt.Sprintf("link_expansion_%s.%s", meta.Provider, strings.Split(meta.ContentType, "/")[1]),
-					"size":         0, // Size unknown, vision model doesn't care
+					"size":         0,
 					"proxy_url":    "",
 					"height":       0,
 					"width":        0,
@@ -681,21 +663,18 @@ func main() {
 	updateBotStatus("Thinking...", "online", 3)
 	defer updateBotStatus("Listening for events...", "online", 2)
 
-	// --- Visual Analysis Phase ---
 	visualContext := ""
 	if len(attachments) > 0 {
 		for _, att := range attachments {
 			contentType, _ := att["content_type"].(string)
 			url, _ := att["url"].(string)
 			filename, _ := att["filename"].(string)
-			id, _ := att["id"].(string) // Discord Attachment ID
+			id, _ := att["id"].(string)
 
-			// Check if image
 			if strings.HasPrefix(contentType, "image/") {
 				updateBotStatus("Analyzing image...", "online", 3)
 				reportProcessStatus(channelID, fmt.Sprintf("Analyzing Image: %s", filename), 0, startTime)
 
-				// Check Cache
 				var description string
 				cacheKey := fmt.Sprintf("analysis:visual:%s", id)
 				if redisClient != nil {
@@ -721,11 +700,9 @@ func main() {
 						continue
 					}
 
-					// Check for explicit content tag
 					if strings.Contains(description, "<EXPLICIT_CONTENT_DETECTED/>") {
 						log.Printf("EXPLICIT CONTENT DETECTED in %s. Deleting message...", filename)
 
-						// Delete the message
 						messageID, _ := input.EventData["message_id"].(string)
 						if messageID != "" {
 							if err := deleteMessage(channelID, messageID); err != nil {
@@ -735,7 +712,6 @@ func main() {
 							}
 						}
 
-						// Emit moderation event
 						modEvent := map[string]interface{}{
 							"type":         types.EventTypeModerationExplicitContentDeleted,
 							"source":       "dex-event-service",
@@ -745,7 +721,7 @@ func main() {
 							"channel_name": input.EventData["channel_name"],
 							"server_id":    input.EventData["server_id"],
 							"server_name":  input.EventData["server_name"],
-							"timestamp":    time.Now().Format(time.RFC3339), // Use string format for validation
+							"timestamp":    time.Now().Format(time.RFC3339),
 							"message_id":   messageID,
 							"reason":       "Explicit content detected in attachment: " + filename,
 							"handler":      "public-message-handler",
@@ -755,15 +731,12 @@ func main() {
 							log.Printf("Failed to emit moderation event: %v", err)
 						}
 
-						// Stop processing immediately
-						// Return success to ack the event processing
 						output := types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}
 						outputBytes, _ := json.Marshal(output)
 						fmt.Println(string(outputBytes))
 						return
 					}
 
-					// Cache the result
 					if redisClient != nil {
 						redisClient.Set(context.Background(), cacheKey, description, 24*time.Hour)
 					}
@@ -772,7 +745,6 @@ func main() {
 				log.Printf("Visual description for %s: %s", filename, description)
 				visualContext += fmt.Sprintf("\n[Attachment: %s (Image) - Description: %s]", filename, description)
 
-				// Emit child event for analysis
 				analysisEvent := map[string]interface{}{
 					"type":            "analysis.visual.completed",
 					"parent_event_id": input.EventID,
@@ -791,29 +763,20 @@ func main() {
 		}
 	}
 
-	// Append visual context to content for engagement/response models
 	if visualContext != "" {
 		content += visualContext
 	}
 
-	// --- Aggregating Lock Check ---
-	// Check if another handler is already processing this channel.
-	// If so, we exit immediately. The active handler will pick up our message via the aggregation loop.
 	lockKey := fmt.Sprintf("engagement:processing:%s", channelID)
 	if redisClient != nil {
-		// Use SetNX to acquire lock. If false, someone else has it.
-		// We set a 60s TTL to prevent deadlocks if the handler crashes.
-		// Note: If this is the VERY SAME handler restarting? No, handlers are new processes.
 		locked, err := redisClient.SetNX(context.Background(), lockKey, "1", 60*time.Second).Result()
 		if err == nil && !locked {
 			log.Printf("Channel %s is already being processed by another handler. Exiting to allow aggregation.", channelID)
-			// We return success effectively "absorbing" this event into the running process
 			output := types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}
 			outputBytes, _ := json.Marshal(output)
 			fmt.Println(string(outputBytes))
 			return
 		}
-		// Ensure we release the lock when we are done (or if we crash/exit early)
 		defer redisClient.Del(context.Background(), lockKey)
 	}
 
@@ -821,17 +784,31 @@ func main() {
 	engagementReason := "Evaluated by dex-engagement-model"
 	var engagementRaw string
 
-	// Fetch context
 	contextHistory, err := fetchContext(channelID)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch context: %v", err)
 	}
 
-	// Fetch channel members (active users)
-	channelMembers, err := fetchChannelMembers(channelID)
+	// Fetch channel members (active users) and build user map
+	var userMap map[string]string // username -> ID
+	var channelMembers string
+
+	users, membersStr, err := fetchChannelMembers(channelID)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch channel members: %v", err)
-	} else if channelMembers != "" {
+	} else {
+		channelMembers = membersStr
+		userMap = make(map[string]string)
+		for _, u := range users {
+			userMap[u.Username] = u.ID
+		}
+
+		if mentions, ok := input.EventData["mentions"].([]interface{}); ok {
+			content = utils.NormalizeMentions(content, mentions)
+		}
+	}
+
+	if channelMembers != "" {
 		contextHistory += "\n\n" + channelMembers
 	}
 
@@ -840,14 +817,12 @@ func main() {
 		shouldEngage = true
 		engagementReason = "Direct mention"
 	} else {
-		// 1. Check Engagement
 		reportProcessStatus(channelID, "Checking Engagement", 0, startTime)
 		prompt := fmt.Sprintf("Context:\n%s\n\nCurrent Message:\n%s", contextHistory, content)
 		var err error
 		engagementRaw, err = generateOllamaResponse("dex-engagement-model", prompt, nil)
 		if err != nil {
 			log.Printf("Engagement check failed: %v", err)
-			// Fail gracefully, maybe don't engage if model fails
 		} else {
 			engagementDecision := strings.ToUpper(strings.TrimSpace(engagementRaw))
 			shouldEngage = strings.Contains(engagementDecision, "TRUE")
@@ -855,7 +830,6 @@ func main() {
 		}
 	}
 
-	// Construct a child event for engagement decision
 	decisionStr := "FALSE"
 	if shouldEngage {
 		decisionStr = "TRUE"
@@ -876,183 +850,61 @@ func main() {
 		"engagement_raw":   engagementRaw,
 	}
 
-	// Emit decision immediately
 	if err := emitEvent(engagementEventData); err != nil {
 		log.Printf("Failed to emit engagement decision event: %v", err)
 	}
 
-	// 2. Engage if needed (Aggregating Loop)
 	if shouldEngage {
 		retryCount := 0
-		var streamMessageID string // Declare streamMessageID here
+		var streamMessageID string
 
 		// Aggregation loop DISABLED by user request
 		/*
-					for {
-						updateBotStatus("Thinking...", "online", 3)
-						reportProcessStatus(channelID, "Aggregating new messages...", retryCount, startTime)
-
-						// Refresh the lock TTL to keep other handlers away while we work
-						if redisClient != nil {
-							redisClient.Expire(context.Background(), lockKey, 60*time.Second)
-						}
-
-			            // Get the ID of the very last message in the channel (from Discord's perspective)
-			            discordLatestID, err := getLatestMessageID(channelID)
-			            if err != nil {
-			                log.Printf("Warning: Failed to get latest Discord message ID for aggregation: %v", err)
-			                // Proceed, but without perfect aggregation info
-			            }
-
-			            // Get the ID of the last message included in our current contextHistory
-			            // This is messy as contextHistory is a text string, not structured.
-			            // For now, let's assume if discordLatestID is different from the input event's message_id,
-			            // or if we're in a retry, we need to refresh context.
-
-			            // Decide if we need to re-fetch context
-			            needsContextRefresh := false
-			            if retryCount == 0 && discordLatestID != "" && discordLatestID != input.EventData["message_id"] {
-			                needsContextRefresh = true
-			            } else if retryCount > 0 { // Always refresh if we are already in a retry loop
-			                needsContextRefresh = true
-			            }
-
-			            if needsContextRefresh {
-			                log.Printf("Refreshing context for aggregation (Attempt %d)...", retryCount)
-			                newContext, err := fetchContext(channelID)
-			                if err == nil {
-			                    contextHistory = newContext
-			                    if channelMembers != "" {
-			                        contextHistory += "\n\n" + channelMembers
-			                    }
-			                }
-			                retryCount++
-			                if retryCount <= 3 { // maxRetries hardcoded for now in comment
-			                    // Give a small moment for Discord/Event service to settle if messages are spamming
-			                    time.Sleep(500 * time.Millisecond)
-			                    continue // Loop again to check if more messages arrived during this refresh
-			                } else {
-			                    log.Printf("Max aggregation retries reached. Generating response with current context.")
-			                }
-			            }
-			            // If we reached here, context is as fresh as we're going to get it, or max retries hit.
-			            break // Exit aggregation loop and proceed to generation
-					}
+			for {
+				// ... aggregation logic ...
+			}
 		*/
 
-		// POINT OF NO RETURN: Generation starts, cannot be interrupted.
 		updateBotStatus("Typing response...", "online", 0)
 		triggerTyping(channelID)
 		reportProcessStatus(channelID, "Generating Response", retryCount, startTime)
 
-<<<<<<< HEAD
-			// Capture the state of the channel BEFORE we start thinking hard.
-
-			snapshotMessageID, _ := getLatestMessageID(channelID)
-
-			var err error
-
-			responseModel := "dex-public-message-model"
-
-			// Initialize Stream
-
-			streamMessageID, err := initStream(channelID)
-
-			if err != nil {
-
-				log.Printf("Failed to init stream: %v", err)
-
-				break
-
-			}
-
-			fullResponse := ""
-
-			// Stream Generation
-			err = generateOllamaResponseStream(responseModel, prompt, nil, func(chunk string) {
-				fullResponse += chunk
-				updateStream(channelID, streamMessageID, fullResponse)
-			})
-
-			if err != nil {
-				log.Printf("Response generation failed: %v", err)
-				break // Exit loop on error
-			}
-
-			// Finalize Stream
-			completeStream(channelID, streamMessageID, fullResponse)
-			log.Printf("Generated response: %s", fullResponse)
-
-			// Check for interruption (Has the world changed while we were thinking?)
-			currentLatestID, err := getLatestMessageID(channelID)
-			if err == nil && snapshotMessageID != "" && currentLatestID != "" && snapshotMessageID != currentLatestID {
-				if retryCount < maxRetries {
-					log.Printf("INTERRUPTION DETECTED: Snapshot ID %s != Current ID %s. Re-aggregating...", snapshotMessageID, currentLatestID)
-					retryCount++
-					continue // Loop again!
-				} else {
-					log.Printf("Max retries reached. Sending despite interruption.")
-				}
-			}
-
-			// Emit bot message event manually (since streaming bypasses PostHandler event emission)
-			botEventData := map[string]interface{}{
-				"type":           types.EventTypeMessagingBotSentMessage,
-				"source":         "dex-event-service",
-				"user_id":        "dexter", // We don't have the bot's ID easily here, 'dexter' is fine or we fetch it
-				"user_name":      "Dexter",
-				"channel_id":     channelID,
-				"channel_name":   input.EventData["channel_name"],
-				"server_id":      input.EventData["server_id"],
-				"server_name":    input.EventData["server_name"],
-				"message_id":     streamMessageID,
-				"content":        fullResponse,
-				"timestamp":      time.Now().Format(time.RFC3339),
-				"response_model": responseModel,
-				"response_raw":   fullResponse,
-				"raw_input":      prompt,
-			}
-			if err := emitEvent(botEventData); err != nil {
-				log.Printf("Warning: Failed to emit event: %v", err)
-			}
-
-			break // Done!
-=======
 		if redisClient != nil {
 			redisClient.Expire(context.Background(), lockKey, 60*time.Second)
->>>>>>> 606870c (add: streaming and delete message support to private message handler)
 		}
-
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
-
 		responseModel := "dex-public-message-model"
 
-		// Initialize Stream
-		streamMessageID, err = initStream(channelID) // Use already declared err
+		streamMessageID, err = initStream(channelID)
 		if err != nil {
 			log.Printf("Failed to init stream: %v", err)
-			return // Exit handler on critical stream error
+			return
 		}
 
 		fullResponse := ""
-		// Stream Generation
 		err = generateOllamaResponseStream(responseModel, prompt, nil, func(chunk string) {
 			fullResponse += chunk
-			updateStream(channelID, streamMessageID, fullResponse)
+
+			denormalizedResponse := fullResponse
+			if len(userMap) > 0 {
+				denormalizedResponse = utils.DenormalizeMentions(fullResponse, userMap)
+			}
+			updateStream(channelID, streamMessageID, denormalizedResponse)
 		})
 
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
-			// Try to send a failure message instead of nothing?
 			completeStream(channelID, streamMessageID, "Error: I couldn't generate a response. Please try again later.")
-			return // Exit handler on critical generation error
+			return
 		}
 
-		// Finalize Stream
-		completeStream(channelID, streamMessageID, fullResponse)
+		finalResponse := fullResponse
+		if len(userMap) > 0 {
+			finalResponse = utils.DenormalizeMentions(fullResponse, userMap)
+		}
+		completeStream(channelID, streamMessageID, finalResponse)
 		log.Printf("Generated response: %s", fullResponse)
 
-		// Emit bot message event manually (since streaming bypasses PostHandler event emission)
 		botEventData := map[string]interface{}{
 			"type":           types.EventTypeMessagingBotSentMessage,
 			"source":         "dex-event-service",
@@ -1072,18 +924,13 @@ func main() {
 		if err := emitEvent(botEventData); err != nil {
 			log.Printf("Warning: Failed to emit event: %v", err)
 		}
-
-		// The loop breaks after one successful generation attempt
-		// This replaces the old retry logic for interruptions during generation
 	}
 
-	// Construct HandlerOutput
 	output := types.HandlerOutput{
 		Success: true,
 		Events:  []types.HandlerOutputEvent{},
 	}
 
-	// Marshal HandlerOutput to JSON and print to stdout
 	outputBytes, err := json.Marshal(output)
 	if err != nil {
 		log.Fatalf("Error marshaling HandlerOutput: %v", err)

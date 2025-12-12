@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/types"
+	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -397,6 +398,7 @@ func fetchContext(channelID string) (string, error) {
 }
 
 type UserContext struct {
+	ID       string `json:"id"`
 	Username string `json:"username"`
 	Status   string `json:"status"`
 	Activity string `json:"activity"`
@@ -408,9 +410,9 @@ type ChannelContextResponse struct {
 	Users       []UserContext `json:"users"`
 }
 
-func fetchChannelMembers(channelID string) (string, error) {
+func fetchChannelMembers(channelID string) ([]UserContext, string, error) {
 	if channelID == "" {
-		return "", nil
+		return nil, "", nil
 	}
 	serviceURL := getDiscordServiceURL()
 	url := fmt.Sprintf("%s/context/channel?channel_id=%s", serviceURL, channelID)
@@ -421,17 +423,17 @@ func fetchChannelMembers(channelID string) (string, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("status %d", resp.StatusCode)
+		return nil, "", fmt.Errorf("status %d", resp.StatusCode)
 	}
 
 	var ctxResp ChannelContextResponse
 	if err := json.NewDecoder(resp.Body).Decode(&ctxResp); err != nil {
-		return "", err
+		return nil, "", err
 	}
 
 	var sb strings.Builder
@@ -445,7 +447,7 @@ func fetchChannelMembers(channelID string) (string, error) {
 		sb.WriteString(statusLine + "\n")
 	}
 
-	return sb.String(), nil
+	return ctxResp.Users, sb.String(), nil
 }
 
 /*
@@ -572,7 +574,7 @@ func main() {
 	content, _ := input.EventData["content"].(string)
 	channelID, _ := input.EventData["channel_id"].(string)
 	userID, _ := input.EventData["user_id"].(string)
-	mentionedBot, _ := input.EventData["mentioned_bot"].(bool)
+	// mentionedBot, _ := input.EventData["mentioned_bot"].(bool) // Unused in PM
 
 	// Process attachments
 	var attachments []map[string]interface{}
@@ -816,7 +818,7 @@ func main() {
 
 					// Cache the result
 					if redisClient != nil {
-					edisClient.Set(context.Background(), cacheKey, description, 24*time.Hour)
+						redisClient.Set(context.Background(), cacheKey, description, 24*time.Hour)
 					}
 				}
 
@@ -826,20 +828,20 @@ func main() {
 				// Emit child event for analysis
 				analysisEvent := map[string]interface{}{
 
-					"type":            "analysis.visual.completed",
+					"type": "analysis.visual.completed",
 
 					"parent_event_id": input.EventID,
 
-					"handler":         "public-message-handler",
+					"handler": "public-message-handler",
 
-					"filename":        filename,
+					"filename": filename,
 
-					"description":     description,
+					"description": description,
 
-					"timestamp":       time.Now().Unix(),
-					"channel_id":      channelID,
-					"user_id":         userID,
-					"server_id":       input.EventData["server_id"],
+					"timestamp":  time.Now().Unix(),
+					"channel_id": channelID,
+					"user_id":    userID,
+					"server_id":  input.EventData["server_id"],
 				}
 				if err := emitEvent(analysisEvent); err != nil {
 					log.Printf("Warning: Failed to emit visual event: %v", err)
@@ -855,14 +857,30 @@ func main() {
 		content += visualContext
 	}
 
-	// Fetch context
 	contextHistory, err := fetchContext(channelID)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch context: %v", err)
 	}
 
-	// 1. Check Engagement
-	// For Private Messages, we ALWAYS engage.
+	// Fetch channel members (active users) and build user map for DMs too
+	var userMap map[string]string // username -> ID
+	// var channelMembers string // Not used in contextHistory for PM usually, but good for normalization
+
+	users, _, err := fetchChannelMembers(channelID)
+	if err != nil {
+		log.Printf("Warning: Failed to fetch channel members: %v", err)
+	} else {
+		userMap = make(map[string]string)
+		for _, u := range users {
+			userMap[u.Username] = u.ID
+		}
+
+		// Normalize Input Content
+		if mentions, ok := input.EventData["mentions"].([]interface{}); ok {
+			content = utils.NormalizeMentions(content, mentions)
+		}
+	}
+
 	shouldEngage := true
 	engagementDecision := "TRUE"
 	engagementRaw := "Forced engagement for Private Message"
@@ -897,20 +915,20 @@ func main() {
 
 		// Aggregation loop DISABLED by user request
 		/*
-					for {
-						updateBotStatus("Thinking...", "online", 3)
-						reportProcessStatus(channelID, "Aggregating new messages...", retryCount, startTime)
+						for {
+							updateBotStatus("Thinking...", "online", 3)
+							reportProcessStatus(channelID, "Aggregating new messages...", retryCount, startTime)
 
-						// Refresh the lock TTL to keep other handlers away while we work
-						if redisClient != nil {
-						edisClient.Expire(context.Background(), lockKey, 60*time.Second)
+							// Refresh the lock TTL to keep other handlers away while we work
+							if redisClient != nil {
+							edisClient.Expire(context.Background(), lockKey, 60*time.Second)
+							}
+
+			            // Get the ID of the very last message in the channel (from Discord's perspective)
+			            // discordLatestID, err := getLatestMessageID(channelID)
+
+			            // ...
 						}
-
-		            // Get the ID of the very last message in the channel (from Discord's perspective)
-		            // discordLatestID, err := getLatestMessageID(channelID)
-
-		            // ...
-					}
 		*/
 
 		// POINT OF NO RETURN: Generation starts, cannot be interrupted.
@@ -919,7 +937,7 @@ func main() {
 		reportProcessStatus(channelID, "Generating Response", retryCount, startTime)
 
 		if redisClient != nil {
-		edisClient.Expire(context.Background(), lockKey, 60*time.Second)
+			redisClient.Expire(context.Background(), lockKey, 60*time.Second)
 		}
 
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
@@ -937,7 +955,14 @@ func main() {
 		// Stream Generation
 		err = generateOllamaResponseStream(responseModel, prompt, nil, func(chunk string) {
 			fullResponse += chunk
-			updateStream(channelID, streamMessageID, fullResponse)
+
+			// Denormalize output (Replace @Username with <@ID>) before sending to Discord
+			denormalizedResponse := fullResponse
+			if len(userMap) > 0 {
+				denormalizedResponse = utils.DenormalizeMentions(fullResponse, userMap)
+			}
+
+			updateStream(channelID, streamMessageID, denormalizedResponse)
 		})
 
 		if err != nil {
@@ -948,7 +973,11 @@ func main() {
 		}
 
 		// Finalize Stream
-		completeStream(channelID, streamMessageID, fullResponse)
+		finalResponse := fullResponse
+		if len(userMap) > 0 {
+			finalResponse = utils.DenormalizeMentions(fullResponse, userMap)
+		}
+		completeStream(channelID, streamMessageID, finalResponse)
 		log.Printf("Generated response: %s", fullResponse)
 
 		// Emit bot message event manually (since streaming bypasses PostHandler event emission)
