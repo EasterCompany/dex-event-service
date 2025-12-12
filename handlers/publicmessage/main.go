@@ -231,7 +231,7 @@ func getRedisClient() (*redis.Client, error) {
 	for _, service := range sm.Services["os"] {
 		if service.ID == "local-cache-0" {
 			return redis.NewClient(&redis.Options{
-				Addr: fmt.Sprintf("localhost:%s", service.Port), // Assuming localhost for handlers
+				Addr: fmt.Sprintf("localhost:%s", service.Port),
 			}), nil
 		}
 	}
@@ -448,6 +448,7 @@ func fetchChannelMembers(channelID string) (string, error) {
 	return sb.String(), nil
 }
 
+/*
 func getLatestMessageID(channelID string) (string, error) {
 	serviceURL := getDiscordServiceURL()
 	url := fmt.Sprintf("%s/channel/latest?channel_id=%s", serviceURL, channelID)
@@ -472,6 +473,7 @@ func getLatestMessageID(channelID string) (string, error) {
 	}
 	return result["last_message_id"], nil
 }
+*/
 
 func reportProcessStatus(channelID, state string, retryCount int, startTime time.Time) {
 	if redisClient == nil {
@@ -583,7 +585,7 @@ func main() {
 	}
 
 	// Link Expansion: Extract URLs from content and fetch metadata
-	urlRegex := `(https?:\/\/[^\s]+)`
+	urlRegex := `(https?://[^\s]+)`
 	re := regexp.MustCompile(urlRegex)
 	foundURLs := re.FindAllString(content, -1)
 
@@ -640,7 +642,9 @@ func main() {
 					"user_id":         userID,
 					"server_id":       input.EventData["server_id"],
 				}
-				_ = emitEvent(linkEvent)
+				if err := emitEvent(linkEvent); err != nil {
+					log.Printf("Warning: Failed to emit link event: %v", err)
+				}
 			}
 
 			if meta.ImageURL != "" {
@@ -780,7 +784,9 @@ func main() {
 					"user_id":         userID,
 					"server_id":       input.EventData["server_id"],
 				}
-				_ = emitEvent(analysisEvent)
+				if err := emitEvent(analysisEvent); err != nil {
+					log.Printf("Warning: Failed to emit visual event: %v", err)
+				}
 			}
 		}
 	}
@@ -877,38 +883,69 @@ func main() {
 
 	// 2. Engage if needed (Aggregating Loop)
 	if shouldEngage {
-		maxRetries := 3 // Prevent infinite loops
 		retryCount := 0
+		var streamMessageID string // Declare streamMessageID here
 
-		for {
-			updateBotStatus("Typing response...", "online", 0)
-			triggerTyping(channelID)
+		// Aggregation loop DISABLED by user request
+		/*
+					for {
+						updateBotStatus("Thinking...", "online", 3)
+						reportProcessStatus(channelID, "Aggregating new messages...", retryCount, startTime)
 
-			statusMsg := "Generating Response"
-			if retryCount > 0 {
-				statusMsg = fmt.Sprintf("Regenerating (Interruption %d)", retryCount)
-			}
-			reportProcessStatus(channelID, statusMsg, retryCount, startTime)
+						// Refresh the lock TTL to keep other handlers away while we work
+						if redisClient != nil {
+							redisClient.Expire(context.Background(), lockKey, 60*time.Second)
+						}
 
-			// Refresh the lock TTL to keep other handlers away while we work
-			if redisClient != nil {
-				redisClient.Expire(context.Background(), lockKey, 60*time.Second)
-			}
+			            // Get the ID of the very last message in the channel (from Discord's perspective)
+			            discordLatestID, err := getLatestMessageID(channelID)
+			            if err != nil {
+			                log.Printf("Warning: Failed to get latest Discord message ID for aggregation: %v", err)
+			                // Proceed, but without perfect aggregation info
+			            }
 
-			// If this is a retry, we need to refresh context to capture the interruption
-			if retryCount > 0 {
-				log.Printf("Refreshing context for aggregation (Attempt %d)...", retryCount)
-				newContext, err := fetchContext(channelID)
-				if err == nil {
-					contextHistory = newContext
-					if channelMembers != "" {
-						contextHistory += "\n\n" + channelMembers
+			            // Get the ID of the last message included in our current contextHistory
+			            // This is messy as contextHistory is a text string, not structured.
+			            // For now, let's assume if discordLatestID is different from the input event's message_id,
+			            // or if we're in a retry, we need to refresh context.
+
+			            // Decide if we need to re-fetch context
+			            needsContextRefresh := false
+			            if retryCount == 0 && discordLatestID != "" && discordLatestID != input.EventData["message_id"] {
+			                needsContextRefresh = true
+			            } else if retryCount > 0 { // Always refresh if we are already in a retry loop
+			                needsContextRefresh = true
+			            }
+
+			            if needsContextRefresh {
+			                log.Printf("Refreshing context for aggregation (Attempt %d)...", retryCount)
+			                newContext, err := fetchContext(channelID)
+			                if err == nil {
+			                    contextHistory = newContext
+			                    if channelMembers != "" {
+			                        contextHistory += "\n\n" + channelMembers
+			                    }
+			                }
+			                retryCount++
+			                if retryCount <= 3 { // maxRetries hardcoded for now in comment
+			                    // Give a small moment for Discord/Event service to settle if messages are spamming
+			                    time.Sleep(500 * time.Millisecond)
+			                    continue // Loop again to check if more messages arrived during this refresh
+			                } else {
+			                    log.Printf("Max aggregation retries reached. Generating response with current context.")
+			                }
+			            }
+			            // If we reached here, context is as fresh as we're going to get it, or max retries hit.
+			            break // Exit aggregation loop and proceed to generation
 					}
-				}
-			}
+		*/
 
-			prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
+		// POINT OF NO RETURN: Generation starts, cannot be interrupted.
+		updateBotStatus("Typing response...", "online", 0)
+		triggerTyping(channelID)
+		reportProcessStatus(channelID, "Generating Response", retryCount, startTime)
 
+<<<<<<< HEAD
 			// Capture the state of the channel BEFORE we start thinking hard.
 
 			snapshotMessageID, _ := getLatestMessageID(channelID)
@@ -980,7 +1017,64 @@ func main() {
 			}
 
 			break // Done!
+=======
+		if redisClient != nil {
+			redisClient.Expire(context.Background(), lockKey, 60*time.Second)
+>>>>>>> 606870c (add: streaming and delete message support to private message handler)
 		}
+
+		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
+
+		responseModel := "dex-public-message-model"
+
+		// Initialize Stream
+		streamMessageID, err = initStream(channelID) // Use already declared err
+		if err != nil {
+			log.Printf("Failed to init stream: %v", err)
+			return // Exit handler on critical stream error
+		}
+
+		fullResponse := ""
+		// Stream Generation
+		err = generateOllamaResponseStream(responseModel, prompt, nil, func(chunk string) {
+			fullResponse += chunk
+			updateStream(channelID, streamMessageID, fullResponse)
+		})
+
+		if err != nil {
+			log.Printf("Response generation failed: %v", err)
+			// Try to send a failure message instead of nothing?
+			completeStream(channelID, streamMessageID, "Error: I couldn't generate a response. Please try again later.")
+			return // Exit handler on critical generation error
+		}
+
+		// Finalize Stream
+		completeStream(channelID, streamMessageID, fullResponse)
+		log.Printf("Generated response: %s", fullResponse)
+
+		// Emit bot message event manually (since streaming bypasses PostHandler event emission)
+		botEventData := map[string]interface{}{
+			"type":           types.EventTypeMessagingBotSentMessage,
+			"source":         "dex-event-service",
+			"user_id":        "dexter",
+			"user_name":      "Dexter",
+			"channel_id":     channelID,
+			"channel_name":   input.EventData["channel_name"],
+			"server_id":      input.EventData["server_id"],
+			"server_name":    input.EventData["server_name"],
+			"message_id":     streamMessageID,
+			"content":        fullResponse,
+			"timestamp":      time.Now().Format(time.RFC3339),
+			"response_model": responseModel,
+			"response_raw":   fullResponse,
+			"raw_input":      prompt,
+		}
+		if err := emitEvent(botEventData); err != nil {
+			log.Printf("Warning: Failed to emit event: %v", err)
+		}
+
+		// The loop breaks after one successful generation attempt
+		// This replaces the old retry logic for interruptions during generation
 	}
 
 	// Construct HandlerOutput
