@@ -440,6 +440,7 @@ func main() {
 
 	for _, foundURL := range foundURLs {
 		if !strings.HasPrefix(foundURL, "https://discord.com/attachments/") {
+			updateBotStatus("Analyzing link...", "online", 3)
 			log.Printf("Found external URL in message: %s", foundURL)
 			meta, err := fetchMetadata(foundURL)
 			if err != nil {
