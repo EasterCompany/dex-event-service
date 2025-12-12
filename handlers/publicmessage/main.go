@@ -503,6 +503,8 @@ func main() {
 	re := regexp.MustCompile(urlRegex)
 	foundURLs := re.FindAllString(content, -1)
 
+	linkContext := ""
+
 	for _, foundURL := range foundURLs {
 		if !strings.HasPrefix(foundURL, "https://discord.com/attachments/") {
 			log.Printf("Found external URL in message: %s", foundURL)
@@ -510,6 +512,18 @@ func main() {
 			if err != nil {
 				log.Printf("Failed to fetch metadata for %s: %v", foundURL, err)
 				continue
+			}
+
+			// Build textual context
+			if meta.Title != "" || meta.Description != "" {
+				linkContext += fmt.Sprintf("\n[Link: %s", foundURL)
+				if meta.Title != "" {
+					linkContext += fmt.Sprintf(" - Title: %s", meta.Title)
+				}
+				if meta.Description != "" {
+					linkContext += fmt.Sprintf(" - Description: %s", meta.Description)
+				}
+				linkContext += "]"
 			}
 
 			if meta.ImageURL != "" {
@@ -527,6 +541,10 @@ func main() {
 				})
 			}
 		}
+	}
+
+	if linkContext != "" {
+		content += linkContext
 	}
 
 	log.Printf("public-message-handler processing for user %s in channel %s: %s (mentioned: %v, attachments: %d)", userID, channelID, content, mentionedBot, len(attachments))
