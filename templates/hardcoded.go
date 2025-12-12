@@ -593,6 +593,9 @@ func GetTemplates() map[string]EventTemplate {
 				"filename":        {Type: "string", Required: true},
 				"description":     {Type: "string", Required: true},
 				"timestamp":       {Type: "number", Required: true},
+				"channel_id":      {Type: "string", Required: true},
+				"user_id":         {Type: "string", Required: true},
+				"server_id":       {Type: "string", Required: false},
 			},
 		},
 
@@ -607,6 +610,9 @@ func GetTemplates() map[string]EventTemplate {
 				"title":           {Type: "string", Required: false},
 				"description":     {Type: "string", Required: false},
 				"timestamp":       {Type: "number", Required: true},
+				"channel_id":      {Type: "string", Required: true},
+				"user_id":         {Type: "string", Required: true},
+				"server_id":       {Type: "string", Required: false},
 			},
 		},
 

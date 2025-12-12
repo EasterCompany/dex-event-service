@@ -535,6 +535,9 @@ func main() {
 					"title":           meta.Title,
 					"description":     meta.Description,
 					"timestamp":       time.Now().Unix(),
+					"channel_id":      channelID,
+					"user_id":         userID,
+					"server_id":       input.EventData["server_id"],
 				}
 				_ = emitEvent(linkEvent)
 			}
@@ -672,6 +675,9 @@ func main() {
 					"filename":        filename,
 					"description":     description,
 					"timestamp":       time.Now().Unix(),
+					"channel_id":      channelID,
+					"user_id":         userID,
+					"server_id":       input.EventData["server_id"],
 				}
 				_ = emitEvent(analysisEvent)
 			}
