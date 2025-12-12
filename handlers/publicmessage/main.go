@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -37,6 +38,7 @@ type OllamaGenerateRequest struct {
 
 type OllamaGenerateResponse struct {
 	Response string `json:"response"`
+	Done     bool   `json:"done"`
 }
 
 func generateOllamaResponse(model, prompt string, images []string) (string, error) {
@@ -71,6 +73,105 @@ func generateOllamaResponse(model, prompt string, images []string) (string, erro
 		return "", err
 	}
 	return response.Response, nil
+}
+
+func generateOllamaResponseStream(model, prompt string, images []string, callback func(string)) error {
+	reqBody := OllamaGenerateRequest{
+		Model:  model,
+		Prompt: prompt,
+		Images: images,
+		Stream: true,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.Post(OllamaURL+"/api/generate", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing ollama response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ollama returned status: %d", resp.StatusCode)
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+
+		var chunk OllamaGenerateResponse
+		if err := json.Unmarshal(line, &chunk); err != nil {
+			continue
+		}
+		if chunk.Response != "" {
+			callback(chunk.Response)
+		}
+		if chunk.Done {
+			break
+		}
+	}
+	return nil
+}
+
+func initStream(channelID string) (string, error) {
+	serviceURL := getDiscordServiceURL()
+	reqBody := map[string]string{
+		"channel_id": channelID,
+	}
+	jsonData, _ := json.Marshal(reqBody)
+
+	resp, err := http.Post(serviceURL+"/message/stream/start", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("init stream failed: %d", resp.StatusCode)
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	return result["message_id"], nil
+}
+
+func updateStream(channelID, messageID, content string) {
+	serviceURL := getDiscordServiceURL()
+	reqBody := map[string]string{
+		"channel_id": channelID,
+		"message_id": messageID,
+		"content":    content,
+	}
+	jsonData, _ := json.Marshal(reqBody)
+	// Fire and forget (errors logged in discord service or ignored for performance)
+	go func() {
+		_, _ = http.Post(serviceURL+"/message/stream/update", "application/json", bytes.NewBuffer(jsonData))
+	}()
+}
+
+func completeStream(channelID, messageID, content string) {
+	serviceURL := getDiscordServiceURL()
+	reqBody := map[string]string{
+		"channel_id": channelID,
+		"message_id": messageID,
+		"content":    content,
+	}
+	jsonData, _ := json.Marshal(reqBody)
+	_, _ = http.Post(serviceURL+"/message/stream/complete", "application/json", bytes.NewBuffer(jsonData))
 }
 
 func downloadImageAndConvertToJPEG(url string) (string, error) {
@@ -263,35 +364,6 @@ func deleteMessage(channelID, messageID string) error {
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
-	}
-	return nil
-}
-
-func postToDiscord(channelID, content string, metadata map[string]interface{}) error {
-	serviceURL := getDiscordServiceURL()
-	reqBody := map[string]interface{}{
-		"channel_id": channelID,
-		"content":    content,
-		"metadata":   metadata,
-	}
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		return err
-	}
-
-	resp, err := http.Post(serviceURL+"/post", "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			log.Printf("Error closing discord response body: %v", err)
-		}
-	}()
-
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("discord service error %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
 }
@@ -837,25 +909,42 @@ func main() {
 
 			prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
 
-			// If retrying, we might just prompt with context history as 'content' is old?
-			// Actually, 'contextHistory' from `fetchContext` includes the latest messages.
-			// 'content' variable holds the *original* trigger message.
-			// If we are retrying, the context is what matters most.
-			// We should probably rely on Context mostly.
-
 			// Capture the state of the channel BEFORE we start thinking hard.
+
 			snapshotMessageID, _ := getLatestMessageID(channelID)
 
 			var err error
+
 			responseModel := "dex-public-message-model"
-			response, err := generateOllamaResponse(responseModel, prompt, nil)
+
+			// Initialize Stream
+
+			streamMessageID, err := initStream(channelID)
+
+			if err != nil {
+
+				log.Printf("Failed to init stream: %v", err)
+
+				break
+
+			}
+
+			fullResponse := ""
+
+			// Stream Generation
+			err = generateOllamaResponseStream(responseModel, prompt, nil, func(chunk string) {
+				fullResponse += chunk
+				updateStream(channelID, streamMessageID, fullResponse)
+			})
 
 			if err != nil {
 				log.Printf("Response generation failed: %v", err)
 				break // Exit loop on error
 			}
 
-			log.Printf("Generated response: %s", response)
+			// Finalize Stream
+			completeStream(channelID, streamMessageID, fullResponse)
+			log.Printf("Generated response: %s", fullResponse)
 
 			// Check for interruption (Has the world changed while we were thinking?)
 			currentLatestID, err := getLatestMessageID(channelID)
@@ -869,16 +958,27 @@ func main() {
 				}
 			}
 
-			// If we are here, either no interruption or max retries.
-			metadata := map[string]interface{}{
+			// Emit bot message event manually (since streaming bypasses PostHandler event emission)
+			botEventData := map[string]interface{}{
+				"type":           types.EventTypeMessagingBotSentMessage,
+				"source":         "dex-event-service",
+				"user_id":        "dexter", // We don't have the bot's ID easily here, 'dexter' is fine or we fetch it
+				"user_name":      "Dexter",
+				"channel_id":     channelID,
+				"channel_name":   input.EventData["channel_name"],
+				"server_id":      input.EventData["server_id"],
+				"server_name":    input.EventData["server_name"],
+				"message_id":     streamMessageID,
+				"content":        fullResponse,
+				"timestamp":      time.Now().Format(time.RFC3339),
 				"response_model": responseModel,
-				"response_raw":   response,
+				"response_raw":   fullResponse,
 				"raw_input":      prompt,
 			}
-
-			if err := postToDiscord(channelID, response, metadata); err != nil {
-				log.Printf("Failed to post to discord: %v", err)
+			if err := emitEvent(botEventData); err != nil {
+				log.Printf("Warning: Failed to emit event: %v", err)
 			}
+
 			break // Done!
 		}
 	}
