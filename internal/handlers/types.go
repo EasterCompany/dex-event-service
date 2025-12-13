@@ -1,0 +1,32 @@
+package handlers
+
+import (
+	"context"
+
+	"github.com/EasterCompany/dex-event-service/config"
+	"github.com/EasterCompany/dex-event-service/internal/discord"
+	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/web"
+	"github.com/EasterCompany/dex-event-service/types"
+	"github.com/redis/go-redis/v9"
+)
+
+type Dependencies struct {
+	Redis           *redis.Client
+	Ollama          *ollama.Client
+	Discord         *discord.Client
+	Web             *web.Client
+	Config          *config.ServiceMapConfig
+	EventServiceURL string
+	TTSServiceURL   string
+}
+
+type Handler interface {
+	Handle(ctx context.Context, input types.HandlerInput, deps *Dependencies) (types.HandlerOutput, error)
+}
+
+type HandlerFunc func(ctx context.Context, input types.HandlerInput, deps *Dependencies) (types.HandlerOutput, error)
+
+func (f HandlerFunc) Handle(ctx context.Context, input types.HandlerInput, deps *Dependencies) (types.HandlerOutput, error) {
+	return f(ctx, input, deps)
+}

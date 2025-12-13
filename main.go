@@ -18,6 +18,10 @@ import (
 	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/endpoints"
 	"github.com/EasterCompany/dex-event-service/handlers"
+	"github.com/EasterCompany/dex-event-service/internal/discord"
+	internalHandlers "github.com/EasterCompany/dex-event-service/internal/handlers"
+	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/web"
 	"github.com/EasterCompany/dex-event-service/middleware"
 	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/gorilla/mux"
@@ -142,11 +146,44 @@ func main() {
 		log.Fatalf("FATAL: Invalid port '%s' for service '%s' in service-map.json: %v", selfConfig.Port, ServiceName, err)
 	}
 
-	// Initialize handler registry
+	// Initialize handler registry (config loader)
 	log.Println("Loading event handlers...")
 	if err := handlers.Initialize(); err != nil {
 		log.Fatalf("FATAL: Failed to initialize handlers: %v", err)
 	}
+
+	// Resolve Service URLs
+	var discordURL, eventURL, ttsURL, webURL, ollamaURL string
+
+	// Helper to find service URL
+	getServiceURL := func(id, category string, defaultPort string) string {
+		for _, s := range serviceMap.Services[category] {
+			if s.ID == id {
+				return fmt.Sprintf("http://localhost:%s", s.Port)
+			}
+		}
+		return fmt.Sprintf("http://localhost:%s", defaultPort)
+	}
+
+	discordURL = getServiceURL("dex-discord-service", "th", "8081")
+	eventURL = getServiceURL("dex-event-service", "cs", "8082")
+	ttsURL = getServiceURL("dex-tts-service", "be", "8200")
+	webURL = getServiceURL("dex-web-service", "be", "8201")
+	ollamaURL = "http://127.0.0.1:11434" // Default
+
+	// Initialize dependencies
+	deps := &internalHandlers.Dependencies{
+		Redis:           redisClient,
+		Ollama:          ollama.NewClient(ollamaURL),
+		Discord:         discord.NewClient(discordURL, eventURL),
+		Web:             web.NewClient(webURL),
+		Config:          serviceMap,
+		EventServiceURL: eventURL,
+		TTSServiceURL:   ttsURL,
+	}
+
+	// Initialize Executor with dependencies
+	handlers.InitExecutor(deps)
 
 	// Create a context for graceful shutdown for HTTP server
 	_, httpCancel := context.WithCancel(context.Background())
