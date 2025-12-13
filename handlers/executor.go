@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	defaultTimeout = 30 // seconds
+	defaultTimeout = 3600 // seconds (1 hour)
 	eventKeyPrefix = "event:"
 	timelineKey    = "events:timeline"
 )
