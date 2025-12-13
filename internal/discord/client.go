@@ -59,14 +59,34 @@ func (c *Client) UpdateStream(channelID, messageID, content string) {
 	}()
 }
 
-func (c *Client) CompleteStream(channelID, messageID, content string) {
+func (c *Client) CompleteStream(channelID, messageID, content string) (string, error) {
 	reqBody := map[string]string{
 		"channel_id": channelID,
 		"message_id": messageID,
 		"content":    content,
 	}
 	jsonData, _ := json.Marshal(reqBody)
-	_, _ = http.Post(c.BaseURL+"/message/stream/complete", "application/json", bytes.NewBuffer(jsonData))
+	resp, err := http.Post(c.BaseURL+"/message/stream/complete", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return messageID, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return messageID, fmt.Errorf("complete stream failed: %d", resp.StatusCode)
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		// If response is empty or invalid, just return original ID
+		return messageID, nil
+	}
+
+	if finalID, ok := result["message_id"]; ok && finalID != "" {
+		return finalID, nil
+	}
+
+	return messageID, nil
 }
 
 func (c *Client) DeleteMessage(channelID, messageID string) error {

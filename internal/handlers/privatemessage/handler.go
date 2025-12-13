@@ -65,6 +65,11 @@ func reportProcessStatus(deps *handlers.Dependencies, channelID, state string, r
 }
 
 func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Dependencies) (types.HandlerOutput, error) {
+	// 1. Check for interruption immediately
+	if deps.CheckInterruption != nil && deps.CheckInterruption() {
+		return types.HandlerOutput{Success: true}, nil
+	}
+
 	content, _ := input.EventData["content"].(string)
 	channelID, _ := input.EventData["channel_id"].(string)
 	userID, _ := input.EventData["user_id"].(string)
@@ -83,6 +88,11 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	foundURLs := re.FindAllString(content, -1)
 
 	linkContext := ""
+
+	// 2. Check interruption before URL expansion
+	if deps.CheckInterruption != nil && deps.CheckInterruption() {
+		return types.HandlerOutput{Success: true}, nil
+	}
 
 	for _, foundURL := range foundURLs {
 		if !strings.HasPrefix(foundURL, "https://discord.com/attachments/") {
@@ -170,6 +180,11 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	visualContext := ""
 	if len(attachments) > 0 {
+		// 3. Check interruption before Image Analysis
+		if deps.CheckInterruption != nil && deps.CheckInterruption() {
+			return types.HandlerOutput{Success: true}, nil
+		}
+
 		for _, att := range attachments {
 			contentType, _ := att["content_type"].(string)
 			url, _ := att["url"].(string)
@@ -329,6 +344,11 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	}
 
 	if shouldEngage {
+		// 4. Final interruption check before generation
+		if deps.CheckInterruption != nil && deps.CheckInterruption() {
+			return types.HandlerOutput{Success: true}, nil
+		}
+
 		retryCount := 0
 		var streamMessageID string
 
@@ -361,7 +381,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
-			deps.Discord.CompleteStream(channelID, streamMessageID, "Error: I couldn't generate a response. Please try again later.")
+			_, _ = deps.Discord.CompleteStream(channelID, streamMessageID, "Error: I couldn't generate a response. Please try again later.")
 			return types.HandlerOutput{Success: false, Error: err.Error()}, err
 		}
 
@@ -369,7 +389,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		if len(userMap) > 0 {
 			finalResponse = utils.DenormalizeMentions(fullResponse, userMap)
 		}
-		deps.Discord.CompleteStream(channelID, streamMessageID, finalResponse)
+		finalMessageID, _ := deps.Discord.CompleteStream(channelID, streamMessageID, finalResponse)
 		log.Printf("Generated response: %s", fullResponse)
 
 		botEventData := map[string]interface{}{
@@ -381,7 +401,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			"channel_name":   "DM",
 			"server_id":      input.EventData["server_id"],
 			"server_name":    "DM",
-			"message_id":     streamMessageID,
+			"message_id":     finalMessageID,
 			"content":        fullResponse,
 			"timestamp":      time.Now().Format(time.RFC3339),
 			"response_model": responseModel,

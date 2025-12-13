@@ -36,9 +36,10 @@ var (
 		"webhook-handler":         webhook.Handle,
 		// "test": test.Handle, // If we implemented test
 	}
-	dependencies *internalHandlers.Dependencies
-	jobQueue     chan *job
-	workerOnce   sync.Once
+	dependencies    *internalHandlers.Dependencies
+	jobQueue        chan *job
+	workerOnce      sync.Once
+	interruptionMap sync.Map // Map[channelID]int64 (timestamp)
 )
 
 type job struct {
@@ -93,6 +94,15 @@ func ExecuteHandler(
 		return nil, fmt.Errorf("executor not initialized")
 	}
 
+	// Update interruption map if channel_id is present
+	// We parse lightly to avoid heavy overhead, or just unmarshal as map
+	var evtData map[string]interface{}
+	if err := json.Unmarshal(event.Event, &evtData); err == nil {
+		if cid, ok := evtData["channel_id"].(string); ok && cid != "" {
+			interruptionMap.Store(cid, event.Timestamp)
+		}
+	}
+
 	// If sync, create a channel to wait for result
 	if isSync {
 		resChan := make(chan jobResult)
@@ -126,8 +136,7 @@ func executeHandlerInternal(
 	handlerConfig *types.HandlerConfig,
 ) ([]string, error) {
 	ctx := context.Background()
-	// Redis client from dependencies, as the one passed in ExecuteHandler might be short-lived (request scoped?)
-	// Actually dependencies.Redis is the long-lived one.
+	// Redis client from dependencies
 	redisClient := dependencies.Redis
 
 	// Parse event data to get event type
@@ -137,6 +146,7 @@ func executeHandlerInternal(
 	}
 
 	eventType, _ := eventData["type"].(string)
+	channelID, _ := eventData["channel_id"].(string)
 
 	// Build handler input
 	input := types.HandlerInput{
@@ -162,9 +172,26 @@ func executeHandlerInternal(
 	var output types.HandlerOutput
 	var handlerErr error
 
+	// Create local dependencies with Interruption Checker
+	localDeps := *dependencies
+	localDeps.CheckInterruption = func() bool {
+		if channelID == "" {
+			return false
+		}
+		if val, ok := interruptionMap.Load(channelID); ok {
+			latestTime := val.(int64)
+			// If a newer event exists (latestTime > event.Timestamp), we are interrupted.
+			if latestTime > event.Timestamp {
+				log.Printf("Handler INTERRUPTED: Channel %s has newer event (Time %d > %d)", channelID, latestTime, event.Timestamp)
+				return true
+			}
+		}
+		return false
+	}
+
 	// Check if internal handler exists
 	if handlerFunc, ok := internalRegistry[handlerConfig.Name]; ok {
-		output, handlerErr = handlerFunc(execCtx, input, dependencies)
+		output, handlerErr = handlerFunc(execCtx, input, &localDeps)
 	} else {
 		// Fallback or Error?
 		// For now, let's treat "test" handler specially or return error

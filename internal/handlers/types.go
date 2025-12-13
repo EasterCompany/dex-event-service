@@ -12,13 +12,14 @@ import (
 )
 
 type Dependencies struct {
-	Redis           *redis.Client
-	Ollama          *ollama.Client
-	Discord         *discord.Client
-	Web             *web.Client
-	Config          *config.ServiceMapConfig
-	EventServiceURL string
-	TTSServiceURL   string
+	Redis             *redis.Client
+	Ollama            *ollama.Client
+	Discord           *discord.Client
+	Web               *web.Client
+	Config            *config.ServiceMapConfig
+	EventServiceURL   string
+	TTSServiceURL     string
+	CheckInterruption func() bool
 }
 
 type Handler interface {

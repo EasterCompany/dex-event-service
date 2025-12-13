@@ -387,7 +387,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
-			deps.Discord.CompleteStream(channelID, streamMessageID, "Error: I couldn't generate a response. Please try again later.")
+			_, _ = deps.Discord.CompleteStream(channelID, streamMessageID, "Error: I couldn't generate a response. Please try again later.")
 			return types.HandlerOutput{Success: false, Error: err.Error()}, err
 		}
 
@@ -395,7 +395,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		if len(userMap) > 0 {
 			finalResponse = utils.DenormalizeMentions(fullResponse, userMap)
 		}
-		deps.Discord.CompleteStream(channelID, streamMessageID, finalResponse)
+		finalMessageID, _ := deps.Discord.CompleteStream(channelID, streamMessageID, finalResponse)
 		log.Printf("Generated response: %s", fullResponse)
 
 		botEventData := map[string]interface{}{
@@ -407,7 +407,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			"channel_name":   input.EventData["channel_name"],
 			"server_id":      input.EventData["server_id"],
 			"server_name":    input.EventData["server_name"],
-			"message_id":     streamMessageID,
+			"message_id":     finalMessageID,
 			"content":        fullResponse,
 			"timestamp":      time.Now().Format(time.RFC3339),
 			"response_model": responseModel,
