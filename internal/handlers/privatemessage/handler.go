@@ -394,8 +394,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	}
 
 	return types.HandlerOutput{
-			Success: true,
-			Events:  []types.HandlerOutputEvent{},
-		},
-		nil
+		Success: true,
+		Events:  []types.HandlerOutputEvent{},
+	}, nil
 }
