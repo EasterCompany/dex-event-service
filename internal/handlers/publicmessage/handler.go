@@ -312,10 +312,20 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		contextHistory += "\n\n" + channelMembers
 	}
 
+	// Restricted channels (Analysis/Moderation only, no unsolicited engagement)
+	restrictedChannels := map[string]bool{
+		"1437617331529580614": true, // Music
+		"1381915374181810236": true, // Memes
+	}
+
 	if mentionedBot {
 		log.Printf("Bot was mentioned, forcing engagement.")
 		shouldEngage = true
 		engagementReason = "Direct mention"
+	} else if restrictedChannels[channelID] {
+		log.Printf("Channel %s is restricted (analysis only). Skipping engagement check.", channelID)
+		shouldEngage = false
+		engagementReason = "Restricted Channel (Analysis Only)"
 	} else {
 		reportProcessStatus(deps, channelID, "Checking Engagement", 0, startTime)
 		prompt := fmt.Sprintf("Context:\n%s\n\nCurrent Message:\n%s", contextHistory, content)
