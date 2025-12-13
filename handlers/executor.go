@@ -64,10 +64,21 @@ func InitExecutor(deps *internalHandlers.Dependencies) {
 
 func startWorker() {
 	for j := range jobQueue {
-		childIDs, err := executeHandlerInternal(j.Event, j.Config)
-		if j.ResultChan != nil {
-			j.ResultChan <- jobResult{ChildIDs: childIDs, Error: err}
-		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("CRITICAL: Worker panicked while processing event %s: %v", j.Event.ID, r)
+					// Optionally create an error event here if possible
+					if j.ResultChan != nil {
+						j.ResultChan <- jobResult{Error: fmt.Errorf("worker panic: %v", r)}
+					}
+				}
+			}()
+			childIDs, err := executeHandlerInternal(j.Event, j.Config)
+			if j.ResultChan != nil {
+				j.ResultChan <- jobResult{ChildIDs: childIDs, Error: err}
+			}
+		}()
 	}
 }
 
