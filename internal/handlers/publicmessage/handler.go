@@ -284,6 +284,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				reportProcessStatus(deps, channelID, fmt.Sprintf("Analyzing Image: %s", filename), 0, startTime)
 
 				var description string
+				var base64Img string // Hoisted declaration
+
 				cacheKey := fmt.Sprintf("analysis:visual:%s", id)
 				if deps.Redis != nil {
 					if cached, err := deps.Redis.Get(context.Background(), cacheKey).Result(); err == nil {
@@ -293,8 +295,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				}
 
 				if description == "" {
-					var base64Img string
-					var imgErr error
+					var imgErr error // Declare imgErr here
 
 					if hasBase64 { // Use base64 from attachment directly
 						base64Img = base64Data
@@ -371,6 +372,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					"channel_id":      channelID,
 					"user_id":         userID,
 					"server_id":       input.EventData["server_id"],
+					"url":             url,
+					"base64_preview":  base64Img,
 				}
 				if err := emitEvent(deps.EventServiceURL, analysisEvent); err != nil {
 					log.Printf("Warning: Failed to emit visual event: %v", err)
