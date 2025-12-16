@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/internal/handlers"
+	"github.com/EasterCompany/dex-event-service/internal/web"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
 )
@@ -85,36 +86,112 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	linkContext := ""
 
+	// Prepare prompt for router model (used for each URL decision)
+	routerBasePrompt := fmt.Sprintf("User message: \"%s\"", content)
+
 	for _, foundURL := range foundURLs {
 		if !strings.HasPrefix(foundURL, "https://discord.com/attachments/") {
-			deps.Discord.UpdateBotStatus("Analyzing link...", "online", 3)
 			log.Printf("Found external URL in message: %s", foundURL)
-			meta, err := deps.Web.FetchMetadata(foundURL)
+
+			// --- Determine Fetch Method using dex-router-model ---
+
+			decision := "STATIC" // Default to static
+			routerInput := fmt.Sprintf("%s\nURL to analyze: %s", routerBasePrompt, foundURL)
+			routerOutput, err := deps.Ollama.Generate("dex-router-model", routerInput, nil)
 			if err != nil {
-				log.Printf("Failed to fetch metadata for %s: %v", foundURL, err)
+				log.Printf("dex-router-model failed: %v, defaulting to STATIC", err)
+			} else {
+				decision = strings.ToUpper(strings.TrimSpace(routerOutput))
+				log.Printf("dex-router-model decision for %s: %s", foundURL, decision)
+			}
+			// --- End Router Model Logic ---
+
+			var meta *web.MetadataResponse
+			var webView *web.WebViewResponse
+			var fetchErr error
+
+			if decision == "VISUAL" {
+				deps.Discord.UpdateBotStatus("Viewing link...", "online", 3)
+				webView, fetchErr = deps.Web.FetchWebView(foundURL)
+				if fetchErr != nil {
+					log.Printf("Failed to fetch web view for %s: %v, falling back to STATIC", foundURL, fetchErr)
+					// Fallback to static if webview fails
+					deps.Discord.UpdateBotStatus("Analyzing link...", "online", 3)
+					meta, fetchErr = deps.Web.FetchMetadata(foundURL)
+				}
+			} else {
+				deps.Discord.UpdateBotStatus("Analyzing link...", "online", 3)
+				meta, fetchErr = deps.Web.FetchMetadata(foundURL)
+			}
+
+			if fetchErr != nil {
+				log.Printf("Failed to fetch data for %s: %v", foundURL, fetchErr)
 				continue
 			}
 
-			var summary string
-			if meta.Content != "" {
-				contentToSummarize := meta.Content
-				if len(contentToSummarize) > 12000 {
-					contentToSummarize = contentToSummarize[:12000]
+			// Consolidate data for linkContext and event emission
+			var currentTitle, currentDescription, currentSummary, currentImageURL, currentContentType, currentProvider string
+
+			if webView != nil {
+				currentTitle = webView.Title
+				currentDescription = ""          // Webview content is too large for general description in linkEvent
+				currentImageURL = ""             // Screenshot is handled separately
+				currentContentType = "text/html" // General type for rendered content
+				currentProvider = "webview"      // Indicate source
+
+				// Generate summary from rendered HTML
+				if webView.Content != "" {
+					contentToSummarize := webView.Content
+					if len(contentToSummarize) > 12000 { // Max summary length
+						contentToSummarize = contentToSummarize[:12000]
+					}
+					currentSummary, _ = deps.Ollama.Generate("dex-scraper-model", contentToSummarize, nil)
+					currentSummary = strings.TrimSpace(currentSummary)
 				}
-				summary, _ = deps.Ollama.Generate("dex-scraper-model", contentToSummarize, nil)
-				summary = strings.TrimSpace(summary)
+
+				// Add screenshot as virtual attachment
+				if webView.Screenshot != "" {
+					attachments = append(attachments, map[string]interface{}{
+						"id":           fmt.Sprintf("virtual_screenshot_%s", input.EventID), // Unique ID for this screenshot
+						"url":          foundURL,                                            // Original URL as source
+						"content_type": "image/png",                                         // Assuming PNG screenshot
+						"filename":     fmt.Sprintf("webview_screenshot_%s.png", input.EventID),
+						"size":         0,                  // Size is not easily known without decoding, set to 0
+						"proxy_url":    "",                 // Not applicable
+						"height":       0,                  // Not easily known, set to 0
+						"width":        0,                  // Not easily known, set to 0
+						"base64":       webView.Screenshot, // Store base64 for processing by vision model
+					})
+				}
+
+			} else if meta != nil { // Fallback to static metadata
+				currentTitle = meta.Title
+				currentDescription = meta.Description
+				currentImageURL = meta.ImageURL
+				currentContentType = meta.ContentType
+				currentProvider = meta.Provider
+
+				// Generate summary from static content
+				if meta.Content != "" {
+					contentToSummarize := meta.Content
+					if len(contentToSummarize) > 12000 {
+						contentToSummarize = contentToSummarize[:12000]
+					}
+					currentSummary, _ = deps.Ollama.Generate("dex-scraper-model", contentToSummarize, nil)
+					currentSummary = strings.TrimSpace(currentSummary)
+				}
 			}
 
-			if meta.Title != "" || meta.Description != "" || summary != "" {
+			if currentTitle != "" || currentDescription != "" || currentSummary != "" {
 				linkContext += fmt.Sprintf("\n[Link: %s", foundURL)
-				if meta.Title != "" {
-					linkContext += fmt.Sprintf(" - Title: %s", meta.Title)
+				if currentTitle != "" {
+					linkContext += fmt.Sprintf(" - Title: %s", currentTitle)
 				}
-				if meta.Description != "" {
-					linkContext += fmt.Sprintf(" - Description: %s", meta.Description)
+				if currentDescription != "" {
+					linkContext += fmt.Sprintf(" - Description: %s", currentDescription)
 				}
-				if summary != "" {
-					linkContext += fmt.Sprintf("\n - Content Summary: %s", summary)
+				if currentSummary != "" {
+					linkContext += fmt.Sprintf("\n - Content Summary: %s", currentSummary)
 				}
 				linkContext += "]"
 
@@ -123,9 +200,9 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					"parent_event_id": input.EventID,
 					"handler":         "public-message-handler",
 					"url":             foundURL,
-					"title":           meta.Title,
-					"description":     meta.Description,
-					"summary":         summary,
+					"title":           currentTitle,
+					"description":     currentDescription,
+					"summary":         currentSummary,
 					"timestamp":       time.Now().Unix(),
 					"channel_id":      channelID,
 					"user_id":         userID,
@@ -136,17 +213,18 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				}
 			}
 
-			if meta.ImageURL != "" {
-				log.Printf("Expanded URL %s to image: %s (Type: %s)", foundURL, meta.ImageURL, meta.ContentType)
+			// Add image URL from static metadata as virtual attachment if no webview screenshot
+			if currentImageURL != "" && webView == nil {
+				log.Printf("Expanded URL %s to image: %s (Type: %s)", foundURL, currentImageURL, currentContentType)
 				ext := "jpg"
-				if parts := strings.Split(meta.ContentType, "/"); len(parts) > 1 {
+				if parts := strings.Split(currentContentType, "/"); len(parts) > 1 {
 					ext = parts[1]
 				}
 				attachments = append(attachments, map[string]interface{}{
 					"id":           "virtual_" + foundURL,
-					"url":          meta.ImageURL,
-					"content_type": meta.ContentType,
-					"filename":     fmt.Sprintf("link_expansion_%s.%s", meta.Provider, ext),
+					"url":          currentImageURL,
+					"content_type": currentContentType,
+					"filename":     fmt.Sprintf("link_expansion_%s.%s", currentProvider, ext),
 					"size":         0,
 					"proxy_url":    "",
 					"height":       0,
@@ -171,7 +249,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				}
 				// If it was the music channel, we stop here (no engagement needed)
 				if channelID == "1437617331529580614" {
-					return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
+					return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}},
+						nil
 				}
 				break // Only play first link
 			}
@@ -198,6 +277,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			url, _ := att["url"].(string)
 			filename, _ := att["filename"].(string)
 			id, _ := att["id"].(string)
+			base64Data, hasBase64 := att["base64"].(string) // New: Check for base64 data
 
 			if strings.HasPrefix(contentType, "image/") {
 				deps.Discord.UpdateBotStatus("Analyzing image...", "online", 3)
@@ -213,15 +293,25 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				}
 
 				if description == "" {
-					log.Printf("Downloading image: %s", filename)
-					base64Img, err := utils.DownloadImageAndConvertToJPEG(url)
-					if err != nil {
-						log.Printf("Failed to download image %s: %v", filename, err)
+					var base64Img string
+					var imgErr error
+
+					if hasBase64 { // Use base64 from attachment directly
+						base64Img = base64Data
+						log.Printf("Using base64 image data for %s", filename)
+					} else { // Download image from URL
+						log.Printf("Downloading image: %s", filename)
+						base64Img, imgErr = utils.DownloadImageAndConvertToJPEG(url)
+					}
+
+					if imgErr != nil {
+						log.Printf("Failed to get image data for %s: %v", filename, imgErr)
 						continue
 					}
 
 					log.Printf("Generating visual description for %s...", filename)
 					prompt := "Describe this image concisely. If the image contains sexual content or nudity, output ONLY the tag <EXPLICIT_CONTENT_DETECTED/> and nothing else."
+					var err error
 					description, err = deps.Ollama.Generate("dex-vision-model", prompt, []string{base64Img})
 					if err != nil {
 						log.Printf("Vision model failed for %s: %v", filename, err)
@@ -259,7 +349,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 							log.Printf("Failed to emit moderation event: %v", err)
 						}
 
-						return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
+						return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}},
+							nil
 					}
 
 					if deps.Redis != nil {
@@ -297,7 +388,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		locked, err := deps.Redis.SetNX(context.Background(), lockKey, "1", 60*time.Second).Result()
 		if err == nil && !locked {
 			log.Printf("Channel %s is already being processed by another handler. Exiting to allow aggregation.", channelID)
-			return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
+			return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}},
+				nil
 		}
 		defer deps.Redis.Del(context.Background(), lockKey)
 	}
@@ -403,7 +495,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		streamMessageID, err = deps.Discord.InitStream(channelID)
 		if err != nil {
 			log.Printf("Failed to init stream: %v", err)
-			return types.HandlerOutput{Success: false, Error: err.Error()}, err
+			return types.HandlerOutput{Success: false, Error: err.Error()},
+				err
 		}
 
 		fullResponse := ""
@@ -420,7 +513,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
 			_, _ = deps.Discord.CompleteStream(channelID, streamMessageID, "Error: I couldn't generate a response. Please try again later.")
-			return types.HandlerOutput{Success: false, Error: err.Error()}, err
+			return types.HandlerOutput{Success: false, Error: err.Error()},
+				err
 		}
 
 		finalResponse := fullResponse
