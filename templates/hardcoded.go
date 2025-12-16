@@ -601,7 +601,7 @@ func GetTemplates() map[string]EventTemplate {
 
 		string(types.EventTypeAnalysisLinkCompleted): {
 			Description: "Link analysis/unfurling is completed",
-			Format:      "Analyzed link {url}: {title} - {description}",
+			Format:      "Analyzed link {url}: {title} - {description}\nSummary: {summary}",
 			Fields: map[string]FieldSpec{
 				"type":            {Type: "string", Required: true},
 				"parent_event_id": {Type: "string", Required: true},

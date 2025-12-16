@@ -317,3 +317,33 @@ func (c *Client) GetVoiceChannelUserCount(channelID string) (int, error) {
 	return result.UserCount, nil
 
 }
+
+func (c *Client) PlayMusic(url string) error {
+	reqBody := map[string]string{
+		"url": url,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", c.BaseURL+"/audio/play_music", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Service-Name", "dex-event-service")
+
+	client := &http.Client{Timeout: 5 * time.Second} // Short timeout for firing the request
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("discord service returned %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	return nil
+}

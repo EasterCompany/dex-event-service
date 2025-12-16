@@ -138,11 +138,15 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 			if meta.ImageURL != "" {
 				log.Printf("Expanded URL %s to image: %s (Type: %s)", foundURL, meta.ImageURL, meta.ContentType)
+				ext := "jpg"
+				if parts := strings.Split(meta.ContentType, "/"); len(parts) > 1 {
+					ext = parts[1]
+				}
 				attachments = append(attachments, map[string]interface{}{
 					"id":           "virtual_" + foundURL,
 					"url":          meta.ImageURL,
 					"content_type": meta.ContentType,
-					"filename":     fmt.Sprintf("link_expansion_%s.%s", meta.Provider, strings.Split(meta.ContentType, "/")[1]),
+					"filename":     fmt.Sprintf("link_expansion_%s.%s", meta.Provider, ext),
 					"size":         0,
 					"proxy_url":    "",
 					"height":       0,
@@ -154,6 +158,24 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	if linkContext != "" {
 		content += linkContext
+	}
+
+	// Music Logic: Check for YouTube links in music channel or if bot is mentioned
+	if channelID == "1437617331529580614" || mentionedBot {
+		for _, foundURL := range foundURLs {
+			if strings.Contains(foundURL, "youtube.com") || strings.Contains(foundURL, "youtu.be") {
+				log.Printf("Music request detected: %s", foundURL)
+				deps.Discord.UpdateBotStatus("Playing music...", "online", 0)
+				if err := deps.Discord.PlayMusic(foundURL); err != nil {
+					log.Printf("Failed to play music: %v", err)
+				}
+				// If it was the music channel, we stop here (no engagement needed)
+				if channelID == "1437617331529580614" {
+					return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
+				}
+				break // Only play first link
+			}
+		}
 	}
 
 	log.Printf("public-message-handler processing for user %s in channel %s: %s (mentioned: %v, attachments: %d)", userID, channelID, content, mentionedBot, len(attachments))

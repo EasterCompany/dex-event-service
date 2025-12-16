@@ -147,11 +147,15 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 			if meta.ImageURL != "" {
 				log.Printf("Expanded URL %s to image: %s (Type: %s)", foundURL, meta.ImageURL, meta.ContentType)
+				ext := "jpg"
+				if parts := strings.Split(meta.ContentType, "/"); len(parts) > 1 {
+					ext = parts[1]
+				}
 				attachments = append(attachments, map[string]interface{}{
 					"id":           "virtual_" + foundURL,
 					"url":          meta.ImageURL,
 					"content_type": meta.ContentType,
-					"filename":     fmt.Sprintf("link_expansion_%s.%s", meta.Provider, strings.Split(meta.ContentType, "/")[1]),
+					"filename":     fmt.Sprintf("link_expansion_%s.%s", meta.Provider, ext),
 					"size":         0,
 					"proxy_url":    "",
 					"height":       0,
