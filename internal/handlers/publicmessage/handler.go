@@ -495,11 +495,14 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
 		responseModel := "dex-public-message-model"
 
-		streamMessageID, err = deps.Discord.InitStream(channelID)
+		streamMessageID, err = deps.Discord.InitStream(channelID, "<a:typing:1449387367315275786>")
+
 		if err != nil {
+
 			log.Printf("Failed to init stream: %v", err)
-			return types.HandlerOutput{Success: false, Error: err.Error()},
-				err
+
+			return types.HandlerOutput{Success: false, Error: err.Error()}, err
+
 		}
 
 		fullResponse := ""

@@ -23,9 +23,10 @@ func NewClient(baseURL, eventSvcURL string) *Client {
 	}
 }
 
-func (c *Client) InitStream(channelID string) (string, error) {
+func (c *Client) InitStream(channelID string, initialContent string) (string, error) {
 	reqBody := map[string]string{
-		"channel_id": channelID,
+		"channel_id":      channelID,
+		"initial_content": initialContent,
 	}
 	jsonData, _ := json.Marshal(reqBody)
 
