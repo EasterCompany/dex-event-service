@@ -243,6 +243,9 @@ func main() {
 	// Close httpCtx to signal any other background tasks
 	httpCancel()
 
+	// Close the executor, which stops all background handlers
+	handlers.CloseExecutor()
+
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("HTTP shutdown error: %v", err)
 	}

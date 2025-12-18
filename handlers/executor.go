@@ -14,6 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	internalHandlers "github.com/EasterCompany/dex-event-service/internal/handlers"
+	"github.com/EasterCompany/dex-event-service/internal/handlers/analyst"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/greeting"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/privatemessage"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/publicmessage"
@@ -40,6 +41,10 @@ var (
 	jobQueue        chan *job
 	workerOnce      sync.Once
 	interruptionMap sync.Map // Map[channelID]int64 (timestamp)
+
+	// runningBackgroundHandlers stores references to initialized background workers
+	runningBackgroundHandlers = make(map[string]internalHandlers.BackgroundHandler)
+	muBackgroundHandlers      sync.Mutex // Protects runningBackgroundHandlers
 )
 
 type job struct {
@@ -61,6 +66,47 @@ func InitExecutor(deps *internalHandlers.Dependencies) {
 		go startWorker()
 	})
 	log.Println("Executor initialized with single-worker queue.")
+
+	// Initialize and run background handlers
+	initBackgroundHandlers()
+}
+
+func initBackgroundHandlers() {
+	muBackgroundHandlers.Lock()
+	defer muBackgroundHandlers.Unlock()
+
+	for _, handlerConfig := range handlerConfigs {
+		if handlerConfig.IsBackgroundWorker {
+			switch handlerConfig.Name {
+			case analyst.HandlerName:
+				analystHandler := analyst.NewAnalystHandler(dependencies.Redis, dependencies.Ollama, dependencies.Discord, dependencies.Web)
+				if err := analystHandler.Init(context.Background()); err != nil {
+					log.Printf("ERROR: Failed to initialize analyst handler: %v", err)
+					continue
+				}
+				runningBackgroundHandlers[handlerConfig.Name] = analystHandler
+				log.Printf("Background handler '%s' started.", handlerConfig.Name)
+			default:
+				log.Printf("WARNING: Unknown background handler '%s'. Not started.", handlerConfig.Name)
+			}
+		}
+	}
+}
+
+// CloseExecutor stops all running background handlers.
+func CloseExecutor() {
+	muBackgroundHandlers.Lock()
+	defer muBackgroundHandlers.Unlock()
+
+	for name, handler := range runningBackgroundHandlers {
+		log.Printf("Closing background handler '%s'...", name)
+		if err := handler.Close(); err != nil {
+			log.Printf("ERROR: Failed to close background handler '%s': %v", name, err)
+		} else {
+			log.Printf("Background handler '%s' closed.", name)
+		}
+	}
+	runningBackgroundHandlers = make(map[string]internalHandlers.BackgroundHandler) // Clear the map
 }
 
 func startWorker() {
