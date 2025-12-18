@@ -639,6 +639,19 @@ func GetTemplates() map[string]EventTemplate {
 			},
 		},
 
+		string(types.EventTypeSystemNotificationGenerated): {
+			Description: "An AI-generated system notification",
+			Format:      "Notification ({priority}): {title} - {body}",
+			Fields: map[string]FieldSpec{
+				"title":             {Type: "string", Required: true, Description: "Concise summary of the notification"},
+				"priority":          {Type: "string", Required: true, Description: "Severity (low, medium, high, critical)"},
+				"category":          {Type: "string", Required: true, Description: "Classification (system, security, conversation, error, build)"},
+				"body":              {Type: "string", Required: true, Description: "Detailed explanation or suggested action"},
+				"related_event_ids": {Type: "array", Required: false, Description: "IDs of related events"},
+				"read":              {Type: "boolean", Required: false, Description: "Whether the user has marked it as read"},
+			},
+		},
+
 		// END NEW MESSAGING EVENTS
 
 		"voice_speaking_started": {
