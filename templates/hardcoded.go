@@ -617,6 +617,28 @@ func GetTemplates() map[string]EventTemplate {
 			},
 		},
 
+		string(types.EventTypeCLICommand): {
+			Description: "A CLI command was executed",
+			Format:      "CLI Command: {command} {args} ({status})",
+			Fields: map[string]FieldSpec{
+				"command":   {Type: "string", Required: true},
+				"args":      {Type: "string", Required: false},
+				"output":    {Type: "string", Required: false},
+				"status":    {Type: "string", Required: true},
+				"duration":  {Type: "string", Required: false},
+				"exit_code": {Type: "number", Required: false},
+			},
+		},
+
+		string(types.EventTypeCLIStatus): {
+			Description: "CLI status update",
+			Format:      "CLI Status: {status} - {message}",
+			Fields: map[string]FieldSpec{
+				"status":  {Type: "string", Required: true},
+				"message": {Type: "string", Required: true},
+			},
+		},
+
 		// END NEW MESSAGING EVENTS
 
 		"voice_speaking_started": {

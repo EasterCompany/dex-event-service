@@ -42,6 +42,10 @@ const (
 
 	// System Events
 	EventTypeSystemStatusChange EventType = "system.status.change"
+
+	// CLI Events
+	EventTypeCLICommand EventType = "system.cli.command"
+	EventTypeCLIStatus  EventType = "system.cli.status"
 )
 
 // GenericMessagingEvent contains common fields for all messaging-related events
