@@ -546,7 +546,8 @@ func checkHTTPStatus(baseReport ServiceReport) ServiceReport {
 	if serviceHealthReport.Metrics["memory"] != nil {
 		if mem, ok := serviceHealthReport.Metrics["memory"].(map[string]interface{}); ok {
 			if avg, ok := mem["avg"].(float64); ok && avg > 0 {
-				report.Memory = fmt.Sprintf("%.1f%%", avg)
+				// Most Dexter services report memory in MB
+				report.Memory = fmt.Sprintf("%.1f MB", avg)
 			}
 		}
 	} else {
