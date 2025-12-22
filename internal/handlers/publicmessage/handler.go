@@ -182,6 +182,41 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				}
 			}
 
+			// Check for explicit text in link metadata
+			if currentTitle != "" || currentDescription != "" {
+				textToCheck := fmt.Sprintf("Title: %s\nDescription: %s\nURL: %s", currentTitle, currentDescription, foundURL)
+				modPrompt := fmt.Sprintf("Analyze this link metadata for explicit pornographic content. Output TRUE if it describes a porn site, explicit video, or sexual content designed for arousal. Output FALSE if safe or artistic.\n\n%s", textToCheck)
+
+				isExplicitRaw, err := deps.Ollama.Generate("dex-router-model", modPrompt, nil)
+				if err == nil && strings.Contains(strings.ToUpper(isExplicitRaw), "TRUE") {
+					log.Printf("EXPLICIT LINK TEXT DETECTED: %s. Deleting message...", foundURL)
+
+					messageID, _ := input.EventData["message_id"].(string)
+					if messageID != "" {
+						_ = deps.Discord.DeleteMessage(channelID, messageID)
+					}
+
+					modEvent := map[string]interface{}{
+						"type":         types.EventTypeModerationExplicitContentDeleted,
+						"source":       "dex-event-service",
+						"user_id":      userID,
+						"user_name":    input.EventData["user_name"],
+						"channel_id":   channelID,
+						"channel_name": input.EventData["channel_name"],
+						"server_id":    input.EventData["server_id"],
+						"server_name":  input.EventData["server_name"],
+						"timestamp":    time.Now().Format(time.RFC3339),
+						"message_id":   messageID,
+						"reason":       "Explicit link text detected: " + foundURL,
+						"handler":      "public-message-handler",
+						"raw_output":   isExplicitRaw,
+					}
+					_ = emitEvent(deps.EventServiceURL, modEvent)
+
+					return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
+				}
+			}
+
 			if currentTitle != "" || currentDescription != "" || currentSummary != "" {
 				linkContext += fmt.Sprintf("\n[Link: %s", foundURL)
 				if currentTitle != "" {
@@ -311,7 +346,11 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					}
 
 					log.Printf("Generating visual description for %s...", filename)
-					prompt := "Describe this image concisely. If the image contains sexual content or nudity, output ONLY the tag <EXPLICIT_CONTENT_DETECTED/> and nothing else."
+					prompt := `Analyze this image for content moderation.
+Rules:
+1. If the image depicts hard-core pornography, realistic sexual acts, exposed genitalia designed for arousal, or "filth", output ONLY the tag <EXPLICIT_CONTENT_DETECTED/>.
+2. If the image contains non-sexual nudity (classical art, statues, medical context) or is safe, provide a concise visual description.
+3. Treat screenshots of pornographic websites or links to explicit galleries as Rule 1.`
 					var err error
 					description, err = deps.Ollama.Generate("dex-vision-model", prompt, []string{base64Img})
 					if err != nil {
