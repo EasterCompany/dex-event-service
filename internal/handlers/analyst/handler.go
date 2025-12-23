@@ -343,11 +343,18 @@ func (h *AnalystHandler) emitNotification(ctx context.Context, notif Notificatio
 		Timestamp: timestamp,
 	}
 
+	// Marshal the full event for storage
+	fullEventJSON, err := json.Marshal(event)
+	if err != nil {
+		log.Printf("[%s] Error marshaling full event: %v", HandlerName, err)
+		return
+	}
+
 	// Use Redis pipeline for atomic operations
 	pipe := h.RedisClient.Pipeline()
 
 	eventKey := "event:" + eventID
-	pipe.Set(ctx, eventKey, json.RawMessage(event.Event), 0) // Store the notification event itself
+	pipe.Set(ctx, eventKey, fullEventJSON, 0) // Store the full notification event struct
 
 	// Add event ID to the global sorted set (timeline)
 	pipe.ZAdd(ctx, "events:timeline", redis.Z{
