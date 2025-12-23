@@ -14,6 +14,7 @@ import (
 	"github.com/EasterCompany/dex-event-service/internal/web"     // Corrected import
 	"github.com/EasterCompany/dex-event-service/templates"
 	"github.com/EasterCompany/dex-event-service/types"
+	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
@@ -270,8 +271,9 @@ func (h *AnalystHandler) fetchEventsForAnalysis(ctx context.Context, sinceTS, un
 // buildAnalysisPrompt constructs the prompt for the Ollama LLM.
 func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event) string {
 	// System prompt based on the user's request
-	systemPrompt := `Your task is to review a series of event logs and identify critical errors, unusual situations, significant completed workflows, or notable user interactions. Summarize these into concise, actionable notifications for the master user.
+	systemPrompt := fmt.Sprintf("%s\n\n%s\n\nYour task is to review a series of event logs and identify critical errors, unusual situations, significant completed workflows, or notable user interactions. Summarize these into concise, actionable notifications for the master user.", utils.DexterIdentity, utils.DexterArchitecture)
 
+	instructions := `
 **Instructions:**
 - Analyze the provided events chronologically.
 - Focus on patterns, anomalies, and changes in system state or user behavior.
@@ -311,7 +313,7 @@ func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event) string {
 	eventLogBuilder.WriteString("-------------\n")
 	eventLogBuilder.WriteString("Based on the above events, please generate a JSON array of notifications. Ensure the output is JUST the JSON, no prose.\n")
 
-	return systemPrompt + "\n" + eventLogBuilder.String()
+	return systemPrompt + "\n" + instructions + "\n" + eventLogBuilder.String()
 }
 
 // emitNotification creates and stores a new system.notification.generated event.

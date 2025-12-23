@@ -564,7 +564,9 @@ Consider the context and whether a response is truly necessary or if a simple em
 		if deps.Redis != nil {
 			deps.Redis.Expire(context.Background(), lockKey, 60*time.Second)
 		}
-		prompt := fmt.Sprintf("Context:\n%s\n\nUser: %s", contextHistory, content)
+
+		systemPrompt := utils.GetBaseSystemPrompt()
+		prompt := fmt.Sprintf("%s\n\nContext:\n%s\n\nUser: %s", systemPrompt, contextHistory, content)
 		responseModel := "dex-public-message-model"
 
 		streamMessageID, err = deps.Discord.InitStream(channelID, "<a:typing:1449387367315275786>")
