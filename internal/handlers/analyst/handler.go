@@ -33,7 +33,7 @@ const (
 	// LastAnalysisKey is the Redis key to store the timestamp of the last successful analysis
 	LastAnalysisKey = "analyst:last_analysis_ts"
 	// OllamaModel is the model to use for analysis
-	OllamaModel = "gpt-oss:20b"
+	OllamaModel = "dex-analyst-model"
 )
 
 var ignoredEventTypes = []string{
