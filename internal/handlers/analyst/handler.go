@@ -60,7 +60,7 @@ func NewAnalystHandler(redisClient *redis.Client, ollamaClient *ollama.Client, d
 		OllamaClient:   ollamaClient,
 		DiscordClient:  discordClient,
 		WebClient:      webClient,
-		lastAnalyzedTS: time.Now().Unix(), // Initialize to now on startup
+		lastAnalyzedTS: time.Now().Add(-1 * time.Hour).Unix(), // Look back 1 hour on first run if no state
 	}
 }
 
@@ -75,7 +75,7 @@ func (h *AnalystHandler) Init(ctx context.Context) error {
 			h.lastAnalyzedTS = ts
 		}
 	}
-	log.Printf("[%s] Last analysis timestamp: %s", HandlerName, time.Unix(h.lastAnalyzedTS, 0).Format(time.RFC3339))
+	log.Printf("[%s] Last analysis coverage up to: %s", HandlerName, time.Unix(h.lastAnalyzedTS, 0).Format(time.RFC3339))
 
 	// Start the background worker
 	ctx, cancel := context.WithCancel(context.Background())
@@ -99,7 +99,7 @@ func (h *AnalystHandler) Close() error {
 // HandleEvent processes incoming events to update activity timestamp.
 func (h *AnalystHandler) HandleEvent(ctx context.Context, event *types.Event, eventData map[string]interface{}) ([]types.Event, error) {
 	// Update last activity timestamp for user-facing events
-	eventType := eventData["type"].(string)
+	eventType, _ := eventData["type"].(string)
 	switch eventType {
 	case string(types.EventTypeMessagingUserSentMessage),
 		string(types.EventTypeMessagingUserJoinedVoice),
@@ -137,9 +137,10 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 		return
 	}
 
+	idleTime := time.Since(time.Unix(lastActivityTS, 0))
 	// Check for idle state
-	if time.Since(time.Unix(lastActivityTS, 0)) < IdleDuration {
-		// log.Printf("[%s] System not idle. Last activity %s ago.", HandlerName, time.Since(time.Unix(lastActivityTS, 0)).Round(time.Second))
+	if idleTime < IdleDuration {
+		// log.Printf("[%s] System not idle. Last activity %s ago.", HandlerName, idleTime.Round(time.Second))
 		return
 	}
 
@@ -157,7 +158,7 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	}
 
 	log.Printf("[%s] System idle for %s. %d new events detected. Initiating analysis...",
-		HandlerName, IdleDuration.Round(time.Second), newEventCount)
+		HandlerName, idleTime.Round(time.Second), newEventCount)
 
 	notifications, err := h.PerformAnalysis(ctx, h.lastAnalyzedTS, time.Now().Unix())
 	if err != nil {
@@ -165,14 +166,24 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 		return
 	}
 
-	for _, notif := range notifications {
-		h.emitNotification(ctx, notif)
+	if len(notifications) == 0 {
+		log.Printf("[%s] Analysis completed: No significant patterns found.", HandlerName)
+		h.emitNotification(ctx, Notification{
+			Title:    "Analysis Completed",
+			Priority: "low",
+			Category: "system",
+			Body:     fmt.Sprintf("Analyzed %d events. No significant patterns or anomalies were detected during this idle period.", newEventCount),
+		})
+	} else {
+		for _, notif := range notifications {
+			h.emitNotification(ctx, notif)
+		}
 	}
 
 	// Update last analyzed timestamp to current time
 	h.lastAnalyzedTS = time.Now().Unix()
 	h.RedisClient.Set(ctx, LastAnalysisKey, h.lastAnalyzedTS, 0)
-	log.Printf("[%s] Analysis complete. Last analyzed timestamp updated to %s.", HandlerName, time.Unix(h.lastAnalyzedTS, 0).Format(time.RFC3339))
+	log.Printf("[%s] Analysis coverage updated to %s.", HandlerName, time.Unix(h.lastAnalyzedTS, 0).Format(time.RFC3339))
 }
 
 // PerformAnalysis fetches events, creates a prompt, calls Ollama, and parses notifications.
