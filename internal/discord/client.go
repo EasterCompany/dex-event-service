@@ -124,6 +124,34 @@ func (c *Client) DeleteMessage(channelID, messageID string) error {
 	return nil
 }
 
+func (c *Client) AddReaction(channelID, messageID, emoji string) error {
+	reqBody := map[string]string{
+		"channel_id": channelID,
+		"message_id": messageID,
+		"emoji":      emoji,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.Post(c.BaseURL+"/message/react", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing reaction response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
 func (c *Client) TriggerTyping(channelID string) {
 	reqBody := map[string]string{"channel_id": channelID}
 	jsonData, _ := json.Marshal(reqBody)

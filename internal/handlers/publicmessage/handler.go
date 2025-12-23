@@ -474,31 +474,64 @@ Rules:
 		"1381915374181810236": true, // Memes
 	}
 
+	decisionStr := "NONE"
 	if mentionedBot {
 		log.Printf("Bot was mentioned, forcing engagement.")
 		shouldEngage = true
+		decisionStr = "REPLY"
 		engagementReason = "Direct mention"
 	} else if restrictedChannels[channelID] {
 		log.Printf("Channel %s is restricted (analysis only). Skipping engagement check.", channelID)
 		shouldEngage = false
+		decisionStr = "NONE"
 		engagementReason = "Restricted Channel (Analysis Only)"
 	} else {
 		reportProcessStatus(deps, channelID, "Checking Engagement", 0, startTime)
-		prompt := fmt.Sprintf("Context:\n%s\n\nCurrent Message:\n%s", contextHistory, content)
+		prompt := fmt.Sprintf(`Context:
+%s
+
+Current Message:
+%s
+
+Your task is to decide how Dexter should engage with the current message.
+Output EXACTLY one of the following options (no prose):
+- "REPLY": If Dexter should send a full text response.
+- "REACTION:<emoji>": If Dexter should only react with an emoji. Example: "REACTION:👍", "REACTION:🔥", "REACTION:😂", "REACTION:🤔", "REACTION:👀", "REACTION:✅", "REACTION:❌".
+- "NONE": If Dexter should ignore the message.
+
+Consider the context and whether a response is truly necessary or if a simple emoji reaction is more appropriate for acknowledgment.`, contextHistory, content)
 		var err error
 		engagementRaw, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
 		if err != nil {
 			log.Printf("Engagement check failed: %v", err)
 		} else {
-			engagementDecision := strings.ToUpper(strings.TrimSpace(engagementRaw))
-			shouldEngage = strings.Contains(engagementDecision, "TRUE")
-			log.Printf("Engagement decision: %s (%v)", engagementDecision, shouldEngage)
+			engagementRaw = strings.TrimSpace(engagementRaw)
+			upperRaw := strings.ToUpper(engagementRaw)
+			if strings.Contains(upperRaw, "REPLY") {
+				shouldEngage = true
+				decisionStr = "REPLY"
+			} else if strings.Contains(upperRaw, "REACTION:") {
+				shouldEngage = false
+				decisionStr = "REACTION"
+				// Extract emoji
+				parts := strings.SplitN(engagementRaw, ":", 2)
+				if len(parts) == 2 {
+					emoji := strings.TrimSpace(parts[1])
+					if emoji != "" {
+						messageID, _ := input.EventData["message_id"].(string)
+						if messageID != "" {
+							log.Printf("Reacting with emoji: %s", emoji)
+							_ = deps.Discord.AddReaction(channelID, messageID, emoji)
+							decisionStr = "REACTION:" + emoji
+						}
+					}
+				}
+			} else {
+				shouldEngage = false
+				decisionStr = "NONE"
+			}
+			log.Printf("Engagement decision: %s (%v)", decisionStr, shouldEngage)
 		}
-	}
-
-	decisionStr := "FALSE"
-	if shouldEngage {
-		decisionStr = "TRUE"
 	}
 
 	engagementEventData := map[string]interface{}{
