@@ -535,7 +535,19 @@ func checkHTTPStatus(baseReport ServiceReport) ServiceReport {
 
 	if serviceHealthReport.Metrics["cpu"] != nil {
 		if cpu, ok := serviceHealthReport.Metrics["cpu"].(map[string]interface{}); ok {
-			if avg, ok := cpu["avg"].(float64); ok && avg > 0 {
+			var avg float64
+			found := true
+			if val, ok := cpu["avg"].(float64); ok {
+				avg = val
+			} else if val, ok := cpu["avg"].(int64); ok {
+				avg = float64(val)
+			} else if val, ok := cpu["avg"].(int); ok {
+				avg = float64(val)
+			} else {
+				found = false
+			}
+
+			if found {
 				report.CPU = fmt.Sprintf("%.1f%%", avg)
 			}
 		}
@@ -545,7 +557,19 @@ func checkHTTPStatus(baseReport ServiceReport) ServiceReport {
 
 	if serviceHealthReport.Metrics["memory"] != nil {
 		if mem, ok := serviceHealthReport.Metrics["memory"].(map[string]interface{}); ok {
-			if avg, ok := mem["avg"].(float64); ok && avg > 0 {
+			var avg float64
+			found := true
+			if val, ok := mem["avg"].(float64); ok {
+				avg = val
+			} else if val, ok := mem["avg"].(int64); ok {
+				avg = float64(val)
+			} else if val, ok := mem["avg"].(int); ok {
+				avg = float64(val)
+			} else {
+				found = false
+			}
+
+			if found {
 				// Most Dexter services report memory in MB
 				report.Memory = fmt.Sprintf("%.1f MB", avg)
 			}
@@ -553,7 +577,6 @@ func checkHTTPStatus(baseReport ServiceReport) ServiceReport {
 	} else {
 		report.Memory = "N/A"
 	}
-
 	return report
 }
 
