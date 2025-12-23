@@ -27,7 +27,7 @@ const (
 	// IdleDuration is how long the system must be idle before analysis
 	IdleDuration = 15 * time.Minute
 	// MaxEventsToAnalyze is the maximum number of recent events to feed to the LLM
-	MaxEventsToAnalyze = 50
+	MaxEventsToAnalyze = 500
 	// LastActivityKey is the Redis key to store the timestamp of the last user-facing activity
 	LastActivityKey = "analyst:last_activity_ts"
 	// LastAnalysisKey is the Redis key to store the timestamp of the last successful analysis
@@ -35,6 +35,13 @@ const (
 	// OllamaModel is the model to use for analysis
 	OllamaModel = "gpt-oss:20b"
 )
+
+var ignoredEventTypes = []string{
+	"messaging.user.speaking.started",
+	"messaging.user.speaking.stopped",
+	"voice_speaking_started",
+	"voice_speaking_stopped",
+}
 
 // AnalystHandler handles generating proactive notifications based on event timeline analysis.
 type AnalystHandler struct {
@@ -259,8 +266,23 @@ func (h *AnalystHandler) fetchEventsForAnalysis(ctx context.Context, sinceTS, un
 		// Exclude notification events themselves from being re-analyzed to prevent feedback loops
 		var eventData map[string]interface{}
 		if err := json.Unmarshal(event.Event, &eventData); err == nil {
-			if eventType, ok := eventData["type"].(string); ok && eventType == string(types.EventTypeSystemNotificationGenerated) {
-				continue // Skip already generated notifications
+			eventType, _ := eventData["type"].(string)
+
+			// 1. Skip already generated notifications to prevent feedback loops
+			if eventType == string(types.EventTypeSystemNotificationGenerated) {
+				continue
+			}
+
+			// 2. Skip "noise" events (speaking started/stopped, etc)
+			isIgnored := false
+			for _, ignored := range ignoredEventTypes {
+				if eventType == ignored {
+					isIgnored = true
+					break
+				}
+			}
+			if isIgnored {
+				continue
 			}
 		}
 		events = append(events, event)
