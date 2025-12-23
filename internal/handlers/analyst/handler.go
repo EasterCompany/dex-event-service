@@ -138,9 +138,10 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	}
 
 	idleTime := time.Since(time.Unix(lastActivityTS, 0))
+	log.Printf("[%s] Idle check: system has been idle for %s (Threshold: %s)", HandlerName, idleTime.Round(time.Second), IdleDuration)
+
 	// Check for idle state
 	if idleTime < IdleDuration {
-		// log.Printf("[%s] System not idle. Last activity %s ago.", HandlerName, idleTime.Round(time.Second))
 		return
 	}
 
