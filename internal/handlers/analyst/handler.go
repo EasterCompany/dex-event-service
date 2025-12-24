@@ -272,18 +272,34 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 
 	// 2. Fallback: Try to parse as a raw array: [...]
 	var rawArray []Notification
-	if err := json.Unmarshal([]byte(cleanJSON), &rawArray); err == nil {
-		return rawArray, nil
+	if err := json.Unmarshal([]byte(cleanJSON), &rawArray); err == nil && len(rawArray) > 0 {
+		// VALIDATION: Ensure the items actually look like notifications
+		var validNotifications []Notification
+		for _, n := range rawArray {
+			if n.Title != "" || n.Body != "" {
+				validNotifications = append(validNotifications, n)
+			}
+		}
+		if len(validNotifications) > 0 {
+			return validNotifications, nil
+		}
 	}
 
-	// 3. If both failed, return the error notification
-	log.Printf("[%s] Warning: Ollama response was not valid JSON. Response: %s", HandlerName, ollamaResponseString)
-	return []Notification{{
-		Title:    "AI Analysis Failed",
-		Priority: "low",
-		Category: "system",
-		Body:     fmt.Sprintf("AI failed to parse its own output. Error: Unrecognized JSON format.\n\nRaw output:\n%s", ollamaResponseString),
-	}}, nil
+	// 3. If both failed, or result was empty log repetition, return error/empty
+	log.Printf("[%s] Warning: Ollama response was not valid or contained empty notifications. Response: %s", HandlerName, ollamaResponseString)
+
+	// If the AI outputted a large array that didn't match our schema, don't emit anything
+	// but do return a failure if it's clearly garbage.
+	if len(cleanJSON) > 10 && !strings.Contains(cleanJSON, "\"title\"") {
+		return []Notification{{
+			Title:    "AI Analysis Error",
+			Priority: "low",
+			Category: "system",
+			Body:     "The analyst model returned data that did not match the expected notification format. It may have attempted to repeat the input logs.",
+		}}, nil
+	}
+
+	return nil, nil
 }
 
 // Notification struct for parsing LLM output
@@ -371,25 +387,24 @@ func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event) string {
 	instructions := `
 **Instructions:**
 - Analyze the provided events chronologically.
-- Focus on patterns, anomalies, and changes in system state or user behavior.
-- Ignore repetitive, benign events (e.g., routine status checks, minor logs unless they form a pattern).
+- Focus on identifying critical errors, unusual patterns, workflow completions, or notable user interactions.
+- **DO NOT repeat the input logs.** Do not return an array of events.
+- Your output must consist ONLY of new insights/notifications that you have derived from the data.
+- If no significant patterns or critical insights are found, return exactly: {"notifications": []}.
 - For each identified insight, generate a single notification in JSON format.
-- Notifications should be clear, concise, and provide context.
-- Your response must be a JSON array of notifications.
-- Use the following JSON schema for each notification object:
+
+**JSON Schema:**
 {
   "notifications": [
     {
       "title": "Concise summary (e.g., 'Build Failed Repeatedly')",
       "priority": "low|medium|high|critical",
       "category": "system|security|conversation|error|build|user_activity",
-      "body": "Detailed explanation, patterns observed, or suggested actions (e.g., 'The 'dex-cli' failed to build 3 times due to linting errors. Check 'service_client.go'.')",
-      "related_event_ids": ["uuid-1", "uuid-2"] // List of relevant event IDs from the input logs
+      "body": "Detailed explanation of your insight.",
+      "related_event_ids": ["uuid-1", "uuid-2"]
     }
   ]
 }
-- If no significant patterns or critical insights are found, return an empty JSON object with an empty "notifications" array: {"notifications": []}.
-- Ensure the JSON is well-formed and strictly adheres to the schema.
 `
 
 	// User content: formatted event logs
