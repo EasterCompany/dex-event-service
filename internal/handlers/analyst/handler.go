@@ -294,26 +294,32 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	}
 
 	// --- Tier 2: Architect (Optimization & Quality) ---
-	// Runs if T1 is stable OR every hour.
-	shouldRunArchitect := true // Logic can be expanded to check T1 result types
-	if shouldRunArchitect {
+	// Runs every 1 hour.
+	lastArchitectRun, _ := h.RedisClient.Get(ctx, "analyst:last_run:architect").Result()
+	lastArchTS, _ := strconv.ParseInt(lastArchitectRun, 10, 64)
+
+	if time.Since(time.Unix(lastArchTS, 0)) >= 1*time.Hour {
 		architectPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "architect")
 		log.Printf("[%s] Executing Tier 2 (Architect) Analysis...", HandlerName)
 		aResults, err := h.runAnalysisWithModel("dex-analyst-architect", architectPrompt)
 		if err == nil {
 			allResults = append(allResults, aResults...)
+			h.RedisClient.Set(ctx, "analyst:last_run:architect", time.Now().Unix(), 0)
 		}
 	}
 
 	// --- Tier 3: Strategist (Feature Visionary) ---
-	// Runs once every 24 hours or when specifically requested.
-	// For now, we simulate with a 1/24 chance per idle cycle for development visibility
-	if time.Now().Hour() == 0 || time.Now().Minute()%30 == 0 {
+	// Runs every 24 hours.
+	lastStrategistRun, _ := h.RedisClient.Get(ctx, "analyst:last_run:strategist").Result()
+	lastStratTS, _ := strconv.ParseInt(lastStrategistRun, 10, 64)
+
+	if time.Since(time.Unix(lastStratTS, 0)) >= 24*time.Hour {
 		strategistPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "strategist")
 		log.Printf("[%s] Executing Tier 3 (Strategist) Analysis...", HandlerName)
 		sResults, err := h.runAnalysisWithModel("dex-analyst-strategist", strategistPrompt)
 		if err == nil {
 			allResults = append(allResults, sResults...)
+			h.RedisClient.Set(ctx, "analyst:last_run:strategist", time.Now().Unix(), 0)
 		}
 	}
 
