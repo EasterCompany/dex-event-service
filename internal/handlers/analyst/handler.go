@@ -55,16 +55,19 @@ type AnalystHandler struct {
 	WebClient      *web.Client
 	CancelFunc     context.CancelFunc
 	lastAnalyzedTS int64
+	lastCheckTS    int64
 }
 
 // NewAnalystHandler creates a new AnalystHandler instance.
 func NewAnalystHandler(redisClient *redis.Client, ollamaClient *ollama.Client, discordClient *discord.Client, webClient *web.Client) *AnalystHandler {
+	now := time.Now().Unix()
 	return &AnalystHandler{
 		RedisClient:    redisClient,
 		OllamaClient:   ollamaClient,
 		DiscordClient:  discordClient,
 		WebClient:      webClient,
-		lastAnalyzedTS: time.Now().Add(-1 * time.Hour).Unix(),
+		lastAnalyzedTS: now - 3600,
+		lastCheckTS:    now,
 	}
 }
 
@@ -72,6 +75,7 @@ func NewAnalystHandler(redisClient *redis.Client, ollamaClient *ollama.Client, d
 func (h *AnalystHandler) Init(ctx context.Context) error {
 	log.Printf("[%s] Initializing handler...", HandlerName)
 
+	h.lastCheckTS = time.Now().Unix()
 	lastAnalysisStr, err := h.RedisClient.Get(ctx, LastAnalysisKey).Result()
 	if err == nil {
 		if ts, err := strconv.ParseInt(lastAnalysisStr, 10, 64); err == nil {
@@ -162,6 +166,7 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 		var eventData map[string]interface{}
 		if err := json.Unmarshal(event.Event, &eventData); err == nil {
 			eventType, _ := eventData["type"].(string)
+			// Ignore our own notifications when calculating idle time
 			if eventType == string(types.EventTypeSystemNotificationGenerated) {
 				continue
 			}
@@ -176,8 +181,17 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 		lastSystemActivityTS = int64(lastEvents[0].Score)
 	}
 
-	idleTime := time.Since(time.Unix(lastSystemActivityTS, 0))
+	// The idle timer starts from the LATEST of:
+	// 1. The last significant user/system event
+	// 2. The last time the analyst completed a run
+	effectiveLastActivityTS := lastSystemActivityTS
+	if h.lastCheckTS > effectiveLastActivityTS {
+		effectiveLastActivityTS = h.lastCheckTS
+	}
 
+	idleTime := time.Since(time.Unix(effectiveLastActivityTS, 0))
+
+	// Check if any cognitive processes are currently running
 	iter := h.RedisClient.Scan(ctx, 0, "process:info:*", 0).Iterator()
 	activeProcessCount := 0
 	for iter.Next(ctx) {
@@ -185,6 +199,8 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	}
 
 	if activeProcessCount > 0 {
+		// If the system is busy, reset our check timer so we don't count "idle" while a job is running
+		h.lastCheckTS = time.Now().Unix()
 		return
 	}
 
@@ -193,6 +209,9 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	if idleTime < IdleDuration {
 		return
 	}
+
+	// Reset check timer immediately to avoid double-triggers
+	h.lastCheckTS = time.Now().Unix()
 
 	newEventCount, err := h.RedisClient.ZCount(ctx, timelineKey, fmt.Sprintf("(%d", h.lastAnalyzedTS), "+inf").Result()
 	if err != nil {
@@ -229,6 +248,7 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 		}
 	}
 
+	// Update coverage
 	latestEventInSet, err := h.RedisClient.ZRevRangeWithScores(ctx, timelineKey, 0, 0).Result()
 	if err == nil && len(latestEventInSet) > 0 {
 		h.lastAnalyzedTS = int64(latestEventInSet[0].Score)
