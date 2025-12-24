@@ -198,7 +198,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	lastArchitectRun, _ := h.RedisClient.Get(ctx, "analyst:last_run:architect").Result()
 	lastArchTS, _ := strconv.ParseInt(lastArchitectRun, 10, 64)
 
-	if time.Since(time.Unix(lastArchTS, 0)) >= 1*time.Hour {
+	if time.Since(time.Unix(lastArchTS, 0)) >= 2*time.Hour {
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 2: Architect Analysis")
 		architectPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "architect")
 
@@ -218,9 +218,8 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	lastStrategistRun, _ := h.RedisClient.Get(ctx, "analyst:last_run:strategist").Result()
 	lastStratTS, _ := strconv.ParseInt(lastStrategistRun, 10, 64)
 
-	if time.Since(time.Unix(lastStratTS, 0)) >= 12*time.Hour {
+	if time.Since(time.Unix(lastStratTS, 0)) >= 3*time.Hour {
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 3: Strategist Analysis")
-
 		roadmapItem := h.fetchOldestPublishedRoadmapItem(ctx)
 		var roadmapContent string
 		if roadmapItem != nil {
