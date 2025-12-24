@@ -75,8 +75,27 @@ func SyncDiscordStatus(ctx context.Context, redisClient *redis.Client, discordCl
 	}
 
 	if activeCount == 0 {
-		// No active processes, revert to standard idle status
-		discordClient.UpdateBotStatus("Offline", "online", 3)
+		// No active processes, revert to standard idle status with some personality
+		idleStatus := "Idle"
+
+		// 10% chance of a witty remark
+		if time.Now().UnixNano()%10 == 0 {
+			wittyRemarks := []string{
+				"Sleeping...",
+				"I am bored.",
+				"Dreaming of electric sheep...",
+				"Contemplating the void.",
+				"Waiting for Owen...",
+				"Refactoring my thoughts.",
+				"Counting bits.",
+				"Idle but aware.",
+			}
+			// Use UnixNano for a simple seed-less random selection
+			idx := (time.Now().UnixNano() / 10) % int64(len(wittyRemarks))
+			idleStatus = wittyRemarks[idx]
+		}
+
+		discordClient.UpdateBotStatus(idleStatus, "online", 3)
 	} else if latestProcessState != "" {
 		// Update to the most recently updated process state
 		discordClient.UpdateBotStatus(latestProcessState, "online", 3)
