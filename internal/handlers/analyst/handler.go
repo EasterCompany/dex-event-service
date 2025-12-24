@@ -96,19 +96,9 @@ func (h *AnalystHandler) Close() error {
 	return nil
 }
 
-// HandleEvent processes incoming events to update activity timestamp.
+// HandleEvent processes incoming events (now a no-op as we query the timeline directly for idle checks).
 func (h *AnalystHandler) HandleEvent(ctx context.Context, event *types.Event, eventData map[string]interface{}) ([]types.Event, error) {
-	// Update last activity timestamp for user-facing events
-	eventType, _ := eventData["type"].(string)
-	switch eventType {
-	case string(types.EventTypeMessagingUserSentMessage),
-		string(types.EventTypeMessagingUserJoinedVoice),
-		string(types.EventTypeMessagingUserLeftVoice),
-		string(types.EventTypeMessagingUserTranscribed),
-		string(types.EventTypeCLICommand):
-		h.RedisClient.Set(ctx, LastActivityKey, event.Timestamp, 0)
-	}
-	return nil, nil // Analyst handler doesn't typically generate child events in response to specific incoming events
+	return nil, nil
 }
 
 // runWorker is the main loop for the analyst handler's background operations.
@@ -129,15 +119,18 @@ func (h *AnalystHandler) runWorker(ctx context.Context) {
 
 // checkAndAnalyze determines if an analysis run is needed and executes it.
 func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
-	lastActivityTS, err := h.RedisClient.Get(ctx, LastActivityKey).Int64()
-	if err == redis.Nil {
-		lastActivityTS = time.Now().Unix() // If no activity recorded, assume now
-	} else if err != nil {
-		log.Printf("[%s] Error getting last activity timestamp: %v", HandlerName, err)
+	timelineKey := "events:timeline"
+
+	// 1. Get the very last event in the system to determine TRUE idle time
+	lastEventIDs, err := h.RedisClient.ZRevRangeWithScores(ctx, timelineKey, 0, 0).Result()
+	if err != nil || len(lastEventIDs) == 0 {
+		// If timeline is empty, nothing to do
 		return
 	}
 
-	idleTime := time.Since(time.Unix(lastActivityTS, 0))
+	lastSystemActivityTS := int64(lastEventIDs[0].Score)
+	idleTime := time.Since(time.Unix(lastSystemActivityTS, 0))
+
 	log.Printf("[%s] Idle check: system has been idle for %s (Threshold: %s)", HandlerName, idleTime.Round(time.Second), IdleDuration)
 
 	// Check for idle state
@@ -145,8 +138,8 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 		return
 	}
 
-	// Check if new events have occurred since last analysis
-	timelineKey := "events:timeline" // Global timeline
+	// 2. Check if new events have occurred since our LAST SUCCESSFUL ANALYSIS
+	// (We don't want to keep analyzing the same 500 events if no new ones arrived)
 	newEventCount, err := h.RedisClient.ZCount(ctx, timelineKey, fmt.Sprintf("(%d", h.lastAnalyzedTS), "+inf").Result()
 	if err != nil {
 		log.Printf("[%s] Error counting new events: %v", HandlerName, err)
@@ -154,12 +147,11 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	}
 
 	if newEventCount == 0 {
-		// log.Printf("[%s] No new events since last analysis at %s.", HandlerName, time.Unix(h.lastAnalyzedTS, 0).Format(time.RFC3339))
 		return
 	}
 
-	log.Printf("[%s] System idle for %s. %d new events detected. Initiating analysis...",
-		HandlerName, idleTime.Round(time.Second), newEventCount)
+	log.Printf("[%s] System idle threshold met. %d new events since last analysis. Initiating analysis...",
+		HandlerName, newEventCount)
 
 	notifications, err := h.PerformAnalysis(ctx, h.lastAnalyzedTS, time.Now().Unix())
 	if err != nil {
