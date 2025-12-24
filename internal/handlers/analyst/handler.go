@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strconv" // Added for strconv.ParseInt
 	"strings" // Added for strings.Builder
 	"time"
@@ -212,6 +213,32 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	log.Printf("[%s] Analysis coverage updated to %s.", HandlerName, time.Unix(h.lastAnalyzedTS, 0).Format(time.RFC3339))
 }
 
+// extractJSON attempts to find and return a JSON string within a larger text block,
+// specifically handling markdown code blocks (```json ... ```).
+func extractJSON(input string) string {
+	input = strings.TrimSpace(input)
+
+	// Check for markdown code blocks
+	if strings.Contains(input, "```") {
+		// Try to find ```json ... ```
+		re := regexp.MustCompile("(?s)```(?:json)?\n?(.*?)\n?```")
+		match := re.FindStringSubmatch(input)
+		if len(match) > 1 {
+			return strings.TrimSpace(match[1])
+		}
+	}
+
+	// Fallback to finding the first '[' or '{' and last ']' or '}'
+	start := strings.IndexAny(input, "[{")
+	end := strings.LastIndexAny(input, "]}")
+
+	if start != -1 && end != -1 && end > start {
+		return input[start : end+1]
+	}
+
+	return input
+}
+
 // PerformAnalysis fetches events, creates a prompt, calls Ollama, and parses notifications.
 func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS int64) ([]Notification, error) {
 	// Fetch events since last analysis
@@ -227,23 +254,25 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	prompt := h.buildAnalysisPrompt(events)
 
 	// Call Ollama
-	// Ollama client's Generate function signature: (model, prompt string, images []string) (string, error)
-	ollamaResponseString, err := h.OllamaClient.Generate(OllamaModel, prompt, nil) // Pass nil for images for now
+	ollamaResponseString, err := h.OllamaClient.Generate(OllamaModel, prompt, nil)
 	if err != nil {
 		return nil, fmt.Errorf("ollama generation failed: %w", err)
 	}
+
+	// Extract clean JSON from potential markdown/prose
+	cleanJSON := extractJSON(ollamaResponseString)
 
 	// Parse Ollama's response into Notification struct
 	var ollamaOutput struct {
 		Notifications []Notification `json:"notifications"`
 	}
-	if err := json.Unmarshal([]byte(ollamaResponseString), &ollamaOutput); err != nil { // Use ollamaResponseString
+	if err := json.Unmarshal([]byte(cleanJSON), &ollamaOutput); err != nil {
 		log.Printf("[%s] Warning: Ollama response was not valid JSON. Response: %s, Error: %v", HandlerName, ollamaResponseString, err)
 		return []Notification{{
 			Title:    "AI Analysis Failed",
 			Priority: "low",
 			Category: "system",
-			Body:     fmt.Sprintf("AI failed to parse its own output. Raw output: %s. Error: %v", ollamaResponseString, err),
+			Body:     fmt.Sprintf("AI failed to parse its own output. Error: %v\n\nRaw output:\n%s", err, ollamaResponseString),
 		}}, nil
 	}
 
