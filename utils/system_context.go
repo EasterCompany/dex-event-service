@@ -57,8 +57,16 @@ func GetBaseSystemPrompt() string {
 	return DexterIdentity + "\n\n" + DexterArchitecture + "\n\n" + DexterOperationalGuidelines
 }
 
-const (
-	// AnalystGuardianContext defines instructions for the Tier 1 Guardian Analyst.
+// GetFastSystemPrompt returns a shorter, more direct persona for high-speed engagement.
+func GetFastSystemPrompt() string {
+	return `You are Dexter, a professional and direct AI. 
+Master user: Owen.
+Core: Event-driven Go system.
+Task: Provide a quick, witty, and helpful response.
+Rules: Be concise. No long explanations unless asked.`
+}
+
+const ( // AnalystGuardianContext defines instructions for the Tier 1 Guardian Analyst.
 	AnalystGuardianContext = `### **Reasoning Objective: Tier 1 - Technical Sentry**
 **Goal:** Detect if the system is broken or unreliable.
 - **Service Health:** Check 'Current System Status' for offline services.

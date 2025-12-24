@@ -57,7 +57,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	defer deps.Discord.UpdateBotStatus("Listening for events...", "online", 2)
 
 	// Fetch context
-	contextHistory, err := deps.Discord.FetchContext(channelID)
+	contextHistory, err := deps.Discord.FetchContext(channelID, 25)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch context: %v", err)
 	}

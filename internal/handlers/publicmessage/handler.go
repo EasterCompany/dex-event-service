@@ -414,44 +414,16 @@ Rules:
 	engagementReason := "Evaluated by dex-engagement-model"
 	var engagementRaw string
 
-	contextHistory, err := deps.Discord.FetchContext(channelID)
-	if err != nil {
-		log.Printf("Warning: Failed to fetch context: %v", err)
-	}
-
-	// Fetch channel members (active users) and build user map
-	var userMap map[string]string // username -> ID
-	var channelMembers string
-
-	users, membersStr, err := deps.Discord.FetchChannelMembers(channelID)
-	if err != nil {
-		log.Printf("Warning: Failed to fetch channel members: %v", err)
-	} else {
-		channelMembers = membersStr
-		userMap = make(map[string]string)
-		for _, u := range users {
-			userMap[u.Username] = u.ID
-		}
-
-		if mentions, ok := input.EventData["mentions"].([]interface{}); ok {
-			content = utils.NormalizeMentions(content, mentions)
-		}
-	}
-
-	if channelMembers != "" {
-		contextHistory += "\n\n" + channelMembers
-	}
-
-	// Restricted channels (Analysis/Moderation only, no unsolicited engagement)
-	restrictedChannels := map[string]bool{
-		"1437617331529580614": true, // Music
-		"1381915374181810236": true, // Memes
-	}
-
+	// --- 1. First Determine the Engagement Decision & Model ---
 	const MainChatChannelID = "1426957003108122656"
 	masterUserID := ""
 	if deps.Options != nil {
 		masterUserID = deps.Options.Discord.MasterUser
+	}
+
+	restrictedChannels := map[string]bool{
+		"1437617331529580614": true, // Music
+		"1381915374181810236": true, // Memes
 	}
 
 	var decisionStr string
@@ -462,7 +434,6 @@ Rules:
 		shouldEngage = true
 		decisionStr = "REPLY"
 		engagementReason = "Direct mention"
-		// Mentions in main chat get regular model, elsewhere get fast
 		if channelID == MainChatChannelID {
 			responseModel = "dex-public-message-model"
 		}
@@ -472,7 +443,9 @@ Rules:
 		decisionStr = "NONE"
 		engagementReason = "Restricted Channel (Analysis Only)"
 	} else if channelID == MainChatChannelID {
-		// --- MAIN CHAT: High-Fidelity Engagement ---
+		// Fetch standard history for evaluating strategy
+		evalHistory, _ := deps.Discord.FetchContext(channelID, 25)
+
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Evaluating Strategy")
 		prompt := fmt.Sprintf(`Context:
 %s
@@ -489,7 +462,7 @@ Output EXACTLY one of the following tokens:
 
 User ID: %s (Master ID: %s)
 
-Output ONLY the token.`, contextHistory, content, userID, masterUserID)
+Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 
 		var err error
 		engagementRaw, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
@@ -535,9 +508,10 @@ Output ONLY the token.`, contextHistory, content, userID, masterUserID)
 		}
 	} else {
 		// --- OTHER CHANNELS: Fast Binary Engagement ---
+		evalHistory, _ := deps.Discord.FetchContext(channelID, 10)
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Vibe Check")
-		prompt := fmt.Sprintf("Analyze if Dexter should respond to this message. Output TRUE or FALSE.\n\nContext:\n%s\n\nMessage: %s", contextHistory, content)
-		engagementRaw, err = deps.Ollama.Generate("dex-fast-engagement-model", prompt, nil)
+		prompt := fmt.Sprintf("Analyze if Dexter should respond to this message. Output TRUE or FALSE.\n\nContext:\n%s\n\nMessage: %s", evalHistory, content)
+		engagementRaw, err := deps.Ollama.Generate("dex-fast-engagement-model", prompt, nil)
 		if err == nil && strings.Contains(strings.ToUpper(engagementRaw), "TRUE") {
 			shouldEngage = true
 			decisionStr = "ENGAGE_FAST"
@@ -546,6 +520,44 @@ Output ONLY the token.`, contextHistory, content, userID, masterUserID)
 			shouldEngage = false
 			decisionStr = "IGNORE"
 		}
+	}
+
+	// --- 2. Build Response Context based on Model Choice ---
+	isFastModel := strings.Contains(responseModel, "-fast-")
+	contextLimit := 25
+	systemPrompt := utils.GetBaseSystemPrompt()
+
+	if isFastModel {
+		contextLimit = 5
+		systemPrompt = utils.GetFastSystemPrompt()
+	}
+
+	contextHistory, err := deps.Discord.FetchContext(channelID, contextLimit)
+	if err != nil {
+		log.Printf("Warning: Failed to fetch context: %v", err)
+	}
+
+	// Fetch channel members (active users) and build user map
+	var userMap map[string]string // username -> ID
+	var channelMembers string
+
+	users, membersStr, err := deps.Discord.FetchChannelMembers(channelID)
+	if err != nil {
+		log.Printf("Warning: Failed to fetch channel members: %v", err)
+	} else {
+		channelMembers = membersStr
+		userMap = make(map[string]string)
+		for _, u := range users {
+			userMap[u.Username] = u.ID
+		}
+
+		if mentions, ok := input.EventData["mentions"].([]interface{}); ok {
+			content = utils.NormalizeMentions(content, mentions)
+		}
+	}
+
+	if channelMembers != "" && !isFastModel { // Only provide detailed member list to regular models
+		contextHistory += "\n\n" + channelMembers
 	}
 
 	engagementEventData := map[string]interface{}{
@@ -575,7 +587,6 @@ Output ONLY the token.`, contextHistory, content, userID, masterUserID)
 			deps.Redis.Expire(context.Background(), lockKey, 60*time.Second)
 		}
 
-		systemPrompt := utils.GetBaseSystemPrompt()
 		prompt := fmt.Sprintf("%s\n\nContext:\n%s\n\nUser: %s", systemPrompt, contextHistory, content)
 
 		streamMessageID, err := deps.Discord.InitStream(channelID, "<a:typing:1449387367315275786>")

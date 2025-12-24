@@ -272,7 +272,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		defer deps.Redis.Del(context.Background(), lockKey)
 	}
 
-	contextHistory, err := deps.Discord.FetchContext(channelID)
+	contextHistory, err := deps.Discord.FetchContext(channelID, 25)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch context: %v", err)
 	}

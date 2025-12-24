@@ -176,14 +176,16 @@ func (c *Client) UpdateBotStatus(text string, status string, activityType int) {
 	}
 }
 
-// FetchContext calls the event service to get history.
-// Note: The original code called Event Service, not Discord Service for context history.
-func (c *Client) FetchContext(channelID string) (string, error) {
+// FetchContext calls the event service to get history with a specific max length.
+func (c *Client) FetchContext(channelID string, maxLength int) (string, error) {
 	if channelID == "" {
 		return "", nil
 	}
+	if maxLength <= 0 {
+		maxLength = 25 // Default
+	}
 	// Use EventSvcURL here
-	url := fmt.Sprintf("%s/events?channel=%s&max_length=25&order=desc&format=text&exclude_types=engagement.decision", c.EventSvcURL, channelID)
+	url := fmt.Sprintf("%s/events?channel=%s&max_length=%d&order=desc&format=text&exclude_types=engagement.decision", c.EventSvcURL, channelID, maxLength)
 
 	resp, err := http.Get(url)
 	if err != nil {
