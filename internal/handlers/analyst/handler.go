@@ -48,14 +48,19 @@ type AnalystHandler struct {
 	WebClient      *web.Client
 	lastAnalyzedTS int64
 	stopChan       chan struct{}
+	ctx            context.Context
+	cancel         context.CancelFunc
 }
 
 func NewAnalystHandler(redis *redis.Client, ollama *ollama.Client, discord *discord.Client, web *web.Client, options interface{}) *AnalystHandler {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &AnalystHandler{
 		RedisClient:   redis,
 		OllamaClient:  ollama,
 		DiscordClient: discord,
 		WebClient:     web,
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 }
 
@@ -63,7 +68,7 @@ func (h *AnalystHandler) Init(ctx context.Context) error {
 	h.stopChan = make(chan struct{})
 
 	// Load last analyzed timestamp
-	ts, _ := h.RedisClient.Get(context.Background(), LastAnalysisKey).Int64()
+	ts, _ := h.RedisClient.Get(h.ctx, LastAnalysisKey).Int64()
 	h.lastAnalyzedTS = ts
 	if h.lastAnalyzedTS == 0 {
 		h.lastAnalyzedTS = time.Now().Add(-24 * time.Hour).Unix()
@@ -75,6 +80,9 @@ func (h *AnalystHandler) Init(ctx context.Context) error {
 }
 
 func (h *AnalystHandler) Close() error {
+	if h.cancel != nil {
+		h.cancel() // Cancel ongoing Ollama/HTTP calls
+	}
 	if h.stopChan != nil {
 		close(h.stopChan)
 	}
@@ -102,23 +110,16 @@ func (h *AnalystHandler) runWorker() {
 }
 
 func (h *AnalystHandler) checkAndAnalyze() {
-	ctx := context.Background()
-
-	lastCognitiveEvent, _ := h.RedisClient.Get(ctx, "system:last_cognitive_event").Int64()
+	lastCognitiveEvent, _ := h.RedisClient.Get(h.ctx, "system:last_cognitive_event").Int64()
 	lastAnalysisDiff := time.Since(time.Unix(h.lastAnalyzedTS, 0))
 
-	// Logic: System is idle if no high-priority cognitive events in last 60s
 	isIdle := time.Since(time.Unix(lastCognitiveEvent, 0)) >= 60*time.Second
-
-	// If it's been more than 2 hours, we FORCE an analysis even if not "idle"
-	// (to prevent permanent blockage by constant chatter)
 	forceRun := lastAnalysisDiff > 2*time.Hour
 
 	if !isIdle && !forceRun {
 		return
 	}
 
-	// Minimum interval of 5 minutes between runs
 	if lastAnalysisDiff < 5*time.Minute {
 		return
 	}
@@ -127,38 +128,42 @@ func (h *AnalystHandler) checkAndAnalyze() {
 	untilTS := time.Now().Unix()
 	sinceTS := h.lastAnalyzedTS
 
-	results, err := h.PerformAnalysis(ctx, sinceTS, untilTS)
+	results, err := h.PerformAnalysis(h.ctx, sinceTS, untilTS)
 	if err != nil {
+		if err == context.Canceled {
+			log.Printf("[%s] Analysis cycle cancelled during shutdown.", HandlerName)
+			return
+		}
 		log.Printf("[%s] Analysis failed: %v", HandlerName, err)
 		return
 	}
 
 	for _, res := range results {
-		h.emitResult(ctx, res)
+		h.emitResult(h.ctx, res)
 	}
 
+	// ONLY update the timestamp if we finished successfully and weren't cancelled
 	h.lastAnalyzedTS = untilTS
-	h.RedisClient.Set(ctx, LastAnalysisKey, h.lastAnalyzedTS, 0)
+	h.RedisClient.Set(h.ctx, LastAnalysisKey, h.lastAnalyzedTS, 0)
 	log.Printf("[%s] Analysis coverage updated to %s.", HandlerName, time.Unix(h.lastAnalyzedTS, 0).Format(time.RFC3339))
 }
 
 func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS int64) ([]AnalysisResult, error) {
 	events, err := h.fetchEventsForAnalysis(ctx, sinceTS, untilTS)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch events: %w", err)
+		return nil, err
 	}
 
-	status, _ := h.fetchSystemStatus()
-	logs, _ := h.fetchRecentLogs()
-	tests, _ := h.fetchTestResults()
+	status, _ := h.fetchSystemStatus(ctx)
+	logs, _ := h.fetchRecentLogs(ctx)
+	tests, _ := h.fetchTestResults(ctx)
 	history, _ := h.fetchRecentNotifications(ctx, 20)
 
 	var allResults []AnalysisResult
 
 	// --- Tier 1: Guardian ---
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, "system-analyst", "Tier 1: Guardian Analysis")
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 1: Guardian Analysis")
 	guardianPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "guardian")
-	log.Printf("[%s] Executing Tier 1 (Guardian) Analysis...", HandlerName)
 
 	guardianModel := "dex-analyst-guardian"
 	ollamaGResponse, err := h.OllamaClient.Generate(guardianModel, guardianPrompt, nil)
@@ -166,6 +171,8 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 		h.emitAudit(ctx, "guardian", guardianModel, guardianPrompt, ollamaGResponse)
 		gResults := h.parseAnalysisResults(ollamaGResponse)
 		allResults = append(allResults, gResults...)
+	} else if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 
 	// --- Tier 2: Architect ---
@@ -173,9 +180,8 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	lastArchTS, _ := strconv.ParseInt(lastArchitectRun, 10, 64)
 
 	if time.Since(time.Unix(lastArchTS, 0)) >= 15*time.Minute {
-		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, "system-analyst", "Tier 2: Architect Analysis")
+		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 2: Architect Analysis")
 		architectPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "architect")
-		log.Printf("[%s] Executing Tier 2 (Architect) Analysis...", HandlerName)
 
 		architectModel := "dex-analyst-architect"
 		ollamaAResponse, err := h.OllamaClient.Generate(architectModel, architectPrompt, nil)
@@ -184,6 +190,8 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 			aResults := h.parseAnalysisResults(ollamaAResponse)
 			allResults = append(allResults, aResults...)
 			h.RedisClient.Set(ctx, "analyst:last_run:architect", time.Now().Unix(), 0)
+		} else if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 	}
 
@@ -192,21 +200,18 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	lastStratTS, _ := strconv.ParseInt(lastStrategistRun, 10, 64)
 
 	if time.Since(time.Unix(lastStratTS, 0)) >= 1*time.Hour {
-		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, "system-analyst", "Tier 3: Strategist Analysis")
+		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 3: Strategist Analysis")
 
 		roadmapItem := h.fetchOldestPublishedRoadmapItem(ctx)
 		var roadmapContent string
 		if roadmapItem != nil {
 			roadmapContent = roadmapItem.Content
-			log.Printf("[%s] Found active roadmap objective: \"%s\".", HandlerName, roadmapItem.ID)
 		}
 
 		strategistPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "strategist")
 		if roadmapContent != "" {
 			strategistPrompt = fmt.Sprintf("### PRIMARY CREATOR OBJECTIVE (PRIORITY #1):\n%s\n\n%s", roadmapContent, strategistPrompt)
 		}
-
-		log.Printf("[%s] Executing Tier 3 (Strategist) Analysis...", HandlerName)
 
 		strategistModel := "dex-analyst-strategist"
 		ollamaSResponse, err := h.OllamaClient.Generate(strategistModel, strategistPrompt, nil)
@@ -222,6 +227,8 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 
 			allResults = append(allResults, sResults...)
 			h.RedisClient.Set(ctx, "analyst:last_run:strategist", time.Now().Unix(), 0)
+		} else if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 	}
 
@@ -257,7 +264,6 @@ func (h *AnalystHandler) parseSingleMarkdownReport(input string) AnalysisResult 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		// Ignore everything until we find the first header (#)
 		if !foundHeader {
 			if strings.HasPrefix(trimmed, "# ") {
 				res.Title = strings.TrimPrefix(trimmed, "# ")
@@ -266,7 +272,6 @@ func (h *AnalystHandler) parseSingleMarkdownReport(input string) AnalysisResult 
 			continue
 		}
 
-		// If we've already found the header, parse metadata and sections
 		if strings.HasPrefix(trimmed, "**Type**:") {
 			res.Type = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(trimmed, "**Type**:")))
 			continue
@@ -441,17 +446,17 @@ func (h *AnalystHandler) fetchEventsForAnalysis(ctx context.Context, sinceTS, un
 	return events, nil
 }
 
-func (h *AnalystHandler) fetchSystemStatus() (string, error) {
+func (h *AnalystHandler) fetchSystemStatus(ctx context.Context) (string, error) {
 	status, err := utils.FetchURL("http://127.0.0.1:8100/system_monitor", 5*time.Second)
 	return status, err
 }
 
-func (h *AnalystHandler) fetchRecentLogs() (string, error) {
+func (h *AnalystHandler) fetchRecentLogs(ctx context.Context) (string, error) {
 	logs, err := utils.FetchURL("http://127.0.0.1:8100/logs?limit=20", 5*time.Second)
 	return logs, err
 }
 
-func (h *AnalystHandler) fetchTestResults() (string, error) {
+func (h *AnalystHandler) fetchTestResults(ctx context.Context) (string, error) {
 	return "No recent test results available.", nil
 }
 
