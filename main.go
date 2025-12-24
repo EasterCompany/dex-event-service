@@ -205,6 +205,8 @@ func main() {
 	router.HandleFunc("/system_monitor", endpoints.SystemMonitorHandler).Methods("GET")
 	router.HandleFunc("/processes", endpoints.ListProcessesHandler).Methods("GET")
 	router.HandleFunc("/logs", endpoints.LogsHandler).Methods("GET")
+	router.HandleFunc("/analyst/status", endpoints.GetAnalystStatusHandler(redisClient)).Methods("GET")
+	router.HandleFunc("/analyst/reset", endpoints.ResetAnalystHandler(redisClient)).Methods("POST", "GET") // Allow GET for simple triggers
 
 	// Mount the static web UI
 	webDir := filepath.Join(os.ExpandEnv("$HOME"), "Dexter", "web", "dist")
