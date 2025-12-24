@@ -219,15 +219,12 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 		return
 	}
 
-	if newEventCount == 0 {
-		return
-	}
-
 	log.Printf("[%s] System idle threshold met. %d new events since last analysis. Initiating analysis...", HandlerName, newEventCount)
 
 	h.reportProcessStatus(ctx, fmt.Sprintf("Analyzing %d events", newEventCount))
 	defer h.RedisClient.Del(ctx, "process:info:system-analyst")
 
+	// Even if newEventCount is 0, we still perform analysis to check Logs and Service Status (Tier 1)
 	results, err := h.PerformAnalysis(ctx, h.lastAnalyzedTS, time.Now().Unix())
 	if err != nil {
 		log.Printf("[%s] Error during analysis: %v", HandlerName, err)
