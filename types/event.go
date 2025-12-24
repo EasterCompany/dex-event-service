@@ -41,7 +41,9 @@ const (
 	EventTypeAnalysisLinkCompleted   EventType = "analysis.link.completed"
 
 	// System Events
-	EventTypeSystemStatusChange EventType = "system.status.change"
+	EventTypeSystemStatusChange   EventType = "system.status.change"
+	EventTypeSystemTestCompleted  EventType = "system.test.completed"
+	EventTypeSystemBuildCompleted EventType = "system.build.completed"
 
 	// CLI Events
 	EventTypeCLICommand EventType = "system.cli.command"

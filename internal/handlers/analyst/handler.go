@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -125,6 +126,10 @@ func (h *AnalystHandler) checkAndAnalyze() {
 	}
 
 	log.Printf("[%s] Analysis trigger: Idle=%v, Force=%v. Starting cycle...", HandlerName, isIdle, forceRun)
+
+	// TRIGGER: Run system tests before analysis to provide fresh data
+	h.runSystemTests(h.ctx)
+
 	untilTS := time.Now().Unix()
 	sinceTS := h.lastAnalyzedTS
 
@@ -146,6 +151,21 @@ func (h *AnalystHandler) checkAndAnalyze() {
 	h.lastAnalyzedTS = untilTS
 	h.RedisClient.Set(h.ctx, LastAnalysisKey, h.lastAnalyzedTS, 0)
 	log.Printf("[%s] Analysis coverage updated to %s.", HandlerName, time.Unix(h.lastAnalyzedTS, 0).Format(time.RFC3339))
+}
+
+func (h *AnalystHandler) runSystemTests(ctx context.Context) {
+	log.Printf("[%s] Running pre-analysis system tests...", HandlerName)
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Running System Tests")
+
+	// Execute 'dex test' command
+	// We assume 'dex' is in the PATH or use the absolute path to the binary
+	cmd := exec.CommandContext(ctx, "/home/owen/Dexter/bin/dex", "test")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("[%s] System tests failed: %v (Output: %s)", HandlerName, err, string(output))
+	} else {
+		log.Printf("[%s] System tests completed successfully.", HandlerName)
+	}
 }
 
 func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS int64) ([]AnalysisResult, error) {
@@ -234,7 +254,6 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 
 	return allResults, nil
 }
-
 func (h *AnalystHandler) parseAnalysisResults(response string) []AnalysisResult {
 	if strings.Contains(response, "No significant insights found.") {
 		return nil
@@ -457,9 +476,45 @@ func (h *AnalystHandler) fetchRecentLogs(ctx context.Context) (string, error) {
 }
 
 func (h *AnalystHandler) fetchTestResults(ctx context.Context) (string, error) {
-	return "No recent test results available.", nil
-}
+	// Query last 100 events to find system.test.completed
+	eventIDs, err := h.RedisClient.ZRevRange(ctx, "events:timeline", 0, 100).Result()
+	if err != nil {
+		return "", err
+	}
 
+	var testSummaries []string
+	seenServices := make(map[string]bool)
+
+	for _, id := range eventIDs {
+		data, _ := h.RedisClient.Get(ctx, "event:"+id).Result()
+		var e types.Event
+		if err := json.Unmarshal([]byte(data), &e); err == nil {
+			var ed map[string]interface{}
+			_ = json.Unmarshal(e.Event, &ed)
+
+			if ed["type"] == string(types.EventTypeSystemTestCompleted) {
+				svc := ed["service_name"].(string)
+				if !seenServices[svc] {
+					// Format a nice summary line
+					format := ed["format"].(map[string]interface{})
+					lint := ed["lint"].(map[string]interface{})
+					test := ed["test"].(map[string]interface{})
+
+					summary := fmt.Sprintf("[%s] Format: %s, Lint: %s, Test: %s (%s)",
+						svc, format["status"], lint["status"], test["details"], ed["duration"])
+					testSummaries = append(testSummaries, summary)
+					seenServices[svc] = true
+				}
+			}
+		}
+	}
+
+	if len(testSummaries) == 0 {
+		return "No recent test results available.", nil
+	}
+
+	return strings.Join(testSummaries, "\n"), nil
+}
 func (h *AnalystHandler) fetchRecentNotifications(ctx context.Context, limit int) (string, error) {
 	eventIDs, err := h.RedisClient.ZRevRange(ctx, "events:service:"+HandlerName, 0, int64(limit-1)).Result()
 	if err != nil {
