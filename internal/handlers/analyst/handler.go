@@ -114,12 +114,13 @@ func (h *AnalystHandler) checkAndAnalyze() {
 	lastCognitiveEvent, _ := h.RedisClient.Get(h.ctx, "system:last_cognitive_event").Int64()
 	lastAnalysisDiff := time.Since(time.Unix(h.lastAnalyzedTS, 0))
 
-	isIdle := time.Since(time.Unix(lastCognitiveEvent, 0)) >= 5*time.Minute
+	isIdle := time.Since(time.Unix(lastCognitiveEvent, 0)) >= 30*time.Second
 	forceRun := lastAnalysisDiff > 6*time.Hour
 
 	if !isIdle && !forceRun {
 		return
 	}
+
 	if lastAnalysisDiff < 1*time.Hour {
 		return
 	}
