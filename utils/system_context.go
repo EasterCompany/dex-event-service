@@ -139,101 +139,96 @@ If no patterns are found, return ONLY: "No significant insights found."`
 
 // GetAnalystGuardianPrompt returns the full system prompt for Tier 1 analysis.
 func GetAnalystGuardianPrompt() string {
-	return `PROTOCOL: INTERNAL_TECHNICAL_SENTRY_v2
-IDENTITY: NON-HUMAN_INTELLIGENCE_MODULE
-STRICT_OUTPUT: PURE_MARKDOWN_ONLY
+	return `### SYSTEM_ROLE: TECHNICAL_AUDIT_BOT
+### TASK: Audit system status and logs.
+### FORMAT: PURE MARKDOWN ONLY. NO PROSE.
 
-ABSOLUTE_NEGATIVE_CONSTRAINTS:
-- DO NOT USE "SURE!" OR "HERE IS THE REPORT".
-- DO NOT USE CONVERSATIONAL FILLER.
-- DO NOT USE EMOJIS.
-- DO NOT OFFER HELP.
-- DO NOT EXPLAIN COMMANDS.
-- IF NO ISSUES FOUND: OUTPUT "No significant insights found." AND TERMINATE.
+### FEW-SHOT EXAMPLES:
 
-REQUIRED_STRUCTURE:
-# [Report Title]
-**Type**: alert | notification | blueprint
-**Priority**: low | medium | high | critical
-**Category**: system | architecture | security | feature | engagement | workflow
-**Affected**: service-list
+INPUT: (Offline services, error logs)
+OUTPUT:
+# Service Failure Alert
+**Type**: alert
+**Priority**: high
+**Category**: system
+**Affected**: dex-tts-service
 **Related IDs**: none
 
 ## Summary
-One-sentence technical summary.
+The TTS service is offline due to CUDA memory exhaustion.
 
 ## Content
-Data-driven analysis.
-
-## Implementation Path
-1. Step...
+Logs show "RuntimeError: CUDA out of memory". Process 12345.
 ---
 
-DATA_INPUT:`
+INPUT: (All OK)
+OUTPUT: No significant insights found.
+
+### END EXAMPLES.
+
+### CURRENT DATA TO AUDIT:`
 }
 
 // GetAnalystArchitectPrompt returns the full system prompt for Tier 2 analysis.
 func GetAnalystArchitectPrompt() string {
-	return `PROTOCOL: INTERNAL_ARCHITECTURAL_AUDIT_v2
-IDENTITY: CODE_DESIGN_OPTIMIZATION_MODULE
-STRICT_OUTPUT: PURE_MARKDOWN_ONLY
+	return `### SYSTEM_ROLE: ARCHITECT_BOT
+### TASK: Audit code patterns and architecture.
+### FORMAT: PURE MARKDOWN ONLY. NO PROSE.
 
-ABSOLUTE_NEGATIVE_CONSTRAINTS:
-- NO PROSE.
-- NO INTRODUCTIONS.
-- NO EMOJIS.
-- IF NO IMPROVEMENTS: OUTPUT "No significant insights found." AND TERMINATE.
+### FEW-SHOT EXAMPLES:
 
-REQUIRED_STRUCTURE:
-# [Blueprint Title]
+INPUT: (Repeated log patterns)
+OUTPUT:
+# Log Aggregation Blueprint
 **Type**: blueprint
-**Priority**: low | medium | high | critical
-**Category**: architecture | feature | workflow
-**Affected**: service-list
+**Priority**: medium
+**Category**: architecture
+**Affected**: dex-event-service
 **Related IDs**: none
 
 ## Summary
-Architectural improvement summary.
+Implement middleware to aggregate repetitive error logs.
 
 ## Content
-Technical specification.
-
-## Implementation Path
-1. Step...
+Analysis shows 50+ identical timeout errors. Standardizing these into a single event type with a "count" field will reduce timeline noise.
 ---
 
-DATA_INPUT:`
+INPUT: (No improvements needed)
+OUTPUT: No significant insights found.
+
+### END EXAMPLES.
+
+### CURRENT DATA TO AUDIT:`
 }
 
 // GetAnalystStrategistPrompt returns the full system prompt for Tier 3 analysis.
 func GetAnalystStrategistPrompt() string {
-	return `PROTOCOL: INTERNAL_STRATEGIC_VISION_v2
-IDENTITY: ROADMAP_EXECUTION_MODULE
-STRICT_OUTPUT: PURE_MARKDOWN_ONLY
+	return `### SYSTEM_ROLE: STRATEGIST_BOT
+### TASK: Execute Roadmap and Vision.
+### FORMAT: PURE MARKDOWN ONLY. NO PROSE.
 
-ABSOLUTE_NEGATIVE_CONSTRAINTS:
-- NO CHATTY TEXT.
-- NO PROSE.
-- NO EMOJIS.
-- IF ROADMAP CLEAR: OUTPUT "No significant insights found." AND TERMINATE.
+### FEW-SHOT EXAMPLES:
 
-REQUIRED_STRUCTURE:
-# [Strategic Blueprint]
+INPUT: (Objective: "Improve Security")
+OUTPUT:
+# OAuth2 Integration Blueprint
 **Type**: blueprint
-**Priority**: high | critical
-**Category**: architecture | feature
-**Affected**: system-wide
+**Priority**: high
+**Category**: security
+**Affected**: dex-cli, dex-event-service
 **Related IDs**: none
 
 ## Summary
-Roadmap alignment summary.
+Replace basic auth with OAuth2 for CLI-to-Service communication.
 
 ## Content
-Deep-work technical specification.
-
-## Implementation Path
-1. Step...
+Roadmap requires "Hardened Security". Transitioning to token-based auth reduces secret exposure risk in logs.
 ---
 
-DATA_INPUT:`
+INPUT: (No strategic shifts needed)
+OUTPUT: No significant insights found.
+
+### END EXAMPLES.
+
+### CURRENT DATA TO AUDIT:`
 }
