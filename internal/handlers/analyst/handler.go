@@ -131,6 +131,19 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	lastSystemActivityTS := int64(lastEventIDs[0].Score)
 	idleTime := time.Since(time.Unix(lastSystemActivityTS, 0))
 
+	// 2. Check for ACTIVE processes (cogntive tasks, builds, etc)
+	// These are reported in Redis as process:info:<channel_id>
+	iter := h.RedisClient.Scan(ctx, 0, "process:info:*", 0).Iterator()
+	activeProcessCount := 0
+	for iter.Next(ctx) {
+		activeProcessCount++
+	}
+
+	if activeProcessCount > 0 {
+		log.Printf("[%s] Idle check: system has %d active processes. Resetting idle timer.", HandlerName, activeProcessCount)
+		return
+	}
+
 	log.Printf("[%s] Idle check: system has been idle for %s (Threshold: %s)", HandlerName, idleTime.Round(time.Second), IdleDuration)
 
 	// Check for idle state
