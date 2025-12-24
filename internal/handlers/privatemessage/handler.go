@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -45,25 +44,6 @@ func emitEvent(serviceURL string, eventData map[string]interface{}) error {
 	return nil
 }
 
-func reportProcessStatus(deps *handlers.Dependencies, channelID, state string, retryCount int, startTime time.Time) {
-	if deps.Redis == nil {
-		return
-	}
-
-	key := fmt.Sprintf("process:info:%s", channelID)
-	data := map[string]interface{}{
-		"channel_id": channelID,
-		"state":      state,
-		"retries":    retryCount,
-		"start_time": startTime.Unix(),
-		"pid":        os.Getpid(),
-		"updated_at": time.Now().Unix(),
-	}
-
-	jsonBytes, _ := json.Marshal(data)
-	deps.Redis.Set(context.Background(), key, jsonBytes, 60*time.Second)
-}
-
 func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Dependencies) (types.HandlerOutput, error) {
 	// 1. Check for interruption immediately
 	if deps.CheckInterruption != nil && deps.CheckInterruption() {
@@ -96,7 +76,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	for _, foundURL := range foundURLs {
 		if !strings.HasPrefix(foundURL, "https://discord.com/attachments/") {
-			deps.Discord.UpdateBotStatus("Analyzing link...", "online", 3)
+			utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Analyzing link...")
 			log.Printf("Found external URL in message: %s", foundURL)
 			meta, err := deps.Web.FetchMetadata(foundURL)
 			if err != nil {
@@ -171,16 +151,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	log.Printf("private-message-handler processing for user %s: %s (attachments: %d)", userID, content, len(attachments))
 
-	startTime := time.Now()
-	reportProcessStatus(deps, channelID, "Initializing", 0, startTime)
-	defer func() {
-		if deps.Redis != nil {
-			deps.Redis.Del(context.Background(), fmt.Sprintf("process:info:%s", channelID))
-		}
-	}()
-
-	deps.Discord.UpdateBotStatus("Thinking...", "online", 3)
-	defer deps.Discord.UpdateBotStatus("Listening for events...", "online", 2)
+	utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Thinking...")
+	defer utils.ClearProcess(context.Background(), deps.Redis, deps.Discord, channelID)
 
 	visualContext := ""
 	if len(attachments) > 0 {
@@ -196,8 +168,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			id, _ := att["id"].(string)
 
 			if strings.HasPrefix(contentType, "image/") {
-				deps.Discord.UpdateBotStatus("Analyzing image...", "online", 3)
-				reportProcessStatus(deps, channelID, fmt.Sprintf("Analyzing Image: %s", filename), 0, startTime)
+				utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, fmt.Sprintf("Analyzing Image: %s", filename))
 
 				var description string
 				cacheKey := fmt.Sprintf("analysis:visual:%s", id)
@@ -269,7 +240,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				analysisEvent := map[string]interface{}{
 					"type":            "analysis.visual.completed",
 					"parent_event_id": input.EventID,
-					"handler":         "private-message-handler", // Kept consistent with other handlers, or should be private? Original code said 'public-message-handler' in mod event but 'private-message-handler' in analysis? Original said public in mod, private in analysis. I'll stick to 'private-message-handler' here.
+					"handler":         "private-message-handler",
 					"filename":        filename,
 					"description":     description,
 					"timestamp":       time.Now().Unix(),
@@ -327,7 +298,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	engagementReason := "Evaluated by dex-engagement-model"
 	var engagementRaw string
 
-	reportProcessStatus(deps, channelID, "Checking Engagement", 0, startTime)
+	utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Checking Engagement")
 	prompt := fmt.Sprintf(`Context:
 %s
 
@@ -402,12 +373,8 @@ Consider the context and whether a response is truly necessary or if a simple em
 			return types.HandlerOutput{Success: true}, nil
 		}
 
-		retryCount := 0
-		var streamMessageID string
-
-		deps.Discord.UpdateBotStatus("Typing response...", "online", 0)
+		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Typing response...")
 		deps.Discord.TriggerTyping(channelID)
-		reportProcessStatus(deps, channelID, "Generating Response", retryCount, startTime)
 
 		if deps.Redis != nil {
 			deps.Redis.Expire(context.Background(), lockKey, 60*time.Second)
@@ -417,7 +384,7 @@ Consider the context and whether a response is truly necessary or if a simple em
 		prompt := fmt.Sprintf("%s\n\nContext:\n%s\n\nUser: %s", systemPrompt, contextHistory, content)
 		responseModel := "dex-private-message-model"
 
-		streamMessageID, err = deps.Discord.InitStream(channelID, "<a:typing:1449387367315275786>")
+		streamMessageID, err := deps.Discord.InitStream(channelID, "<a:typing:1449387367315275786>")
 		if err != nil {
 			log.Printf("Failed to init stream: %v", err)
 			return types.HandlerOutput{Success: false, Error: err.Error()}, err

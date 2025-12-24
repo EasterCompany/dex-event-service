@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -44,25 +43,6 @@ func emitEvent(serviceURL string, eventData map[string]interface{}) error {
 		return fmt.Errorf("event service error %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
-}
-
-func reportProcessStatus(deps *handlers.Dependencies, channelID, state string, retryCount int, startTime time.Time) {
-	if deps.Redis == nil {
-		return
-	}
-
-	key := fmt.Sprintf("process:info:%s", channelID)
-	data := map[string]interface{}{
-		"channel_id": channelID,
-		"state":      state,
-		"retries":    retryCount,
-		"start_time": startTime.Unix(),
-		"pid":        os.Getpid(),
-		"updated_at": time.Now().Unix(),
-	}
-
-	jsonBytes, _ := json.Marshal(data)
-	deps.Redis.Set(context.Background(), key, jsonBytes, 60*time.Second)
 }
 
 func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Dependencies) (types.HandlerOutput, error) {
@@ -111,16 +91,16 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			var fetchErr error
 
 			if decision == "VISUAL" {
-				deps.Discord.UpdateBotStatus("Viewing link...", "online", 3)
+				utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Viewing link...")
 				webView, fetchErr = deps.Web.FetchWebView(foundURL)
 				if fetchErr != nil {
 					log.Printf("Failed to fetch web view for %s: %v, falling back to STATIC", foundURL, fetchErr)
 					// Fallback to static if webview fails
-					deps.Discord.UpdateBotStatus("Analyzing link...", "online", 3)
+					utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Analyzing link...")
 					meta, fetchErr = deps.Web.FetchMetadata(foundURL)
 				}
 			} else {
-				deps.Discord.UpdateBotStatus("Analyzing link...", "online", 3)
+				utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Analyzing link...")
 				meta, fetchErr = deps.Web.FetchMetadata(foundURL)
 			}
 
@@ -213,7 +193,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					}
 					_ = emitEvent(deps.EventServiceURL, modEvent)
 
-					return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
+					return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}},
+						nil
 				}
 			}
 
@@ -278,12 +259,13 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		for _, foundURL := range foundURLs {
 			if strings.Contains(foundURL, "youtube.com") || strings.Contains(foundURL, "youtu.be") {
 				log.Printf("Music request detected: %s", foundURL)
-				deps.Discord.UpdateBotStatus("Playing music...", "online", 0)
+				utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Playing music...")
 				if err := deps.Discord.PlayMusic(foundURL); err != nil {
 					log.Printf("Failed to play music: %v", err)
 				}
 				// If it was the music channel, we stop here (no engagement needed)
 				if channelID == "1437617331529580614" {
+					utils.ClearProcess(context.Background(), deps.Redis, deps.Discord, channelID)
 					return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}},
 						nil
 				}
@@ -294,16 +276,9 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	log.Printf("public-message-handler processing for user %s in channel %s: %s (mentioned: %v, attachments: %d)", userID, channelID, content, mentionedBot, len(attachments))
 
-	startTime := time.Now()
-	reportProcessStatus(deps, channelID, "Initializing", 0, startTime)
-	defer func() {
-		if deps.Redis != nil {
-			deps.Redis.Del(context.Background(), fmt.Sprintf("process:info:%s", channelID))
-		}
-	}()
-
-	deps.Discord.UpdateBotStatus("Thinking...", "online", 3)
-	defer deps.Discord.UpdateBotStatus("Listening for events...", "online", 2)
+	// Register process for dashboard visibility and sync Discord status
+	utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Thinking...")
+	defer utils.ClearProcess(context.Background(), deps.Redis, deps.Discord, channelID)
 
 	visualContext := ""
 	if len(attachments) > 0 {
@@ -315,8 +290,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			base64Data, hasBase64 := att["base64"].(string) // New: Check for base64 data
 
 			if strings.HasPrefix(contentType, "image/") {
-				deps.Discord.UpdateBotStatus("Analyzing image...", "online", 3)
-				reportProcessStatus(deps, channelID, fmt.Sprintf("Analyzing Image: %s", filename), 0, startTime)
+				utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, fmt.Sprintf("Analyzing Image: %s", filename))
 
 				var description string
 				var base64Img string // Hoisted declaration
@@ -486,7 +460,7 @@ Rules:
 		decisionStr = "NONE"
 		engagementReason = "Restricted Channel (Analysis Only)"
 	} else {
-		reportProcessStatus(deps, channelID, "Checking Engagement", 0, startTime)
+		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Checking Engagement")
 		prompt := fmt.Sprintf(`Context:
 %s
 
@@ -554,12 +528,8 @@ Consider the context and whether a response is truly necessary or if a simple em
 	}
 
 	if shouldEngage {
-		retryCount := 0
-		var streamMessageID string
-
-		deps.Discord.UpdateBotStatus("Typing response...", "online", 0)
+		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Typing response...")
 		deps.Discord.TriggerTyping(channelID)
-		reportProcessStatus(deps, channelID, "Generating Response", retryCount, startTime)
 
 		if deps.Redis != nil {
 			deps.Redis.Expire(context.Background(), lockKey, 60*time.Second)
@@ -569,13 +539,14 @@ Consider the context and whether a response is truly necessary or if a simple em
 		prompt := fmt.Sprintf("%s\n\nContext:\n%s\n\nUser: %s", systemPrompt, contextHistory, content)
 		responseModel := "dex-public-message-model"
 
-		streamMessageID, err = deps.Discord.InitStream(channelID, "<a:typing:1449387367315275786>")
+		streamMessageID, err := deps.Discord.InitStream(channelID, "<a:typing:1449387367315275786>")
 
 		if err != nil {
 
 			log.Printf("Failed to init stream: %v", err)
 
-			return types.HandlerOutput{Success: false, Error: err.Error()}, err
+			return types.HandlerOutput{Success: false, Error: err.Error()},
+				err
 
 		}
 

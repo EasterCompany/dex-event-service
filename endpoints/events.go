@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"bytes"
 	"github.com/EasterCompany/dex-event-service/handlers"
+	"github.com/EasterCompany/dex-event-service/internal/discord"
 	"github.com/EasterCompany/dex-event-service/templates"
 	"github.com/EasterCompany/dex-event-service/types"
+	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
@@ -152,25 +153,30 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 		}
 
 		// TRIGGER: CLI Status -> Discord
-		// If we receive a CLI status update, immediately push it to Discord so the bot status reflects the operation
+		// If we receive a CLI status update, immediately register it as a process and push it to Discord
 		if eventType == string(types.EventTypeCLIStatus) {
 			status, _ := eventData["status"].(string)
 			message, _ := eventData["message"].(string)
 			if status != "" && message != "" {
 				go func(s, m string) {
-					// Default to localhost:8300 for Discord service
-					url := "http://localhost:8300/status"
-					// Activity Type 3 = Watching
-					reqBody := map[string]interface{}{
-						"activity_type": 3,
-						"status_text":   m,
-						"online_status": s,
-					}
-					jb, _ := json.Marshal(reqBody)
-					client := &http.Client{Timeout: 1 * time.Second}
-					r, err := client.Post(url, "application/json", bytes.NewBuffer(jb))
-					if err == nil {
-						_ = r.Body.Close()
+					// Register as a short-lived process (1 minute TTL simulation via Del)
+					// We use a specific ID for CLI operations
+					processID := "system-cli-op"
+
+					// We need a Discord client here. Since this is an endpoint,
+					// we'll create a temporary one or ideally use a shared one.
+					// For now, we'll use the existing logic but wrapped in ReportProcess if possible.
+
+					discordSvcURL := "http://localhost:8300"
+					dClient := discord.NewClient(discordSvcURL, "")
+
+					utils.ReportProcess(ctx, redisClient, dClient, processID, m)
+
+					// CLI statuses are usually self-completing or updated by the next event.
+					// For "completed" statuses, we clear the process.
+					if s == "online" || strings.Contains(strings.ToLower(m), "complete") || strings.Contains(strings.ToLower(m), "success") {
+						time.Sleep(5 * time.Second) // Give user time to see the success
+						utils.ClearProcess(ctx, redisClient, dClient, processID)
 					}
 				}(status, message)
 			}
