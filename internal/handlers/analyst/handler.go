@@ -282,11 +282,11 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	}
 
 	// --- Tier 2: Architect (Optimization & Quality) ---
-	// Runs every 1 hour.
+	// Runs every 15 minutes.
 	lastArchitectRun, _ := h.RedisClient.Get(ctx, "analyst:last_run:architect").Result()
 	lastArchTS, _ := strconv.ParseInt(lastArchitectRun, 10, 64)
 
-	if time.Since(time.Unix(lastArchTS, 0)) >= 1*time.Hour {
+	if time.Since(time.Unix(lastArchTS, 0)) >= 15*time.Minute {
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, "system-analyst", "Tier 2: Architect Analysis")
 		architectPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "architect")
 		log.Printf("[%s] Executing Tier 2 (Architect) Analysis...", HandlerName)
@@ -298,11 +298,11 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	}
 
 	// --- Tier 3: Strategist (Feature Visionary) ---
-	// Runs every 24 hours.
+	// Runs every 1 hour.
 	lastStrategistRun, _ := h.RedisClient.Get(ctx, "analyst:last_run:strategist").Result()
 	lastStratTS, _ := strconv.ParseInt(lastStrategistRun, 10, 64)
 
-	if time.Since(time.Unix(lastStratTS, 0)) >= 24*time.Hour {
+	if time.Since(time.Unix(lastStratTS, 0)) >= 1*time.Hour {
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, "system-analyst", "Tier 3: Strategist Analysis")
 		strategistPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "strategist")
 		log.Printf("[%s] Executing Tier 3 (Strategist) Analysis...", HandlerName)
