@@ -49,6 +49,7 @@ const (
 
 	// System Notifications
 	EventTypeSystemNotificationGenerated EventType = "system.notification.generated"
+	EventTypeSystemBlueprintGenerated    EventType = "system.blueprint.generated"
 )
 
 // GenericMessagingEvent contains common fields for all messaging-related events
