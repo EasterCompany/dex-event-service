@@ -460,11 +460,11 @@ func (h *AnalystHandler) fetchTestResults() (string, error) {
 	}
 
 	log.Printf("[%s] Running automated system tests via 'dex test'...", HandlerName)
-	// We use --quiet to reduce output tokens, but we want the summary/errors
-	cmd := fmt.Sprintf("%s test --quiet", dexPath)
+	// Execute raw dex test - the output will be used for Tier 1 analysis
+	cmd := dexPath + " test"
 	output, err := utils.RunCommand(cmd)
 	if err != nil {
-		// If tests fail, the output will contain the failure details
+		// We still return the output even on error so the Analyst can diagnose the failure
 		return output, nil
 	}
 
