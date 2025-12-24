@@ -36,8 +36,6 @@ const (
 	MaxLogsToAnalyze = 20
 	// LastAnalysisKey is the Redis key to store the timestamp of the last successful analysis
 	LastAnalysisKey = "analyst:last_analysis_ts"
-	// OllamaModel is the model to use for analysis
-	OllamaModel = "dex-analyst-model"
 )
 
 var ignoredEventTypes = []string{
@@ -167,7 +165,7 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 		if err := json.Unmarshal(event.Event, &eventData); err == nil {
 			eventType, _ := eventData["type"].(string)
 			// Ignore our own notifications when calculating idle time
-			if eventType == string(types.EventTypeSystemNotificationGenerated) {
+			if eventType == string(types.EventTypeSystemNotificationGenerated) || eventType == string(types.EventTypeSystemBlueprintGenerated) {
 				continue
 			}
 		}
@@ -233,13 +231,6 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 
 	if len(results) == 0 {
 		log.Printf("[%s] Analysis completed: No significant patterns found.", HandlerName)
-		h.emitResult(ctx, AnalysisResult{
-			Type:     "notification",
-			Title:    "Analysis Completed",
-			Priority: "low",
-			Category: "system",
-			Body:     fmt.Sprintf("Analyzed %d events. No significant patterns or anomalies were detected during this idle period.", newEventCount),
-		})
 	} else {
 		for _, res := range results {
 			h.emitResult(ctx, res)
@@ -268,8 +259,13 @@ func extractJSON(input string) string {
 			return strings.TrimSpace(match[1])
 		}
 	}
-	start := strings.IndexAny(input, "[[")
-	end := strings.LastIndexAny(input, "]]")
+	start := strings.Index(input, "[")
+	end := strings.LastIndex(input, "]")
+	if start != -1 && end != -1 && end > start {
+		return input[start : end+1]
+	}
+	start = strings.Index(input, "{")
+	end = strings.LastIndex(input, "}")
 	if start != -1 && end != -1 && end > start {
 		return input[start : end+1]
 	}
@@ -282,20 +278,19 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch events: %w", err)
 	}
-	if len(events) == 0 {
-		return nil, nil
-	}
 
 	status, _ := h.fetchSystemStatus()
 	logs, _ := h.fetchRecentLogs()
+	tests, _ := h.fetchTestResults()
 	history, err := h.fetchRecentNotifications(ctx, 20)
 	if err != nil {
 		log.Printf("[%s] Warning: Failed to fetch history context: %v", HandlerName, err)
 	}
 
-	prompt := h.buildAnalysisPrompt(events, history, status, logs)
+	prompt := h.buildAnalysisPrompt(events, history, status, logs, tests)
 
-	ollamaResponseString, err := h.OllamaClient.Generate(OllamaModel, prompt, nil)
+	// Triage Routing: For now, we always run the Guardian (Tier 1)
+	ollamaResponseString, err := h.OllamaClient.Generate("dex-analyst-guardian", prompt, nil)
 	if err != nil {
 		return nil, fmt.Errorf("ollama generation failed: %w", err)
 	}
@@ -424,6 +419,28 @@ func (h *AnalystHandler) fetchRecentLogs() ([]types.LogReport, error) {
 	return reports, nil
 }
 
+// fetchTestResults runs 'dex test' if available and returns the raw output.
+func (h *AnalystHandler) fetchTestResults() (string, error) {
+	home := os.Getenv("HOME")
+	dexPath := fmt.Sprintf("%s/Dexter/bin/dex", home)
+
+	// Check if dex binary exists
+	if _, err := os.Stat(dexPath); os.IsNotExist(err) {
+		return "dex CLI not found, skipping automated tests.", nil
+	}
+
+	log.Printf("[%s] Running automated system tests via 'dex test'...", HandlerName)
+	// We use --quiet to reduce output tokens, but we want the summary/errors
+	cmd := fmt.Sprintf("%s test --quiet", dexPath)
+	output, err := utils.RunCommand(cmd)
+	if err != nil {
+		// If tests fail, the output will contain the failure details
+		return output, nil
+	}
+
+	return output, nil
+}
+
 func (h *AnalystHandler) readLastNLines(filePath string, n int) ([]string, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -443,69 +460,17 @@ func (h *AnalystHandler) readLastNLines(filePath string, n int) ([]string, error
 }
 
 // buildAnalysisPrompt constructs the prompt for the Ollama LLM.
-func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event, history []AnalysisResult, status []types.ServiceReport, logs []types.LogReport) string {
-	systemPrompt := fmt.Sprintf("%s\n\n%s\n\nYour task is to act as a Strategic System Analyst using a multi-tiered reasoning approach.", utils.DexterIdentity, utils.DexterArchitecture)
-
-	instructions := `
-### **Reasoning Phase 1: Tier 1 - Technical Sentry**
-**Goal:** Detect if the system is broken or unreliable.
-- **Service Health:** Check 'Current System Status' for offline services.
-- **Log Anomalies:** Check 'Recent System Logs' for panics, 500 errors, or repeated timeouts.
-- **Build/Test Failures:** Check 'New Event Logs' for 'system.build.completed' or 'system.test.completed' where status is 'failure' or results indicate errors (lint issues, format issues, or failed unit tests).
-- **CRITICAL:** If any Tier 1 issues are found that are NOT already in 'Recent Reported Issues', you MUST report them immediately and prioritize them as High/Critical.
-
-### **Reasoning Phase 2: Tier 2 - The Optimizer**
-**Goal:** If Tier 1 is stable, identify engagement gaps and workflow friction.
-- **Ghosting Detection:** Look for user messages where Dexter chose 'REACTION' or 'NONE', but the context actually required a 'REPLY' (e.g., a direct question or a complex technical request).
-- **Missed Opportunities:** Identify if Dexter missed a mention or a shift in topic during high volume.
-- **Workflow Friction:** Detect repetitive patterns (e.g., the same test failing 3 times in a row, or a user building the same service repeatedly). Suggest optimizations or point out the specific roadblock.
-- **Context Fragmentation:** Detect if a conversation was left in an awkward state due to a service restart or build cycle.
-
-### **Reasoning Phase 3: Tier 3 - The Visionary**
-**Goal:** If the system is Healthy (Tier 1) and Efficient (Tier 2), propose a strategic evolution.
-- **Feature Synthesis:** Identify recurring user needs that aren't yet features (e.g., repeating a request for specific data).
-- **Architectural Foresight:** Detect systemic risks or scaling bottlenecks (e.g., rapid growth in specific event types).
-- **Blueprint Generation:** Propose a high-level technical plan for a new feature or optimization.
-- **IMPORTANT:** Tier 3 should only trigger if you detect a strong pattern across multiple events or history. 
-
-### **Memory & Continuity**
-- You are provided with 'Recent Reported Issues'. 
-- **DO NOT report the same issue multiple times.**
-- Only report a persisting issue if its severity has changed or you have a new root-cause insight from the logs.
-
-### **Output Constraints**
-- Return ONLY a JSON object. No prose.
-- If no significant patterns are found, return: {"results": []}.
-
-**JSON Schema:**
-{
-  "results": [
-    {
-      "type": "notification",
-      "title": "Clear summary of Tier 1/2 issue",
-      "priority": "low|medium|high|critical",
-      "category": "error|build|test|engagement|workflow",
-      "body": "Detailed explanation and root cause analysis.",
-      "related_event_ids": ["uuid-1"]
-    },
-    {
-      "type": "blueprint",
-      "title": "Name of Proposed Feature/Optimization",
-      "priority": "medium|high",
-      "category": "architecture|feature|system",
-      "summary": "One-sentence executive summary.",
-      "content": "Full markdown proposal (JetBrains Mono formatting). Include: Rationale, Affected Services, and Proposed Changes.",
-      "affected_services": ["dex-web-service"],
-      "implementation_path": ["Step 1...", "Step 2..."]
-    }
-  ]
-}
-`
+func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event, history []AnalysisResult, status []types.ServiceReport, logs []types.LogReport, tests string) string {
+	// Use the specialized Guardian prompt
+	systemPrompt := utils.GetAnalystGuardianPrompt()
 
 	var sb strings.Builder
-	// ... rest of the function constructing the strings ...
 	sb.WriteString(systemPrompt + "\n")
-	sb.WriteString(instructions + "\n")
+
+	if tests != "" {
+		sb.WriteString("\n### Automated Test Results (dex test):\n")
+		sb.WriteString(tests + "\n")
+	}
 
 	if len(history) > 0 {
 		sb.WriteString("\n### Recent Reported Issues (Memory):\n")
@@ -531,13 +496,15 @@ func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event, history []Ana
 		}
 	}
 
-	sb.WriteString("\n### New Event Logs:\n")
-	for _, event := range events {
-		var eventData map[string]interface{}
-		_ = json.Unmarshal(event.Event, &eventData)
-		eventType, _ := eventData["type"].(string)
-		summary := templates.FormatEventAsText(eventType, eventData, event.Service, event.Timestamp, 0, "UTC", "en")
-		sb.WriteString(fmt.Sprintf("%s | %s | %s\n", time.Unix(event.Timestamp, 0).Format("15:04:05"), event.Service, summary))
+	if len(events) > 0 {
+		sb.WriteString("\n### New Event Logs:\n")
+		for _, event := range events {
+			var eventData map[string]interface{}
+			_ = json.Unmarshal(event.Event, &eventData)
+			eventType, _ := eventData["type"].(string)
+			summary := templates.FormatEventAsText(eventType, eventData, event.Service, event.Timestamp, 0, "UTC", "en")
+			sb.WriteString(fmt.Sprintf("%s | %s | %s\n", time.Unix(event.Timestamp, 0).Format("15:04:05"), event.Service, summary))
+		}
 	}
 
 	return sb.String()
@@ -597,7 +564,7 @@ func (h *AnalystHandler) fetchEventsForAnalysis(ctx context.Context, sinceTS, un
 		var eventData map[string]interface{}
 		if err := json.Unmarshal(event.Event, &eventData); err == nil {
 			eventType, _ := eventData["type"].(string)
-			if eventType == string(types.EventTypeSystemNotificationGenerated) {
+			if eventType == string(types.EventTypeSystemNotificationGenerated) || eventType == string(types.EventTypeSystemBlueprintGenerated) {
 				continue
 			}
 			isIgnored := false

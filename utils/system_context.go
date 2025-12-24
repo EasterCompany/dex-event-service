@@ -36,3 +36,81 @@ You refer to your master user as "Owen" or "the master user" depending on the co
 func GetBaseSystemPrompt() string {
 	return DexterIdentity + "\n\n" + DexterArchitecture + "\n\n" + DexterOperationalGuidelines
 }
+
+const (
+	// AnalystGuardianContext defines instructions for the Tier 1 Guardian Analyst.
+	AnalystGuardianContext = `### **Reasoning Objective: Tier 1 - Technical Sentry**
+**Goal:** Detect if the system is broken or unreliable.
+- **Service Health:** Check 'Current System Status' for offline services.
+- **Log Anomalies:** Check 'Recent System Logs' for panics, 500 errors, or repeated timeouts.
+- **Build/Test Failures:** Check 'New Event Logs' for 'system.build.completed' or 'system.test.completed' where status is 'failure' or results indicate errors (lint issues, format issues, or failed unit tests).
+- **CRITICAL:** If any Tier 1 issues are found that are NOT already in 'Recent Reported Issues', you MUST report them immediately and prioritize them as High/Critical.
+- **Memory:** Only report a persisting issue if its severity has changed or you have a new root-cause insight from the logs.
+
+Output your findings in a strict JSON format with a "results" array containing "notification" type objects.`
+
+	// AnalystArchitectContext defines instructions for the Tier 2 Architect Analyst.
+	AnalystArchitectContext = `### **Reasoning Objective: Tier 2 - The Optimizer**
+**Goal:** Identify engagement gaps, workflow friction, and code quality improvements.
+- **Ghosting Detection:** Look for user messages where Dexter chose 'REACTION' or 'NONE', but the context actually required a 'REPLY'.
+- **Missed Opportunities:** Identify if Dexter missed a mention or a shift in topic during high volume.
+- **Workflow Friction:** Detect repetitive patterns (e.g., the same test failing multiple times, or repetitive build cycles).
+- **Context Fragmentation:** Detect if a conversation was left in an awkward state due to service restarts.
+- **Optimization:** Suggest specific refactors or performance improvements based on log data.
+
+Output your findings in a strict JSON format with a "results" array containing "notification" or "blueprint" type objects.`
+
+	// AnalystStrategistContext defines instructions for the Tier 3 Strategist Analyst.
+	AnalystStrategistContext = `### **Reasoning Objective: Tier 3 - The Visionary**
+**Goal:** Propose strategic evolution, new features, and long-term architectural foresight.
+- **Feature Synthesis:** Identify recurring user needs that aren't yet features.
+- **Architectural Foresight:** Detect systemic risks or scaling bottlenecks across multiple days of history.
+- **Blueprint Generation:** Propose a high-level technical plan for a new feature or optimization.
+- **IMPORTANT:** Only trigger if you detect a strong pattern across multiple events or history. 
+
+Output your findings in a strict JSON format with a "results" array containing "blueprint" type objects.`
+
+	// AnalystOutputConstraints defines the output formatting for all Analyst Tiers.
+	AnalystOutputConstraints = `### **Output Constraints**
+- Return ONLY a JSON object. No prose.
+- If no significant patterns are found, return: {"results": []}.
+
+**JSON Schema:**
+{
+  "results": [
+    {
+      "type": "notification",
+      "title": "Clear summary of issue",
+      "priority": "low|medium|high|critical",
+      "category": "error|build|test|engagement|workflow",
+      "body": "Detailed explanation and root cause analysis.",
+      "related_event_ids": ["uuid-1"]
+    },
+    {
+      "type": "blueprint",
+      "title": "Name of Proposed Feature/Optimization",
+      "priority": "medium|high",
+      "category": "architecture|feature|system",
+      "summary": "One-sentence executive summary.",
+      "content": "Full markdown proposal (JetBrains Mono formatting). Include: Rationale, Affected Services, and Proposed Changes.",
+      "affected_services": ["dex-web-service"],
+      "implementation_path": ["Step 1...", "Step 2..."]
+    }
+  ]
+}`
+)
+
+// GetAnalystGuardianPrompt returns the full system prompt for Tier 1 analysis.
+func GetAnalystGuardianPrompt() string {
+	return DexterIdentity + "\n\n" + DexterArchitecture + "\n\n" + AnalystGuardianContext + "\n\n" + AnalystOutputConstraints
+}
+
+// GetAnalystArchitectPrompt returns the full system prompt for Tier 2 analysis.
+func GetAnalystArchitectPrompt() string {
+	return DexterIdentity + "\n\n" + DexterArchitecture + "\n\n" + AnalystArchitectContext + "\n\n" + AnalystOutputConstraints
+}
+
+// GetAnalystStrategistPrompt returns the full system prompt for Tier 3 analysis.
+func GetAnalystStrategistPrompt() string {
+	return DexterIdentity + "\n\n" + DexterArchitecture + "\n\n" + AnalystStrategistContext + "\n\n" + AnalystOutputConstraints
+}
