@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strconv" // Added for strconv.ParseInt
 	"strings" // Added for strings.Builder
 	"time"
@@ -117,6 +118,22 @@ func (h *AnalystHandler) runWorker(ctx context.Context) {
 	}
 }
 
+// reportProcessStatus updates the analyst's current state in Redis for dashboard visibility.
+func (h *AnalystHandler) reportProcessStatus(ctx context.Context, state string) {
+	key := "process:info:system-analyst"
+	data := map[string]interface{}{
+		"channel_id": "system-analyst",
+		"state":      state,
+		"retries":    0,
+		"start_time": time.Now().Unix(),
+		"pid":        os.Getpid(),
+		"updated_at": time.Now().Unix(),
+	}
+
+	jsonBytes, _ := json.Marshal(data)
+	h.RedisClient.Set(ctx, key, jsonBytes, 2*time.Minute) // 2m TTL as safety
+}
+
 // checkAndAnalyze determines if an analysis run is needed and executes it.
 func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	timelineKey := "events:timeline"
@@ -140,7 +157,7 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	}
 
 	if activeProcessCount > 0 {
-		log.Printf("[%s] Idle check: system has %d active processes. Resetting idle timer.", HandlerName, activeProcessCount)
+		// log.Printf("[%s] Idle check: system has %d active processes. Resetting idle timer.", HandlerName, activeProcessCount)
 		return
 	}
 
@@ -151,8 +168,7 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 		return
 	}
 
-	// 2. Check if new events have occurred since our LAST SUCCESSFUL ANALYSIS
-	// (We don't want to keep analyzing the same 500 events if no new ones arrived)
+	// 3. Check if new events have occurred since our LAST SUCCESSFUL ANALYSIS
 	newEventCount, err := h.RedisClient.ZCount(ctx, timelineKey, fmt.Sprintf("(%d", h.lastAnalyzedTS), "+inf").Result()
 	if err != nil {
 		log.Printf("[%s] Error counting new events: %v", HandlerName, err)
@@ -165,6 +181,10 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 
 	log.Printf("[%s] System idle threshold met. %d new events since last analysis. Initiating analysis...",
 		HandlerName, newEventCount)
+
+	// Report process status so it appears on dashboard
+	h.reportProcessStatus(ctx, fmt.Sprintf("Analyzing %d events", newEventCount))
+	defer h.RedisClient.Del(ctx, "process:info:system-analyst")
 
 	notifications, err := h.PerformAnalysis(ctx, h.lastAnalyzedTS, time.Now().Unix())
 	if err != nil {
