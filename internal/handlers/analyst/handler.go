@@ -440,31 +440,40 @@ func (h *AnalystHandler) readLastNLines(filePath string, n int) ([]string, error
 
 // buildAnalysisPrompt constructs the prompt for the Ollama LLM.
 func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event, history []Notification, status []types.ServiceReport, logs []types.LogReport) string {
-	systemPrompt := fmt.Sprintf("%s\n\n%s\n\nYour task is to act as a Tier 1 Technical Analyst. You will monitor system logs, events, and service status for technical issues, bugs, service failures, or build errors. You must report these as notifications for the master user.", utils.DexterIdentity, utils.DexterArchitecture)
+	systemPrompt := fmt.Sprintf("%s\n\n%s\n\nYour task is to act as a Strategic System Analyst using a multi-tiered reasoning approach.", utils.DexterIdentity, utils.DexterArchitecture)
 
 	instructions := `
-**Primary Objective (Tier 1 Analysis):**
-- Identify technical issues, service crashes, repeated build failures, or API timeouts.
-- Analyze the provided Status, Logs, and Events together to find root causes.
-- Focus strictly on technical health and reliability.
+### **Reasoning Phase 1: Tier 1 - Technical Sentry**
+**Goal:** Detect if the system is broken or unreliable.
+- **Service Health:** Check 'Current System Status' for offline services.
+- **Log Anomalies:** Check 'Recent System Logs' for panics, 500 errors, or repeated timeouts.
+- **Build/Test Failures:** Check 'New Event Logs' for 'system.build.completed' or 'system.test.completed' where status is 'failure' or results indicate errors (lint issues, format issues, or failed unit tests).
+- **CRITICAL:** If any Tier 1 issues are found that are NOT already in 'Recent Reported Issues', you MUST report them immediately and prioritize them as High/Critical.
 
-**Memory & Continuity:**
-- You will be provided with a list of "Recent Reported Issues." 
+### **Reasoning Phase 2: Tier 2 - The Optimizer**
+**Goal:** If Tier 1 is stable, identify engagement gaps and workflow friction.
+- **Ghosting Detection:** Look for user messages where Dexter chose 'REACTION' or 'NONE', but the context actually required a 'REPLY' (e.g., a direct question or a complex technical request).
+- **Missed Opportunities:** Identify if Dexter missed a mention or a shift in topic during high volume.
+- **Workflow Friction:** Detect repetitive patterns (e.g., the same test failing 3 times in a row, or a user building the same service repeatedly). Suggest optimizations or point out the specific roadblock.
+- **Context Fragmentation:** Detect if a conversation was left in an awkward state due to a service restart or build cycle.
+
+### **Memory & Continuity**
+- You are provided with 'Recent Reported Issues'. 
 - **DO NOT report the same issue multiple times.**
-- If an issue is already in the history and persists, only report it again if the severity has increased or the error message has changed.
+- Only report a persisting issue if its severity has changed or you have a new root-cause insight from the logs.
 
-**Output Constraints:**
-- If no NEW technical issues are found, return exactly: {"notifications": []}.
-- Your output must consist ONLY of the JSON object. No prose.
+### **Output Constraints**
+- Return ONLY a JSON object. No prose.
+- If no significant Tier 1 or Tier 2 patterns are found, return: {"notifications": []}.
 
 **JSON Schema:**
 {
   "notifications": [
     {
-      "title": "Clear summary of the technical issue",
+      "title": "Clear summary of the issue (Tier 1 or Tier 2)",
       "priority": "low|medium|high|critical",
-      "category": "error|build|system|security",
-      "body": "Detailed explanation, including service names and root cause analysis from logs/events.",
+      "category": "error|build|test|engagement|workflow",
+      "body": "Detailed explanation and root cause analysis.",
       "related_event_ids": ["uuid-1"]
     }
   ]
@@ -472,6 +481,7 @@ func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event, history []Not
 `
 
 	var sb strings.Builder
+	// ... rest of the function constructing the strings ...
 	sb.WriteString(systemPrompt + "\n")
 	sb.WriteString(instructions + "\n")
 
