@@ -159,10 +159,10 @@ func main() {
 	getServiceURL := func(id, category string, defaultPort string) string {
 		for _, s := range serviceMap.Services[category] {
 			if s.ID == id {
-				return fmt.Sprintf("http://localhost:%s", s.Port)
+				return fmt.Sprintf("http://127.0.0.1:%s", s.Port)
 			}
 		}
-		return fmt.Sprintf("http://localhost:%s", defaultPort)
+		return fmt.Sprintf("http://127.0.0.1:%s", defaultPort)
 	}
 
 	discordURL = getServiceURL("dex-discord-service", "th", "8081")

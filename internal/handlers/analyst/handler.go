@@ -397,7 +397,7 @@ func (h *AnalystHandler) fetchSystemStatus() ([]types.ServiceReport, error) {
 		for _, s := range services {
 			status := "unknown"
 			if s.Port != "" {
-				url := fmt.Sprintf("http://localhost:%s/service", s.Port)
+				url := fmt.Sprintf("http://127.0.0.1:%s/service", s.Port)
 				_, err := utils.FetchURL(url, 500*time.Millisecond)
 				if err == nil {
 					status = "online"

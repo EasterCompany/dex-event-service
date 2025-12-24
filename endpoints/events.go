@@ -167,7 +167,7 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 					// we'll create a temporary one or ideally use a shared one.
 					// For now, we'll use the existing logic but wrapped in ReportProcess if possible.
 
-					discordSvcURL := "http://localhost:8300"
+					discordSvcURL := "http://127.0.0.1:8300"
 					dClient := discord.NewClient(discordSvcURL, "")
 
 					utils.ReportProcess(ctx, redisClient, dClient, processID, m)
