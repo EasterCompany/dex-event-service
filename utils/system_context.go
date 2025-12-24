@@ -67,29 +67,35 @@ const (
 
 	// AnalystOutputConstraints defines the output formatting for all Analyst Tiers.
 	AnalystOutputConstraints = `### **Strict Output Format: The Dexter Report**
-You must return your findings as a series of Markdown reports. Each report must be separated by a horizontal rule (---).
-If no significant patterns are found, return exactly: "No significant insights found."
-
-Each report MUST follow this EXACT structure:
-
-# [Title of the Insight/Blueprint]
-**Type**: alert | notification | blueprint
-**Priority**: low | medium | high | critical
-**Category**: system | architecture | security | feature | engagement | workflow
-**Affected**: dex-event-service, dex-cli (comma separated list of services)
-**Related IDs**: uuid-1, uuid-2 (comma separated list of related event IDs)
-
-## Summary
-A concise one-sentence pitch of the idea or issue.
-
-## Content
-Detailed technical deep-dive. Use Markdown for code blocks, tables, and lists. 
-This is where you explain the "Why" and the "How".
-
-## Implementation Path
-1. Step one...
-2. Step two...
-(Numbered list of implementation steps)`
+	**CRITICAL:** Do NOT include any conversational filler, introductory prose, or concluding remarks. Your entire response must consist ONLY of one or more reports separated by "---".
+	
+	If no significant patterns are found, return exactly: "No significant insights found."
+	
+	#### **Example Report Structure:**
+	# [Title]
+	**Type**: blueprint
+	**Priority**: high
+	**Category**: architecture
+	**Affected**: dex-event-service
+	**Related IDs**: none
+	
+	## Summary
+	A concise one-sentence pitch.
+	
+	## Content
+	Technical deep-dive using Markdown.
+	
+	## Implementation Path
+	1. Step one...
+	---
+	
+	#### **Field Requirements:**
+	- **# [Title]**: A clear, technical name for the insight.
+	- **Type**: Must be exactly "alert", "notification", or "blueprint".
+	- **Priority**: "low", "medium", "high", or "critical".
+	- **Category**: "system", "architecture", "security", "feature", "engagement", or "workflow".
+	- **Affected**: Comma-separated list of services (e.g., "dex-cli, dex-web-service").
+	- **Related IDs**: Comma-separated event UUIDs if applicable, else "none".`
 )
 
 // GetAnalystGuardianPrompt returns the full system prompt for Tier 1 analysis.

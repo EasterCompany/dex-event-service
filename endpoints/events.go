@@ -187,9 +187,12 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 					utils.ReportProcess(ctx, redisClient, dClient, processID, m)
 
 					// CLI statuses are usually self-completing or updated by the next event.
-					// For "completed" statuses, we clear the process.
-					if s == "online" || strings.Contains(strings.ToLower(m), "complete") || strings.Contains(strings.ToLower(m), "success") {
-						time.Sleep(5 * time.Second) // Give user time to see the success
+					// For terminal statuses, we clear the process.
+					lowerM := strings.ToLower(m)
+					if s == "online" || s == "success" || s == "failure" || s == "error" ||
+						strings.Contains(lowerM, "complete") || strings.Contains(lowerM, "success") ||
+						strings.Contains(lowerM, "failed") || strings.Contains(lowerM, "error") {
+						time.Sleep(5 * time.Second) // Give user time to see the final state
 						utils.ClearProcess(ctx, redisClient, dClient, processID)
 					}
 				}(status, message)

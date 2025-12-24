@@ -78,6 +78,8 @@ func (h *AnalystHandler) Close() error {
 	if h.stopChan != nil {
 		close(h.stopChan)
 	}
+	// Clear process entry from dashboard
+	utils.ClearProcess(context.Background(), h.RedisClient, h.DiscordClient, ProcessID)
 	return nil
 }
 
@@ -250,18 +252,21 @@ func (h *AnalystHandler) parseSingleMarkdownReport(input string) AnalysisResult 
 	var contentLines []string
 	var pathLines []string
 	var summaryLines []string
+	foundHeader := false
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" && currentSection == "" {
+
+		// Ignore everything until we find the first header (#)
+		if !foundHeader {
+			if strings.HasPrefix(trimmed, "# ") {
+				res.Title = strings.TrimPrefix(trimmed, "# ")
+				foundHeader = true
+			}
 			continue
 		}
 
-		if strings.HasPrefix(trimmed, "# ") {
-			res.Title = strings.TrimPrefix(trimmed, "# ")
-			continue
-		}
-
+		// If we've already found the header, parse metadata and sections
 		if strings.HasPrefix(trimmed, "**Type**:") {
 			res.Type = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(trimmed, "**Type**:")))
 			continue
