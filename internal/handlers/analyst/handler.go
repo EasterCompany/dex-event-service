@@ -139,17 +139,50 @@ func (h *AnalystHandler) reportProcessStatus(ctx context.Context, state string) 
 func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	timelineKey := "events:timeline"
 
-	// 1. Get the very last event in the system to determine TRUE idle time
-	lastEventIDs, err := h.RedisClient.ZRevRangeWithScores(ctx, timelineKey, 0, 0).Result()
-	if err != nil || len(lastEventIDs) == 0 {
-		// If timeline is empty, nothing to do
+	// 1. Get the last event that IS NOT an analyst notification to determine TRUE idle time
+	// We check the last 10 events to be safe, searching for the first non-analyst one.
+	lastEvents, err := h.RedisClient.ZRevRangeWithScores(ctx, timelineKey, 0, 10).Result()
+	if err != nil || len(lastEvents) == 0 {
 		return
 	}
 
-	lastSystemActivityTS := int64(lastEventIDs[0].Score)
+	var lastSystemActivityTS int64
+	foundActivity := false
+
+	for _, z := range lastEvents {
+		eventID := z.Member.(string)
+		eventJSON, err := h.RedisClient.Get(ctx, "event:"+eventID).Result()
+		if err != nil {
+			continue
+		}
+
+		var event types.Event
+		if err := json.Unmarshal([]byte(eventJSON), &event); err != nil {
+			continue
+		}
+
+		var eventData map[string]interface{}
+		if err := json.Unmarshal(event.Event, &eventData); err == nil {
+			eventType, _ := eventData["type"].(string)
+			// Ignore our own notifications when calculating idle time
+			if eventType == string(types.EventTypeSystemNotificationGenerated) {
+				continue
+			}
+		}
+
+		lastSystemActivityTS = int64(z.Score)
+		foundActivity = true
+		break
+	}
+
+	if !foundActivity {
+		// Fallback to the very latest event if we can't find a non-analyst one
+		lastSystemActivityTS = int64(lastEvents[0].Score)
+	}
+
 	idleTime := time.Since(time.Unix(lastSystemActivityTS, 0))
 
-	// 2. Check for ACTIVE processes (cogntive tasks, builds, etc)
+	// 2. Check for ACTIVE processes (cognitive tasks, builds, etc)
 	// These are reported in Redis as process:info:<channel_id>
 	iter := h.RedisClient.Scan(ctx, 0, "process:info:*", 0).Iterator()
 	activeProcessCount := 0
@@ -207,8 +240,14 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 		}
 	}
 
-	// Update last analyzed timestamp to current time
-	h.lastAnalyzedTS = time.Now().Unix()
+	// Determine the timestamp of the latest event we just considered
+	latestEventInSet, err := h.RedisClient.ZRevRangeWithScores(ctx, timelineKey, 0, 0).Result()
+	if err == nil && len(latestEventInSet) > 0 {
+		h.lastAnalyzedTS = int64(latestEventInSet[0].Score)
+	} else {
+		h.lastAnalyzedTS = time.Now().Unix()
+	}
+
 	h.RedisClient.Set(ctx, LastAnalysisKey, h.lastAnalyzedTS, 0)
 	log.Printf("[%s] Analysis coverage updated to %s.", HandlerName, time.Unix(h.lastAnalyzedTS, 0).Format(time.RFC3339))
 }
