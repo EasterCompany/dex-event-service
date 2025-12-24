@@ -29,7 +29,7 @@ const (
 	// AnalysisInterval is how often the analyst checks for idle state
 	AnalysisInterval = 1 * time.Minute
 	// IdleDuration is how long the system must be idle before analysis
-	IdleDuration = 15 * time.Minute
+	IdleDuration = 5 * time.Minute
 	// MaxEventsToAnalyze is the maximum number of recent events to feed to the LLM
 	MaxEventsToAnalyze = 500
 	// MaxLogsToAnalyze is the number of recent log lines per service to analyze
