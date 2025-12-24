@@ -167,9 +167,9 @@ func TestGetTemplateList(t *testing.T) {
 	// Need to import types to use the constants
 	eventTypes := GetTemplateList()
 
-	if len(eventTypes) != 30 {
+	if len(eventTypes) != 32 {
 
-		t.Errorf("Expected 30 event types, got %d", len(eventTypes))
+		t.Errorf("Expected 32 event types, got %d", len(eventTypes))
 
 	}
 
@@ -187,16 +187,6 @@ func TestGetTemplateList(t *testing.T) {
 
 		"metric_recorded": true,
 
-		"voice_speaking_started": true,
-
-		"voice_speaking_stopped": true,
-
-		"voice_transcribed": true,
-
-		"engagement.decision": true,
-
-		"bot_response": true,
-
 		string(types.EventTypeMessagingUserJoinedVoice): true,
 
 		string(types.EventTypeMessagingUserLeftVoice): true,
@@ -204,6 +194,10 @@ func TestGetTemplateList(t *testing.T) {
 		string(types.EventTypeMessagingUserSentMessage): true,
 
 		string(types.EventTypeMessagingBotSentMessage): true,
+
+		"messaging.bot.joined_voice": true,
+
+		string(types.EventTypeMessagingBotVoiceResponse): true,
 
 		string(types.EventTypeMessagingBotStatusUpdate): true,
 
@@ -214,10 +208,6 @@ func TestGetTemplateList(t *testing.T) {
 		string(types.EventTypeMessagingUserTranscribed): true,
 
 		string(types.EventTypeMessagingUserJoinedServer): true,
-
-		"messaging.bot.joined_voice": true,
-
-		string(types.EventTypeMessagingBotVoiceResponse): true,
 
 		string(types.EventTypeMessagingWebhookMessage): true,
 
@@ -234,6 +224,20 @@ func TestGetTemplateList(t *testing.T) {
 		string(types.EventTypeCLIStatus): true,
 
 		string(types.EventTypeSystemNotificationGenerated): true,
+
+		string(types.EventTypeSystemBlueprintGenerated): true,
+
+		string(types.EventTypeSystemAnalysisAudit): true,
+
+		"voice_speaking_started": true,
+
+		"voice_speaking_stopped": true,
+
+		"voice_transcribed": true,
+
+		"engagement.decision": true,
+
+		"bot_response": true,
 	}
 
 	for _, typeName := range eventTypes {

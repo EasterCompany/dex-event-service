@@ -276,8 +276,12 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, "system-analyst", "Tier 1: Guardian Analysis")
 	guardianPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "guardian")
 	log.Printf("[%s] Executing Tier 1 (Guardian) Analysis...", HandlerName)
-	gResults, err := h.runAnalysisWithModel("dex-analyst-guardian", guardianPrompt)
+
+	guardianModel := "dex-analyst-guardian"
+	ollamaGResponse, err := h.OllamaClient.Generate(guardianModel, guardianPrompt, nil)
 	if err == nil {
+		h.emitAudit(ctx, "guardian", guardianModel, guardianPrompt, ollamaGResponse)
+		gResults := h.parseAnalysisResults(ollamaGResponse)
 		allResults = append(allResults, gResults...)
 	}
 
@@ -290,8 +294,12 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, "system-analyst", "Tier 2: Architect Analysis")
 		architectPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "architect")
 		log.Printf("[%s] Executing Tier 2 (Architect) Analysis...", HandlerName)
-		aResults, err := h.runAnalysisWithModel("dex-analyst-architect", architectPrompt)
+
+		architectModel := "dex-analyst-architect"
+		ollamaAResponse, err := h.OllamaClient.Generate(architectModel, architectPrompt, nil)
 		if err == nil {
+			h.emitAudit(ctx, "architect", architectModel, architectPrompt, ollamaAResponse)
+			aResults := h.parseAnalysisResults(ollamaAResponse)
 			allResults = append(allResults, aResults...)
 			h.RedisClient.Set(ctx, "analyst:last_run:architect", time.Now().Unix(), 0)
 		}
@@ -306,8 +314,12 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, "system-analyst", "Tier 3: Strategist Analysis")
 		strategistPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "strategist")
 		log.Printf("[%s] Executing Tier 3 (Strategist) Analysis...", HandlerName)
-		sResults, err := h.runAnalysisWithModel("dex-analyst-strategist", strategistPrompt)
+
+		strategistModel := "dex-analyst-strategist"
+		ollamaSResponse, err := h.OllamaClient.Generate(strategistModel, strategistPrompt, nil)
 		if err == nil {
+			h.emitAudit(ctx, "strategist", strategistModel, strategistPrompt, ollamaSResponse)
+			sResults := h.parseAnalysisResults(ollamaSResponse)
 			allResults = append(allResults, sResults...)
 			h.RedisClient.Set(ctx, "analyst:last_run:strategist", time.Now().Unix(), 0)
 		}
@@ -316,20 +328,15 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	return allResults, nil
 }
 
-// runAnalysisWithModel executes a generation against a specific model and parses JSON.
-func (h *AnalystHandler) runAnalysisWithModel(model, prompt string) ([]AnalysisResult, error) {
-	ollamaResponseString, err := h.OllamaClient.Generate(model, prompt, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	cleanJSON := extractJSON(ollamaResponseString)
+// parseAnalysisResults parses the raw model response into a slice of AnalysisResult.
+func (h *AnalystHandler) parseAnalysisResults(response string) []AnalysisResult {
+	cleanJSON := extractJSON(response)
 
 	var ollamaOutput struct {
 		Results []AnalysisResult `json:"results"`
 	}
 	if err := json.Unmarshal([]byte(cleanJSON), &ollamaOutput); err == nil && len(ollamaOutput.Results) > 0 {
-		return ollamaOutput.Results, nil
+		return ollamaOutput.Results
 	}
 
 	var rawArray []AnalysisResult
@@ -340,10 +347,49 @@ func (h *AnalystHandler) runAnalysisWithModel(model, prompt string) ([]AnalysisR
 				validResults = append(validResults, r)
 			}
 		}
-		return validResults, nil
+		return validResults
 	}
 
-	return nil, nil
+	return nil
+}
+
+// emitAudit creates a new system.analysis.audit event.
+func (h *AnalystHandler) emitAudit(ctx context.Context, tier, model, input, output string) {
+	eventID := uuid.New().String()
+	timestamp := time.Now().Unix()
+
+	payload := map[string]interface{}{
+		"type":       string(types.EventTypeSystemAnalysisAudit),
+		"tier":       tier,
+		"model":      model,
+		"raw_input":  input,
+		"raw_output": output,
+		"timestamp":  timestamp,
+	}
+
+	eventJSON, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	event := types.Event{
+		ID:        eventID,
+		Service:   HandlerName,
+		Event:     eventJSON,
+		Timestamp: timestamp,
+	}
+	fullEventJSON, err := json.Marshal(event)
+	if err != nil {
+		return
+	}
+	pipe := h.RedisClient.Pipeline()
+	pipe.Set(ctx, "event:"+eventID, fullEventJSON, 0)
+	pipe.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(timestamp), Member: eventID})
+	pipe.ZAdd(ctx, "events:service:"+HandlerName, redis.Z{Score: float64(timestamp), Member: eventID})
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.Printf("[%s] Error storing audit: %v", HandlerName, err)
+	} else {
+		log.Printf("[%s] Emitted Audit for %s tier", HandlerName, tier)
+	}
 }
 
 // fetchRecentNotifications retrieves the last N notifications generated by the system.

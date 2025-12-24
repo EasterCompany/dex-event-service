@@ -649,6 +649,35 @@ func GetTemplates() map[string]EventTemplate {
 				"body":              {Type: "string", Required: true, Description: "Detailed explanation or suggested action"},
 				"related_event_ids": {Type: "array", Required: false, Description: "IDs of related events"},
 				"read":              {Type: "boolean", Required: false, Description: "Whether the user has marked it as read"},
+				"alert":             {Type: "boolean", Required: false, Description: "Whether this is an urgent alert"},
+			},
+		},
+
+		string(types.EventTypeSystemBlueprintGenerated): {
+			Description: "An AI-generated technical blueprint for a new feature or optimization",
+			Format:      "Blueprint: {title} - {summary}",
+			Fields: map[string]FieldSpec{
+				"title":               {Type: "string", Required: true},
+				"priority":            {Type: "string", Required: true},
+				"category":            {Type: "string", Required: true},
+				"body":                {Type: "string", Required: true},
+				"summary":             {Type: "string", Required: true},
+				"content":             {Type: "string", Required: true},
+				"affected_services":   {Type: "array", Required: true},
+				"implementation_path": {Type: "array", Required: true},
+				"read":                {Type: "boolean", Required: false},
+			},
+		},
+
+		string(types.EventTypeSystemAnalysisAudit): {
+			Description: "Raw audit log of an AI analysis run",
+			Format:      "Analysis Audit: {tier} tier processed",
+			Fields: map[string]FieldSpec{
+				"tier":       {Type: "string", Required: true, Description: "guardian, architect, or strategist"},
+				"model":      {Type: "string", Required: true, Description: "Ollama model ID used"},
+				"raw_input":  {Type: "string", Required: true, Description: "Full prompt sent to the model"},
+				"raw_output": {Type: "string", Required: true, Description: "Raw response received from the model"},
+				"timestamp":  {Type: "number", Required: true},
 			},
 		},
 
