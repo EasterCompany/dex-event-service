@@ -180,18 +180,27 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 
 	var allResults []AnalysisResult
 
+	// Helper for generation with timeout
+	generateWithTimeout := func(tierCtx context.Context, model, prompt string) (string, error) {
+		tCtx, cancel := context.WithTimeout(tierCtx, 10*time.Minute)
+		defer cancel()
+		return h.OllamaClient.GenerateWithContext(tCtx, model, prompt, nil)
+	}
+
 	// --- Tier 1: Guardian ---
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 1: Guardian Analysis")
 	guardianPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "guardian")
 
 	guardianModel := "dex-analyst-guardian"
-	ollamaGResponse, err := h.OllamaClient.Generate(guardianModel, guardianPrompt, nil)
+	ollamaGResponse, err := generateWithTimeout(ctx, guardianModel, guardianPrompt)
 	if err == nil {
 		h.emitAudit(ctx, "guardian", guardianModel, guardianPrompt, ollamaGResponse)
 		gResults := h.parseAnalysisResults(ollamaGResponse)
 		allResults = append(allResults, gResults...)
 	} else if ctx.Err() != nil {
 		return nil, ctx.Err()
+	} else {
+		log.Printf("[%s] Guardian generation failed or timed out: %v", HandlerName, err)
 	}
 
 	// --- Tier 2: Architect ---
@@ -203,7 +212,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 		architectPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "architect")
 
 		architectModel := "dex-analyst-architect"
-		ollamaAResponse, err := h.OllamaClient.Generate(architectModel, architectPrompt, nil)
+		ollamaAResponse, err := generateWithTimeout(ctx, architectModel, architectPrompt)
 		if err == nil {
 			h.emitAudit(ctx, "architect", architectModel, architectPrompt, ollamaAResponse)
 			aResults := h.parseAnalysisResults(ollamaAResponse)
@@ -211,6 +220,8 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 			h.RedisClient.Set(ctx, "analyst:last_run:architect", time.Now().Unix(), 0)
 		} else if ctx.Err() != nil {
 			return nil, ctx.Err()
+		} else {
+			log.Printf("[%s] Architect generation failed or timed out: %v", HandlerName, err)
 		}
 	}
 
@@ -220,6 +231,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 
 	if time.Since(time.Unix(lastStratTS, 0)) >= 3*time.Hour {
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 3: Strategist Analysis")
+
 		roadmapItem := h.fetchOldestPublishedRoadmapItem(ctx)
 		var roadmapContent string
 		if roadmapItem != nil {
@@ -232,7 +244,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 		}
 
 		strategistModel := "dex-analyst-strategist"
-		ollamaSResponse, err := h.OllamaClient.Generate(strategistModel, strategistPrompt, nil)
+		ollamaSResponse, err := generateWithTimeout(ctx, strategistModel, strategistPrompt)
 		if err == nil {
 			h.emitAudit(ctx, "strategist", strategistModel, strategistPrompt, ollamaSResponse)
 			sResults := h.parseAnalysisResults(ollamaSResponse)
@@ -247,11 +259,14 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 			h.RedisClient.Set(ctx, "analyst:last_run:strategist", time.Now().Unix(), 0)
 		} else if ctx.Err() != nil {
 			return nil, ctx.Err()
+		} else {
+			log.Printf("[%s] Strategist generation failed or timed out: %v", HandlerName, err)
 		}
 	}
 
 	return allResults, nil
 }
+
 func (h *AnalystHandler) parseAnalysisResults(response string) []AnalysisResult {
 	if strings.Contains(response, "No significant insights found.") {
 		return nil
@@ -408,13 +423,19 @@ func (h *AnalystHandler) emitAudit(ctx context.Context, tier, model, input, outp
 }
 
 func (h *AnalystHandler) fetchEventsForAnalysis(ctx context.Context, sinceTS, untilTS int64) ([]types.Event, error) {
-	eventIDs, err := h.RedisClient.ZRangeByScore(ctx, "events:timeline", &redis.ZRangeBy{
+	// Limit to most recent 50 events to keep context concise
+	eventIDs, err := h.RedisClient.ZRevRangeByScore(ctx, "events:timeline", &redis.ZRangeBy{
 		Min: fmt.Sprintf("%d", sinceTS+1),
 		Max: fmt.Sprintf("%d", untilTS),
 	}).Result()
 
 	if err != nil || len(eventIDs) == 0 {
 		return nil, err
+	}
+
+	// Cap at 50 most recent events
+	if len(eventIDs) > 50 {
+		eventIDs = eventIDs[:50]
 	}
 
 	ignoredEventTypes := []string{

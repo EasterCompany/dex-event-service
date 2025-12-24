@@ -3,6 +3,7 @@ package ollama
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,6 +37,10 @@ type GenerateResponse struct {
 }
 
 func (c *Client) Generate(model, prompt string, images []string) (string, error) {
+	return c.GenerateWithContext(context.Background(), model, prompt, images)
+}
+
+func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, images []string) (string, error) {
 	reqBody := GenerateRequest{
 		Model:  model,
 		Prompt: prompt,
@@ -47,7 +52,14 @@ func (c *Client) Generate(model, prompt string, images []string) (string, error)
 		return "", err
 	}
 
-	resp, err := http.Post(c.BaseURL+"/api/generate", "application/json", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/generate", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
