@@ -58,19 +58,33 @@ func matchesEventFilters(eventData json.RawMessage, filters map[string]string) b
 			actualValueStr = ""
 		}
 
-		switch expectedValue {
-		case "empty":
-			if actualValueStr != "" && actualValueStr != "0" { // Consider "0" as empty for IDs
-				return false
+		// Support multiple comma-separated values (OR logic)
+		expectedValues := strings.Split(expectedValue, ",")
+		matchFound := false
+
+		for _, val := range expectedValues {
+			val = strings.TrimSpace(val)
+			switch val {
+			case "empty":
+				if actualValueStr == "" || actualValueStr == "0" {
+					matchFound = true
+				}
+			case "!empty":
+				if actualValueStr != "" && actualValueStr != "0" {
+					matchFound = true
+				}
+			default:
+				if actualValueStr == val {
+					matchFound = true
+				}
 			}
-		case "!empty":
-			if actualValueStr == "" || actualValueStr == "0" {
-				return false
+			if matchFound {
+				break
 			}
-		default:
-			if actualValueStr != expectedValue {
-				return false
-			}
+		}
+
+		if !matchFound {
+			return false
 		}
 	}
 
