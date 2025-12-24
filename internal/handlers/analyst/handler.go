@@ -103,16 +103,25 @@ func (h *AnalystHandler) checkAndAnalyze() {
 	ctx := context.Background()
 
 	lastCognitiveEvent, _ := h.RedisClient.Get(ctx, "system:last_cognitive_event").Int64()
-	if time.Since(time.Unix(lastCognitiveEvent, 0)) < 60*time.Second {
+	lastAnalysisDiff := time.Since(time.Unix(h.lastAnalyzedTS, 0))
+
+	// Logic: System is idle if no high-priority cognitive events in last 60s
+	isIdle := time.Since(time.Unix(lastCognitiveEvent, 0)) >= 60*time.Second
+
+	// If it's been more than 2 hours, we FORCE an analysis even if not "idle"
+	// (to prevent permanent blockage by constant chatter)
+	forceRun := lastAnalysisDiff > 2*time.Hour
+
+	if !isIdle && !forceRun {
 		return
 	}
 
-	if time.Since(time.Unix(h.lastAnalyzedTS, 0)) < 5*time.Minute {
+	// Minimum interval of 5 minutes between runs
+	if lastAnalysisDiff < 5*time.Minute {
 		return
 	}
 
-	log.Printf("[%s] System idle detected. Starting multi-tier analysis cycle...", HandlerName)
-
+	log.Printf("[%s] Analysis trigger: Idle=%v, Force=%v. Starting cycle...", HandlerName, isIdle, forceRun)
 	untilTS := time.Now().Unix()
 	sinceTS := h.lastAnalyzedTS
 
