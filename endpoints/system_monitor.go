@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/config"
+	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/redis/go-redis/v9"
 )
@@ -35,21 +36,6 @@ type ProcessInfo struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
-// ServiceReport for a single service, adapted for JSON output to frontend
-type ServiceReport struct {
-	ID            string        `json:"id"`
-	ShortName     string        `json:"short_name"` // Will use ID as short_name fallback if not present
-	Type          string        `json:"type"`       // Service type from service map group (e.g., "cs", "be")
-	Domain        string        `json:"domain"`
-	Port          string        `json:"port"`
-	Status        string        `json:"status"` // "online", "offline", "unknown"
-	Uptime        string        `json:"uptime"` // formatted string
-	Version       utils.Version `json:"version"`
-	HealthMessage string        `json:"health_message"`
-	CPU           string        `json:"cpu"`    // formatted string (e.g., "1.2%")
-	Memory        string        `json:"memory"` // formatted string (e.g., "5.3%")
-}
-
 // ModelReport for a single model's status
 type ModelReport struct {
 	Name   string `json:"name"`
@@ -60,9 +46,9 @@ type ModelReport struct {
 
 // SystemMonitorResponse is the top-level response for the system monitor endpoint
 type SystemMonitorResponse struct {
-	Services []ServiceReport      `json:"services"`
-	Models   []ModelReport        `json:"models"`
-	Whisper  *WhisperStatusReport `json:"whisper,omitempty"`
+	Services []types.ServiceReport `json:"services"`
+	Models   []ModelReport         `json:"models"`
+	Whisper  *WhisperStatusReport  `json:"whisper,omitempty"`
 }
 
 // ListProcessesHandler fetches and returns information about active event handler processes
@@ -135,7 +121,7 @@ func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var serviceReports []ServiceReport
+	var serviceReports []types.ServiceReport
 
 	// Define service type order for consistent sorting
 	typeOrder := map[string]int{
@@ -259,9 +245,9 @@ func checkModelsStatus() []ModelReport {
 }
 
 // checkService dispatches to appropriate status checker based on service type.
-func checkService(service config.ServiceEntry, serviceType string) ServiceReport {
+func checkService(service config.ServiceEntry, serviceType string) types.ServiceReport {
 	// Populate basic info, ShortName will be ID as no ShortName field in ServiceEntry
-	baseReport := ServiceReport{
+	baseReport := types.ServiceReport{
 		ID:        service.ID,
 		ShortName: service.ID, // Use ID as ShortName fallback
 		Type:      serviceType,
@@ -292,7 +278,7 @@ func checkService(service config.ServiceEntry, serviceType string) ServiceReport
 }
 
 // newUnknownServiceReport creates a default report for services we can't fully check
-func newUnknownServiceReport(baseReport ServiceReport, message string) ServiceReport {
+func newUnknownServiceReport(baseReport types.ServiceReport, message string) types.ServiceReport {
 	baseReport.Status = "unknown"
 	baseReport.HealthMessage = message
 	baseReport.Uptime = "N/A"
@@ -458,7 +444,7 @@ func isLocalAddress(domain string) bool {
 }
 
 // checkCLIStatus checks if the CLI tool is installed and working
-func checkCLIStatus(baseReport ServiceReport) ServiceReport {
+func checkCLIStatus(baseReport types.ServiceReport) types.ServiceReport {
 	report := baseReport
 	cmd := exec.Command(os.ExpandEnv("$HOME/Dexter/bin/dex"), "version")
 	output, err := cmd.CombinedOutput()
@@ -494,7 +480,7 @@ func checkCLIStatus(baseReport ServiceReport) ServiceReport {
 }
 
 // checkHTTPStatus checks a service via its new, unified /service endpoint
-func checkHTTPStatus(baseReport ServiceReport) ServiceReport {
+func checkHTTPStatus(baseReport types.ServiceReport) types.ServiceReport {
 	report := baseReport // Start with base info
 
 	host := report.Domain
@@ -581,7 +567,7 @@ func checkHTTPStatus(baseReport ServiceReport) ServiceReport {
 }
 
 // checkRedisStatus checks a Redis server via PING and INFO commands
-func checkRedisStatus(baseReport ServiceReport, creds *config.ServiceCredentials) ServiceReport {
+func checkRedisStatus(baseReport types.ServiceReport, creds *config.ServiceCredentials) types.ServiceReport {
 	report := baseReport
 
 	host := report.Domain
@@ -740,7 +726,7 @@ func checkRedisStatus(baseReport ServiceReport, creds *config.ServiceCredentials
 }
 
 // checkOllamaStatus checks an Ollama server via its API
-func checkOllamaStatus(baseReport ServiceReport) ServiceReport {
+func checkOllamaStatus(baseReport types.ServiceReport) types.ServiceReport {
 	report := baseReport
 
 	host := report.Domain

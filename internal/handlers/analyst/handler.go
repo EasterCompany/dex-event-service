@@ -1,19 +1,21 @@
 package analyst
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"regexp"
-	"strconv" // Added for strconv.ParseInt
-	"strings" // Added for strings.Builder
+	"strconv"
+	"strings"
 	"time"
 
-	"github.com/EasterCompany/dex-event-service/internal/discord" // Corrected import
-	"github.com/EasterCompany/dex-event-service/internal/ollama"  // Corrected import
-	"github.com/EasterCompany/dex-event-service/internal/web"     // Corrected import
+	"github.com/EasterCompany/dex-event-service/config"
+	"github.com/EasterCompany/dex-event-service/internal/discord"
+	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/web"
 	"github.com/EasterCompany/dex-event-service/templates"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
@@ -30,8 +32,8 @@ const (
 	IdleDuration = 15 * time.Minute
 	// MaxEventsToAnalyze is the maximum number of recent events to feed to the LLM
 	MaxEventsToAnalyze = 500
-	// LastActivityKey is the Redis key to store the timestamp of the last user-facing activity
-	LastActivityKey = "analyst:last_activity_ts"
+	// MaxLogsToAnalyze is the number of recent log lines per service to analyze
+	MaxLogsToAnalyze = 20
 	// LastAnalysisKey is the Redis key to store the timestamp of the last successful analysis
 	LastAnalysisKey = "analyst:last_analysis_ts"
 	// OllamaModel is the model to use for analysis
@@ -48,11 +50,11 @@ var ignoredEventTypes = []string{
 // AnalystHandler handles generating proactive notifications based on event timeline analysis.
 type AnalystHandler struct {
 	RedisClient    *redis.Client
-	OllamaClient   *ollama.Client     // Corrected type
-	DiscordClient  *discord.Client    // Corrected type
-	WebClient      *web.Client        // Corrected type
-	CancelFunc     context.CancelFunc // To gracefully stop the worker goroutine
-	lastAnalyzedTS int64              // Timestamp of the last event processed by analysis
+	OllamaClient   *ollama.Client
+	DiscordClient  *discord.Client
+	WebClient      *web.Client
+	CancelFunc     context.CancelFunc
+	lastAnalyzedTS int64
 }
 
 // NewAnalystHandler creates a new AnalystHandler instance.
@@ -62,7 +64,7 @@ func NewAnalystHandler(redisClient *redis.Client, ollamaClient *ollama.Client, d
 		OllamaClient:   ollamaClient,
 		DiscordClient:  discordClient,
 		WebClient:      webClient,
-		lastAnalyzedTS: time.Now().Add(-1 * time.Hour).Unix(), // Look back 1 hour on first run if no state
+		lastAnalyzedTS: time.Now().Add(-1 * time.Hour).Unix(),
 	}
 }
 
@@ -70,7 +72,6 @@ func NewAnalystHandler(redisClient *redis.Client, ollamaClient *ollama.Client, d
 func (h *AnalystHandler) Init(ctx context.Context) error {
 	log.Printf("[%s] Initializing handler...", HandlerName)
 
-	// Recover last analysis timestamp from Redis
 	lastAnalysisStr, err := h.RedisClient.Get(ctx, LastAnalysisKey).Result()
 	if err == nil {
 		if ts, err := strconv.ParseInt(lastAnalysisStr, 10, 64); err == nil {
@@ -79,7 +80,6 @@ func (h *AnalystHandler) Init(ctx context.Context) error {
 	}
 	log.Printf("[%s] Last analysis coverage up to: %s", HandlerName, time.Unix(h.lastAnalyzedTS, 0).Format(time.RFC3339))
 
-	// Start the background worker
 	ctx, cancel := context.WithCancel(context.Background())
 	h.CancelFunc = cancel
 	go h.runWorker(ctx)
@@ -98,7 +98,7 @@ func (h *AnalystHandler) Close() error {
 	return nil
 }
 
-// HandleEvent processes incoming events (now a no-op as we query the timeline directly for idle checks).
+// HandleEvent processes incoming events (no-op).
 func (h *AnalystHandler) HandleEvent(ctx context.Context, event *types.Event, eventData map[string]interface{}) ([]types.Event, error) {
 	return nil, nil
 }
@@ -132,15 +132,13 @@ func (h *AnalystHandler) reportProcessStatus(ctx context.Context, state string) 
 	}
 
 	jsonBytes, _ := json.Marshal(data)
-	h.RedisClient.Set(ctx, key, jsonBytes, 2*time.Minute) // 2m TTL as safety
+	h.RedisClient.Set(ctx, key, jsonBytes, 2*time.Minute)
 }
 
 // checkAndAnalyze determines if an analysis run is needed and executes it.
 func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	timelineKey := "events:timeline"
 
-	// 1. Get the last event that IS NOT an analyst notification to determine TRUE idle time
-	// We check the last 10 events to be safe, searching for the first non-analyst one.
 	lastEvents, err := h.RedisClient.ZRevRangeWithScores(ctx, timelineKey, 0, 10).Result()
 	if err != nil || len(lastEvents) == 0 {
 		return
@@ -164,7 +162,6 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 		var eventData map[string]interface{}
 		if err := json.Unmarshal(event.Event, &eventData); err == nil {
 			eventType, _ := eventData["type"].(string)
-			// Ignore our own notifications when calculating idle time
 			if eventType == string(types.EventTypeSystemNotificationGenerated) {
 				continue
 			}
@@ -176,14 +173,11 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	}
 
 	if !foundActivity {
-		// Fallback to the very latest event if we can't find a non-analyst one
 		lastSystemActivityTS = int64(lastEvents[0].Score)
 	}
 
 	idleTime := time.Since(time.Unix(lastSystemActivityTS, 0))
 
-	// 2. Check for ACTIVE processes (cognitive tasks, builds, etc)
-	// These are reported in Redis as process:info:<channel_id>
 	iter := h.RedisClient.Scan(ctx, 0, "process:info:*", 0).Iterator()
 	activeProcessCount := 0
 	for iter.Next(ctx) {
@@ -191,18 +185,15 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	}
 
 	if activeProcessCount > 0 {
-		// log.Printf("[%s] Idle check: system has %d active processes. Resetting idle timer.", HandlerName, activeProcessCount)
 		return
 	}
 
 	log.Printf("[%s] Idle check: system has been idle for %s (Threshold: %s)", HandlerName, idleTime.Round(time.Second), IdleDuration)
 
-	// Check for idle state
 	if idleTime < IdleDuration {
 		return
 	}
 
-	// 3. Check if new events have occurred since our LAST SUCCESSFUL ANALYSIS
 	newEventCount, err := h.RedisClient.ZCount(ctx, timelineKey, fmt.Sprintf("(%d", h.lastAnalyzedTS), "+inf").Result()
 	if err != nil {
 		log.Printf("[%s] Error counting new events: %v", HandlerName, err)
@@ -213,10 +204,8 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 		return
 	}
 
-	log.Printf("[%s] System idle threshold met. %d new events since last analysis. Initiating analysis...",
-		HandlerName, newEventCount)
+	log.Printf("[%s] System idle threshold met. %d new events since last analysis. Initiating analysis...", HandlerName, newEventCount)
 
-	// Report process status so it appears on dashboard
 	h.reportProcessStatus(ctx, fmt.Sprintf("Analyzing %d events", newEventCount))
 	defer h.RedisClient.Del(ctx, "process:info:system-analyst")
 
@@ -240,7 +229,6 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 		}
 	}
 
-	// Determine the timestamp of the latest event we just considered
 	latestEventInSet, err := h.RedisClient.ZRevRangeWithScores(ctx, timelineKey, 0, 0).Result()
 	if err == nil && len(latestEventInSet) > 0 {
 		h.lastAnalyzedTS = int64(latestEventInSet[0].Score)
@@ -252,56 +240,50 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	log.Printf("[%s] Analysis coverage updated to %s.", HandlerName, time.Unix(h.lastAnalyzedTS, 0).Format(time.RFC3339))
 }
 
-// extractJSON attempts to find and return a JSON string within a larger text block,
-// specifically handling markdown code blocks (```json ... ```).
+// extractJSON attempts to find and return a JSON string within a larger text block.
 func extractJSON(input string) string {
 	input = strings.TrimSpace(input)
-
-	// Check for markdown code blocks
 	if strings.Contains(input, "```") {
-		// Try to find ```json ... ```
 		re := regexp.MustCompile("(?s)```(?:json)?\n?(.*?)\n?```")
 		match := re.FindStringSubmatch(input)
 		if len(match) > 1 {
 			return strings.TrimSpace(match[1])
 		}
 	}
-
-	// Fallback to finding the first '[' or '{' and last ']' or '}'
-	start := strings.IndexAny(input, "[{")
-	end := strings.LastIndexAny(input, "]}")
-
+	start := strings.IndexAny(input, "[[")
+	end := strings.LastIndexAny(input, "]]")
 	if start != -1 && end != -1 && end > start {
 		return input[start : end+1]
 	}
-
 	return input
 }
 
 // PerformAnalysis fetches events, creates a prompt, calls Ollama, and parses notifications.
 func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS int64) ([]Notification, error) {
-	// Fetch events since last analysis
 	events, err := h.fetchEventsForAnalysis(ctx, sinceTS, untilTS)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch events: %w", err)
 	}
-
 	if len(events) == 0 {
-		return nil, nil // No events to analyze
+		return nil, nil
 	}
 
-	prompt := h.buildAnalysisPrompt(events)
+	status, _ := h.fetchSystemStatus()
+	logs, _ := h.fetchRecentLogs()
+	history, err := h.fetchRecentNotifications(ctx, 20)
+	if err != nil {
+		log.Printf("[%s] Warning: Failed to fetch history context: %v", HandlerName, err)
+	}
 
-	// Call Ollama
+	prompt := h.buildAnalysisPrompt(events, history, status, logs)
+
 	ollamaResponseString, err := h.OllamaClient.Generate(OllamaModel, prompt, nil)
 	if err != nil {
 		return nil, fmt.Errorf("ollama generation failed: %w", err)
 	}
 
-	// Extract clean JSON from potential markdown/prose
 	cleanJSON := extractJSON(ollamaResponseString)
 
-	// 1. Try to parse as the expected wrapped object: {"notifications": [...]}
 	var ollamaOutput struct {
 		Notifications []Notification `json:"notifications"`
 	}
@@ -309,10 +291,8 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 		return ollamaOutput.Notifications, nil
 	}
 
-	// 2. Fallback: Try to parse as a raw array: [...]
 	var rawArray []Notification
 	if err := json.Unmarshal([]byte(cleanJSON), &rawArray); err == nil && len(rawArray) > 0 {
-		// VALIDATION: Ensure the items actually look like notifications
 		var validNotifications []Notification
 		for _, n := range rawArray {
 			if n.Title != "" || n.Body != "" {
@@ -324,28 +304,198 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 		}
 	}
 
-	// 3. If both failed, or result was empty log repetition, return error/empty
-	log.Printf("[%s] Warning: Ollama response was not valid or contained empty notifications. Response: %s", HandlerName, ollamaResponseString)
+	return nil, nil
+}
 
-	// If the AI outputted a large array that didn't match our schema, don't emit anything
-	// but do return a failure if it's clearly garbage.
-	if len(cleanJSON) > 10 && !strings.Contains(cleanJSON, "\"title\"") {
-		return []Notification{{
-			Title:    "AI Analysis Error",
-			Priority: "low",
-			Category: "system",
-			Body:     "The analyst model returned data that did not match the expected notification format. It may have attempted to repeat the input logs.",
-		}}, nil
+// fetchRecentNotifications retrieves the last N notifications generated by the system.
+func (h *AnalystHandler) fetchRecentNotifications(ctx context.Context, count int) ([]Notification, error) {
+	serviceKey := "events:service:" + HandlerName
+	eventIDs, err := h.RedisClient.ZRevRange(ctx, serviceKey, 0, int64(count-1)).Result()
+	if err != nil {
+		return nil, err
 	}
 
-	return nil, nil
+	history := make([]Notification, 0, len(eventIDs))
+	for _, id := range eventIDs {
+		data, err := h.RedisClient.Get(ctx, "event:"+id).Result()
+		if err != nil {
+			continue
+		}
+		var event types.Event
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			continue
+		}
+		var payload map[string]interface{}
+		if err := json.Unmarshal(event.Event, &payload); err != nil {
+			continue
+		}
+		if payload["type"] != string(types.EventTypeSystemNotificationGenerated) {
+			continue
+		}
+		history = append(history, Notification{
+			Title:    payload["title"].(string),
+			Priority: payload["priority"].(string),
+			Category: payload["category"].(string),
+			Body:     payload["body"].(string),
+		})
+	}
+	return history, nil
+}
+
+// fetchSystemStatus retrieves current health of all services
+func (h *AnalystHandler) fetchSystemStatus() ([]types.ServiceReport, error) {
+	configuredServices, err := config.LoadServiceMap()
+	if err != nil {
+		return nil, err
+	}
+
+	var reports []types.ServiceReport
+	for group, services := range configuredServices.Services {
+		for _, s := range services {
+			status := "unknown"
+			if s.Port != "" {
+				url := fmt.Sprintf("http://localhost:%s/service", s.Port)
+				_, err := utils.FetchURL(url, 500*time.Millisecond)
+				if err == nil {
+					status = "online"
+				} else {
+					status = "offline"
+				}
+			}
+			reports = append(reports, types.ServiceReport{
+				ID:     s.ID,
+				Type:   group,
+				Status: status,
+			})
+		}
+	}
+	return reports, nil
+}
+
+// fetchRecentLogs retrieves recent log lines for all manageable services
+func (h *AnalystHandler) fetchRecentLogs() ([]types.LogReport, error) {
+	configuredServices, err := config.LoadServiceMap()
+	if err != nil {
+		return nil, err
+	}
+
+	var reports []types.LogReport
+	home := os.Getenv("HOME")
+
+	for _, services := range configuredServices.Services {
+		for _, s := range services {
+			if strings.Contains(s.ID, "cli") || strings.Contains(s.ID, "os") {
+				continue
+			}
+			logPath := fmt.Sprintf("%s/Dexter/logs/%s.log", home, s.ID)
+			lines, _ := h.readLastNLines(logPath, MaxLogsToAnalyze)
+			if len(lines) > 0 {
+				reports = append(reports, types.LogReport{
+					ID:   s.ID,
+					Logs: lines,
+				})
+			}
+		}
+	}
+	return reports, nil
+}
+
+func (h *AnalystHandler) readLastNLines(filePath string, n int) ([]string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+
+	var lines []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines, scanner.Err()
+}
+
+// buildAnalysisPrompt constructs the prompt for the Ollama LLM.
+func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event, history []Notification, status []types.ServiceReport, logs []types.LogReport) string {
+	systemPrompt := fmt.Sprintf("%s\n\n%s\n\nYour task is to act as a Tier 1 Technical Analyst. You will monitor system logs, events, and service status for technical issues, bugs, service failures, or build errors. You must report these as notifications for the master user.", utils.DexterIdentity, utils.DexterArchitecture)
+
+	instructions := `
+**Primary Objective (Tier 1 Analysis):**
+- Identify technical issues, service crashes, repeated build failures, or API timeouts.
+- Analyze the provided Status, Logs, and Events together to find root causes.
+- Focus strictly on technical health and reliability.
+
+**Memory & Continuity:**
+- You will be provided with a list of "Recent Reported Issues." 
+- **DO NOT report the same issue multiple times.**
+- If an issue is already in the history and persists, only report it again if the severity has increased or the error message has changed.
+
+**Output Constraints:**
+- If no NEW technical issues are found, return exactly: {"notifications": []}.
+- Your output must consist ONLY of the JSON object. No prose.
+
+**JSON Schema:**
+{
+  "notifications": [
+    {
+      "title": "Clear summary of the technical issue",
+      "priority": "low|medium|high|critical",
+      "category": "error|build|system|security",
+      "body": "Detailed explanation, including service names and root cause analysis from logs/events.",
+      "related_event_ids": ["uuid-1"]
+    }
+  ]
+}
+`
+
+	var sb strings.Builder
+	sb.WriteString(systemPrompt + "\n")
+	sb.WriteString(instructions + "\n")
+
+	if len(history) > 0 {
+		sb.WriteString("\n### Recent Reported Issues (Memory):\n")
+		for _, h := range history {
+			sb.WriteString(fmt.Sprintf("- [%s] %s: %s\n", h.Priority, h.Title, h.Body))
+		}
+	}
+
+	if len(status) > 0 {
+		sb.WriteString("\n### Current System Status:\n")
+		for _, s := range status {
+			sb.WriteString(fmt.Sprintf("- %s (%s): %s\n", s.ID, s.Type, s.Status))
+		}
+	}
+
+	if len(logs) > 0 {
+		sb.WriteString("\n### Recent System Logs:\n")
+		for _, report := range logs {
+			sb.WriteString(fmt.Sprintf("[%s]:\n", report.ID))
+			for _, line := range report.Logs {
+				sb.WriteString(fmt.Sprintf("  %s\n", line))
+			}
+		}
+	}
+
+	sb.WriteString("\n### New Event Logs:\n")
+	for _, event := range events {
+		var eventData map[string]interface{}
+		_ = json.Unmarshal(event.Event, &eventData)
+		eventType, _ := eventData["type"].(string)
+		summary := templates.FormatEventAsText(eventType, eventData, event.Service, event.Timestamp, 0, "UTC", "en")
+		sb.WriteString(fmt.Sprintf("%s | %s | %s\n", time.Unix(event.Timestamp, 0).Format("15:04:05"), event.Service, summary))
+	}
+
+	return sb.String()
 }
 
 // Notification struct for parsing LLM output
 type Notification struct {
 	Title           string   `json:"title"`
-	Priority        string   `json:"priority"` // low, medium, high, critical
-	Category        string   `json:"category"` // system, security, conversation, error, build
+	Priority        string   `json:"priority"`
+	Category        string   `json:"category"`
 	Body            string   `json:"body"`
 	RelatedEventIDs []string `json:"related_event_ids"`
 	Read            bool     `json:"read"`
@@ -354,7 +504,6 @@ type Notification struct {
 // fetchEventsForAnalysis retrieves events from Redis for analysis.
 func (h *AnalystHandler) fetchEventsForAnalysis(ctx context.Context, sinceTS, untilTS int64) ([]types.Event, error) {
 	timelineKey := "events:timeline"
-	// Fetch events within the time range, up to MaxEventsToAnalyze, ordered newest first
 	eventIDs, err := h.RedisClient.ZRevRangeByScore(ctx, timelineKey, &redis.ZRangeBy{
 		Min:   fmt.Sprintf("%d", sinceTS),
 		Max:   fmt.Sprintf("%d", untilTS),
@@ -363,15 +512,12 @@ func (h *AnalystHandler) fetchEventsForAnalysis(ctx context.Context, sinceTS, un
 	if err != nil {
 		return nil, err
 	}
-
 	if len(eventIDs) == 0 {
 		return nil, nil
 	}
-
 	events := make([]types.Event, 0, len(eventIDs))
 	pipe := h.RedisClient.Pipeline()
 	cmds := make([]*redis.StringCmd, len(eventIDs))
-
 	for i, eventID := range eventIDs {
 		cmds[i] = pipe.Get(ctx, "event:"+eventID)
 	}
@@ -379,29 +525,21 @@ func (h *AnalystHandler) fetchEventsForAnalysis(ctx context.Context, sinceTS, un
 	if err != nil {
 		return nil, err
 	}
-
 	for _, cmd := range cmds {
 		eventJSON, err := cmd.Result()
 		if err != nil {
-			log.Printf("[%s] Warning: Could not retrieve event data for ID: %s, Error: %v", HandlerName, cmd.Args()[1], err)
 			continue
 		}
 		var event types.Event
 		if err := json.Unmarshal([]byte(eventJSON), &event); err != nil {
-			log.Printf("[%s] Warning: Could not unmarshal event JSON: %s, Error: %v", HandlerName, eventJSON, err)
 			continue
 		}
-		// Exclude notification events themselves from being re-analyzed to prevent feedback loops
 		var eventData map[string]interface{}
 		if err := json.Unmarshal(event.Event, &eventData); err == nil {
 			eventType, _ := eventData["type"].(string)
-
-			// 1. Skip already generated notifications to prevent feedback loops
 			if eventType == string(types.EventTypeSystemNotificationGenerated) {
 				continue
 			}
-
-			// 2. Skip "noise" events (speaking started/stopped, etc)
 			isIgnored := false
 			for _, ignored := range ignoredEventTypes {
 				if eventType == ignored {
@@ -418,59 +556,10 @@ func (h *AnalystHandler) fetchEventsForAnalysis(ctx context.Context, sinceTS, un
 	return events, nil
 }
 
-// buildAnalysisPrompt constructs the prompt for the Ollama LLM.
-func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event) string {
-	// System prompt based on the user's request
-	systemPrompt := fmt.Sprintf("%s\n\n%s\n\nYour task is to review a series of event logs and identify critical errors, unusual situations, significant completed workflows, or notable user interactions. Summarize these into concise, actionable notifications for the master user.", utils.DexterIdentity, utils.DexterArchitecture)
-
-	instructions := `
-**Instructions:**
-- Analyze the provided events chronologically.
-- Focus on identifying critical errors, unusual patterns, workflow completions, or notable user interactions.
-- **DO NOT repeat the input logs.** Do not return an array of events.
-- Your output must consist ONLY of new insights/notifications that you have derived from the data.
-- If no significant patterns or critical insights are found, return exactly: {"notifications": []}.
-- For each identified insight, generate a single notification in JSON format.
-
-**JSON Schema:**
-{
-  "notifications": [
-    {
-      "title": "Concise summary (e.g., 'Build Failed Repeatedly')",
-      "priority": "low|medium|high|critical",
-      "category": "system|security|conversation|error|build|user_activity",
-      "body": "Detailed explanation of your insight.",
-      "related_event_ids": ["uuid-1", "uuid-2"]
-    }
-  ]
-}
-`
-
-	// User content: formatted event logs
-	var eventLogBuilder strings.Builder
-	eventLogBuilder.WriteString("Event Logs:\n")
-	eventLogBuilder.WriteString("-------------\n")
-
-	for _, event := range events {
-		var eventData map[string]interface{}
-		_ = json.Unmarshal(event.Event, &eventData) // Safe to ignore error, handled by prompt.
-
-		eventType, _ := eventData["type"].(string)
-		summary := templates.FormatEventAsText(eventType, eventData, event.Service, event.Timestamp, 0, "UTC", "en") // Use generic formatting
-		eventLogBuilder.WriteString(fmt.Sprintf("%s | %s | %s\n", time.Unix(event.Timestamp, 0).Format("15:04:05"), event.Service, summary))
-	}
-	eventLogBuilder.WriteString("-------------\n")
-	eventLogBuilder.WriteString("Based on the above events, please generate a JSON array of notifications. Ensure the output is JUST the JSON, no prose.\n")
-
-	return systemPrompt + "\n" + instructions + "\n" + eventLogBuilder.String()
-}
-
 // emitNotification creates and stores a new system.notification.generated event.
 func (h *AnalystHandler) emitNotification(ctx context.Context, notif Notification) {
 	eventID := uuid.New().String()
 	timestamp := time.Now().Unix()
-
-	// Add type and timestamp to notification payload for template validation
 	notifPayload := map[string]interface{}{
 		"type":              string(types.EventTypeSystemNotificationGenerated),
 		"title":             notif.Title,
@@ -478,50 +567,30 @@ func (h *AnalystHandler) emitNotification(ctx context.Context, notif Notificatio
 		"category":          notif.Category,
 		"body":              notif.Body,
 		"related_event_ids": notif.RelatedEventIDs,
-		"read":              false, // Always emit as unread
+		"read":              false,
 	}
-
 	eventJSON, err := json.Marshal(notifPayload)
 	if err != nil {
-		log.Printf("[%s] Error marshaling notification payload: %v", HandlerName, err)
 		return
 	}
-
 	event := types.Event{
 		ID:        eventID,
-		Service:   HandlerName, // Source of the notification
+		Service:   HandlerName,
 		Event:     eventJSON,
 		Timestamp: timestamp,
 	}
-
-	// Marshal the full event for storage
 	fullEventJSON, err := json.Marshal(event)
 	if err != nil {
-		log.Printf("[%s] Error marshaling full event: %v", HandlerName, err)
 		return
 	}
-
-	// Use Redis pipeline for atomic operations
 	pipe := h.RedisClient.Pipeline()
-
 	eventKey := "event:" + eventID
-	pipe.Set(ctx, eventKey, fullEventJSON, 0) // Store the full notification event struct
-
-	// Add event ID to the global sorted set (timeline)
-	pipe.ZAdd(ctx, "events:timeline", redis.Z{
-		Score:  float64(timestamp),
-		Member: eventID,
-	})
-
-	// Add event ID to a service-specific sorted set
-	pipe.ZAdd(ctx, "events:service:"+HandlerName, redis.Z{
-		Score:  float64(timestamp),
-		Member: eventID,
-	})
-
+	pipe.Set(ctx, eventKey, fullEventJSON, 0)
+	pipe.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(timestamp), Member: eventID})
+	pipe.ZAdd(ctx, "events:service:"+HandlerName, redis.Z{Score: float64(timestamp), Member: eventID})
 	if _, err := pipe.Exec(ctx); err != nil {
-		log.Printf("[%s] Error storing generated notification event: %v", HandlerName, err)
+		log.Printf("[%s] Error storing notification: %v", HandlerName, err)
 	} else {
-		log.Printf("[%s] Emitted new notification: \"%s\" (Priority: %s)", HandlerName, notif.Title, notif.Priority)
+		log.Printf("[%s] Emitted: \"%s\"", HandlerName, notif.Title)
 	}
 }

@@ -10,13 +10,8 @@ import (
 	"strings"
 
 	"github.com/EasterCompany/dex-event-service/config"
+	"github.com/EasterCompany/dex-event-service/types"
 )
-
-// LogReport for a single service
-type LogReport struct {
-	ID   string   `json:"id"`
-	Logs []string `json:"logs"`
-}
 
 // LogsHandler collects logs for all configured services and returns as JSON
 func LogsHandler(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +21,7 @@ func LogsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var reports []LogReport
+	var reports []types.LogReport
 
 	// Get sorted group keys to ensure consistent order
 	var groupKeys []string
@@ -62,17 +57,17 @@ func LogsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getLogReport(service config.ServiceEntry) LogReport {
+func getLogReport(service config.ServiceEntry) types.LogReport {
 	logPath := getLogPath(service.ID)
 	logs, err := readLastNLines(logPath, 50)
 	if err != nil {
-		return LogReport{
+		return types.LogReport{
 			ID:   service.ID,
 			Logs: []string{fmt.Sprintf("Error reading log file: %v", err)},
 		}
 	}
 
-	return LogReport{
+	return types.LogReport{
 		ID:   service.ID,
 		Logs: logs,
 	}
