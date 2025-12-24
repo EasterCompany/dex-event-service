@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/internal/handlers"
 	"github.com/EasterCompany/dex-event-service/internal/web"
 	"github.com/EasterCompany/dex-event-service/types"
@@ -429,7 +430,19 @@ Rules:
 	var decisionStr string
 	responseModel := "dex-fast-public-message-model" // Default to fast
 
-	if mentionedBot {
+	// --- 0. Check for Quiet Mode (Reload options dynamically) ---
+	quietMode := false
+	if opt, err := config.LoadOptions(); err == nil {
+		deps.Options = opt
+		quietMode = opt.Discord.QuietMode
+	}
+
+	if quietMode && !mentionedBot {
+		log.Printf("Quiet mode is ENABLED. Ignoring unsolicited message in channel %s.", channelID)
+		shouldEngage = false
+		decisionStr = "IGNORE"
+		engagementReason = "Quiet Mode Enabled (No Direct Mention)"
+	} else if mentionedBot {
 		log.Printf("Bot was mentioned, forcing engagement.")
 		shouldEngage = true
 		decisionStr = "REPLY"
