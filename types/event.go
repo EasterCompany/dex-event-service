@@ -49,7 +49,6 @@ const (
 
 	// System Notifications
 	EventTypeSystemNotificationGenerated EventType = "system.notification.generated"
-	EventTypeSystemNotificationAlert     EventType = "system.notification.alert"
 	EventTypeSystemBlueprintGenerated    EventType = "system.blueprint.generated"
 )
 

@@ -634,7 +634,8 @@ func (h *AnalystHandler) emitResult(ctx context.Context, res AnalysisResult) {
 
 	switch res.Type {
 	case "alert":
-		eventType = string(types.EventTypeSystemNotificationAlert)
+		eventType = string(types.EventTypeSystemNotificationGenerated)
+		payload["alert"] = true
 	case "blueprint":
 		eventType = string(types.EventTypeSystemBlueprintGenerated)
 		payload["summary"] = res.Summary
