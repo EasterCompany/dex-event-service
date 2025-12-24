@@ -617,12 +617,12 @@ func (h *AnalystHandler) fetchEventsForAnalysis(ctx context.Context, sinceTS, un
 	return events, nil
 }
 
-// emitResult creates and stores a new system event (notification or blueprint).
+// emitResult creates and stores a new system event (notification, alert, or blueprint).
 func (h *AnalystHandler) emitResult(ctx context.Context, res AnalysisResult) {
 	eventID := uuid.New().String()
 	timestamp := time.Now().Unix()
 
-	eventType := string(types.EventTypeSystemNotificationGenerated)
+	var eventType string
 	payload := map[string]interface{}{
 		"title":             res.Title,
 		"priority":          res.Priority,
@@ -632,12 +632,17 @@ func (h *AnalystHandler) emitResult(ctx context.Context, res AnalysisResult) {
 		"read":              false,
 	}
 
-	if res.Type == "blueprint" {
+	switch res.Type {
+	case "alert":
+		eventType = string(types.EventTypeSystemNotificationAlert)
+	case "blueprint":
 		eventType = string(types.EventTypeSystemBlueprintGenerated)
 		payload["summary"] = res.Summary
 		payload["content"] = res.Content
 		payload["affected_services"] = res.AffectedServices
 		payload["implementation_path"] = res.ImplementationPath
+	default:
+		eventType = string(types.EventTypeSystemNotificationGenerated)
 	}
 
 	payload["type"] = eventType

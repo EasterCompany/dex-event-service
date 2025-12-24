@@ -47,7 +47,7 @@ const (
 - **CRITICAL:** If any Tier 1 issues are found that are NOT already in 'Recent Reported Issues', you MUST report them immediately and prioritize them as High/Critical.
 - **Memory:** Only report a persisting issue if its severity has changed or you have a new root-cause insight from the logs.
 
-Output your findings in a strict JSON format with a "results" array containing "notification" type objects.`
+Output your findings in a strict JSON format with a "results" array containing "alert" type objects.`
 
 	// AnalystArchitectContext defines instructions for the Tier 2 Architect Analyst.
 	AnalystArchitectContext = `### **Reasoning Objective: Tier 2 - The Optimizer**
