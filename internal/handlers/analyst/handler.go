@@ -262,21 +262,28 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	// Extract clean JSON from potential markdown/prose
 	cleanJSON := extractJSON(ollamaResponseString)
 
-	// Parse Ollama's response into Notification struct
+	// 1. Try to parse as the expected wrapped object: {"notifications": [...]}
 	var ollamaOutput struct {
 		Notifications []Notification `json:"notifications"`
 	}
-	if err := json.Unmarshal([]byte(cleanJSON), &ollamaOutput); err != nil {
-		log.Printf("[%s] Warning: Ollama response was not valid JSON. Response: %s, Error: %v", HandlerName, ollamaResponseString, err)
-		return []Notification{{
-			Title:    "AI Analysis Failed",
-			Priority: "low",
-			Category: "system",
-			Body:     fmt.Sprintf("AI failed to parse its own output. Error: %v\n\nRaw output:\n%s", err, ollamaResponseString),
-		}}, nil
+	if err := json.Unmarshal([]byte(cleanJSON), &ollamaOutput); err == nil && len(ollamaOutput.Notifications) > 0 {
+		return ollamaOutput.Notifications, nil
 	}
 
-	return ollamaOutput.Notifications, nil
+	// 2. Fallback: Try to parse as a raw array: [...]
+	var rawArray []Notification
+	if err := json.Unmarshal([]byte(cleanJSON), &rawArray); err == nil {
+		return rawArray, nil
+	}
+
+	// 3. If both failed, return the error notification
+	log.Printf("[%s] Warning: Ollama response was not valid JSON. Response: %s", HandlerName, ollamaResponseString)
+	return []Notification{{
+		Title:    "AI Analysis Failed",
+		Priority: "low",
+		Category: "system",
+		Body:     fmt.Sprintf("AI failed to parse its own output. Error: Unrecognized JSON format.\n\nRaw output:\n%s", ollamaResponseString),
+	}}, nil
 }
 
 // Notification struct for parsing LLM output
