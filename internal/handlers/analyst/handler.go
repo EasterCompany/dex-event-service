@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -312,7 +313,22 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 
 	if time.Since(time.Unix(lastStratTS, 0)) >= 1*time.Hour {
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, "system-analyst", "Tier 3: Strategist Analysis")
+
+		// Check for published roadmap items to prioritize
+		roadmapItem := h.fetchOldestPublishedRoadmapItem(ctx)
+		var roadmapContent string
+		if roadmapItem != nil {
+			roadmapContent = roadmapItem.Content
+			log.Printf("[%s] Found active roadmap objective: \"%s\". Prioritizing in Tier 3.", HandlerName, roadmapItem.ID)
+		}
+
 		strategistPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "strategist")
+
+		// Inject roadmap context if available
+		if roadmapContent != "" {
+			strategistPrompt = fmt.Sprintf("### PRIMARY CREATOR OBJECTIVE (PRIORITY #1):\n%s\n\n%s", roadmapContent, strategistPrompt)
+		}
+
 		log.Printf("[%s] Executing Tier 3 (Strategist) Analysis...", HandlerName)
 
 		strategistModel := "dex-analyst-strategist"
@@ -320,6 +336,15 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 		if err == nil {
 			h.emitAudit(ctx, "strategist", strategistModel, strategistPrompt, ollamaSResponse)
 			sResults := h.parseAnalysisResults(ollamaSResponse)
+
+			// If we had a roadmap item and generated results, link them
+			if roadmapItem != nil && len(sResults) > 0 {
+				// Mark as consumed
+				roadmapItem.State = types.RoadmapStateConsumed
+				roadmapItem.ConsumedAt = time.Now().Unix()
+				h.updateRoadmapItem(ctx, roadmapItem)
+			}
+
 			allResults = append(allResults, sResults...)
 			h.RedisClient.Set(ctx, "analyst:last_run:strategist", time.Now().Unix(), 0)
 		}
@@ -720,4 +745,41 @@ func (h *AnalystHandler) emitResult(ctx context.Context, res AnalysisResult) {
 	} else {
 		log.Printf("[%s] Emitted %s: \"%s\"", HandlerName, res.Type, res.Title)
 	}
+}
+
+// fetchOldestPublishedRoadmapItem retrieves the oldest item in "published" state.
+func (h *AnalystHandler) fetchOldestPublishedRoadmapItem(ctx context.Context) *types.RoadmapItem {
+	keys, err := h.RedisClient.Keys(ctx, "roadmap:*").Result()
+	if err != nil || len(keys) == 0 {
+		return nil
+	}
+
+	var items []types.RoadmapItem
+	for _, key := range keys {
+		data, err := h.RedisClient.Get(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+		var item types.RoadmapItem
+		if err := json.Unmarshal([]byte(data), &item); err == nil && item.State == types.RoadmapStatePublished {
+			items = append(items, item)
+		}
+	}
+
+	if len(items) == 0 {
+		return nil
+	}
+
+	// Sort by CreatedAt (ascending) to get the oldest
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedAt < items[j].CreatedAt
+	})
+
+	return &items[0]
+}
+
+// updateRoadmapItem saves an updated roadmap item to Redis.
+func (h *AnalystHandler) updateRoadmapItem(ctx context.Context, item *types.RoadmapItem) {
+	data, _ := json.Marshal(item)
+	h.RedisClient.Set(ctx, "roadmap:"+item.ID, data, 0)
 }
