@@ -229,9 +229,7 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 		return
 	}
 
-	if len(results) == 0 {
-		log.Printf("[%s] Analysis completed: No significant patterns found.", HandlerName)
-	} else {
+	if len(results) > 0 {
 		for _, res := range results {
 			h.emitResult(ctx, res)
 		}
@@ -272,7 +270,7 @@ func extractJSON(input string) string {
 	return input
 }
 
-// PerformAnalysis fetches events, creates a prompt, calls Ollama, and parses notifications.
+// PerformAnalysis fetches events, creates prompts for each tier, and aggregates results.
 func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS int64) ([]AnalysisResult, error) {
 	events, err := h.fetchEventsForAnalysis(ctx, sinceTS, untilTS)
 	if err != nil {
@@ -282,17 +280,51 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	status, _ := h.fetchSystemStatus()
 	logs, _ := h.fetchRecentLogs()
 	tests, _ := h.fetchTestResults()
-	history, err := h.fetchRecentNotifications(ctx, 20)
-	if err != nil {
-		log.Printf("[%s] Warning: Failed to fetch history context: %v", HandlerName, err)
+	history, _ := h.fetchRecentNotifications(ctx, 20)
+
+	var allResults []AnalysisResult
+
+	// --- Tier 1: Guardian (Health & Stability) ---
+	// Runs on every analysis cycle.
+	guardianPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "guardian")
+	log.Printf("[%s] Executing Tier 1 (Guardian) Analysis...", HandlerName)
+	gResults, err := h.runAnalysisWithModel("dex-analyst-guardian", guardianPrompt)
+	if err == nil {
+		allResults = append(allResults, gResults...)
 	}
 
-	prompt := h.buildAnalysisPrompt(events, history, status, logs, tests)
+	// --- Tier 2: Architect (Optimization & Quality) ---
+	// Runs if T1 is stable OR every hour.
+	shouldRunArchitect := true // Logic can be expanded to check T1 result types
+	if shouldRunArchitect {
+		architectPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "architect")
+		log.Printf("[%s] Executing Tier 2 (Architect) Analysis...", HandlerName)
+		aResults, err := h.runAnalysisWithModel("dex-analyst-architect", architectPrompt)
+		if err == nil {
+			allResults = append(allResults, aResults...)
+		}
+	}
 
-	// Triage Routing: For now, we always run the Guardian (Tier 1)
-	ollamaResponseString, err := h.OllamaClient.Generate("dex-analyst-guardian", prompt, nil)
+	// --- Tier 3: Strategist (Feature Visionary) ---
+	// Runs once every 24 hours or when specifically requested.
+	// For now, we simulate with a 1/24 chance per idle cycle for development visibility
+	if time.Now().Hour() == 0 || time.Now().Minute()%30 == 0 {
+		strategistPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "strategist")
+		log.Printf("[%s] Executing Tier 3 (Strategist) Analysis...", HandlerName)
+		sResults, err := h.runAnalysisWithModel("dex-analyst-strategist", strategistPrompt)
+		if err == nil {
+			allResults = append(allResults, sResults...)
+		}
+	}
+
+	return allResults, nil
+}
+
+// runAnalysisWithModel executes a generation against a specific model and parses JSON.
+func (h *AnalystHandler) runAnalysisWithModel(model, prompt string) ([]AnalysisResult, error) {
+	ollamaResponseString, err := h.OllamaClient.Generate(model, prompt, nil)
 	if err != nil {
-		return nil, fmt.Errorf("ollama generation failed: %w", err)
+		return nil, err
 	}
 
 	cleanJSON := extractJSON(ollamaResponseString)
@@ -312,9 +344,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 				validResults = append(validResults, r)
 			}
 		}
-		if len(validResults) > 0 {
-			return validResults, nil
-		}
+		return validResults, nil
 	}
 
 	return nil, nil
@@ -460,9 +490,19 @@ func (h *AnalystHandler) readLastNLines(filePath string, n int) ([]string, error
 }
 
 // buildAnalysisPrompt constructs the prompt for the Ollama LLM.
-func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event, history []AnalysisResult, status []types.ServiceReport, logs []types.LogReport, tests string) string {
-	// Use the specialized Guardian prompt
-	systemPrompt := utils.GetAnalystGuardianPrompt()
+func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event, history []AnalysisResult, status []types.ServiceReport, logs []types.LogReport, tests string, tier string) string {
+	// Use the specialized prompts from utils/system_context
+	var systemPrompt string
+	switch tier {
+	case "guardian":
+		systemPrompt = utils.GetAnalystGuardianPrompt()
+	case "architect":
+		systemPrompt = utils.GetAnalystArchitectPrompt()
+	case "strategist":
+		systemPrompt = utils.GetAnalystStrategistPrompt()
+	default:
+		systemPrompt = utils.GetAnalystGuardianPrompt()
+	}
 
 	var sb strings.Builder
 	sb.WriteString(systemPrompt + "\n")
