@@ -79,7 +79,7 @@ func initBackgroundHandlers() {
 		if handlerConfig.IsBackgroundWorker {
 			switch handlerConfig.Name {
 			case analyst.HandlerName:
-				analystHandler := analyst.NewAnalystHandler(dependencies.Redis, dependencies.Ollama, dependencies.Discord, dependencies.Web)
+				analystHandler := analyst.NewAnalystHandler(dependencies.Redis, dependencies.Ollama, dependencies.Discord, dependencies.Web, dependencies.Options)
 				if err := analystHandler.Init(context.Background()); err != nil {
 					log.Printf("ERROR: Failed to initialize analyst handler: %v", err)
 					continue

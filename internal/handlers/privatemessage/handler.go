@@ -294,58 +294,21 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	}
 
 	var decisionStr string
-	shouldEngage := false
-	engagementReason := "Evaluated by dex-engagement-model"
-	var engagementRaw string
+	shouldEngage := true // Always engage in DMs
+	engagementReason := "Automatic engagement for Private Message"
 
-	utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Checking Engagement")
-	prompt := fmt.Sprintf(`Context:
-%s
+	masterUserID := ""
+	if deps.Options != nil {
+		masterUserID = deps.Options.Discord.MasterUser
+	}
 
-Current Message:
-%s
+	responseModel := "dex-fast-private-message-model"
+	decisionStr = "REPLY_FAST"
 
-Your task is to decide how Dexter should engage with the current message in this Private Message conversation.
-Output EXACTLY one of the following options (no prose):
-- "REPLY": If Dexter should send a full text response.
-- "REACTION:<emoji>": If Dexter should only react with an emoji. Example: "REACTION:👍", "REACTION:🔥", "REACTION:😂", "REACTION:🤔", "REACTION:👀", "REACTION:✅", "REACTION:❌".
-- "NONE": If Dexter should ignore the message.
-
-Consider the context and whether a response is truly necessary or if a simple emoji reaction is more appropriate for acknowledgment.`, contextHistory, content)
-	engagementRaw, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
-	if err != nil {
-		log.Printf("Engagement check failed: %v", err)
-		// Fallback for private messages if model fails: always reply
-		shouldEngage = true
-		decisionStr = "REPLY"
-		engagementReason = "Engagement model failed, falling back to REPLY for DM"
-	} else {
-		engagementRaw = strings.TrimSpace(engagementRaw)
-		upperRaw := strings.ToUpper(engagementRaw)
-		if strings.Contains(upperRaw, "REPLY") {
-			shouldEngage = true
-			decisionStr = "REPLY"
-		} else if strings.Contains(upperRaw, "REACTION:") {
-			shouldEngage = false
-			decisionStr = "REACTION"
-			// Extract emoji
-			parts := strings.SplitN(engagementRaw, ":", 2)
-			if len(parts) == 2 {
-				emoji := strings.TrimSpace(parts[1])
-				if emoji != "" {
-					messageID, _ := input.EventData["message_id"].(string)
-					if messageID != "" {
-						log.Printf("Reacting with emoji: %s", emoji)
-						_ = deps.Discord.AddReaction(channelID, messageID, emoji)
-						decisionStr = "REACTION:" + emoji
-					}
-				}
-			}
-		} else {
-			shouldEngage = false
-			decisionStr = "NONE"
-		}
-		log.Printf("Engagement decision: %s (%v)", decisionStr, shouldEngage)
+	if userID == masterUserID {
+		responseModel = "dex-private-message-model"
+		decisionStr = "REPLY_REGULAR"
+		engagementReason = "Master user detected in DM, using regular model"
 	}
 
 	engagementEventData := map[string]interface{}{
@@ -358,9 +321,9 @@ Consider the context and whether a response is truly necessary or if a simple em
 		"user_id":          userID,
 		"message_content":  content,
 		"timestamp":        time.Now().Unix(),
-		"engagement_model": "dex-engagement-model",
+		"engagement_model": "hardcoded",
 		"context_history":  contextHistory,
-		"engagement_raw":   engagementRaw,
+		"engagement_raw":   "automatic",
 	}
 
 	if err := emitEvent(deps.EventServiceURL, engagementEventData); err != nil {
@@ -382,7 +345,6 @@ Consider the context and whether a response is truly necessary or if a simple em
 
 		systemPrompt := utils.GetBaseSystemPrompt()
 		prompt := fmt.Sprintf("%s\n\nContext:\n%s\n\nUser: %s", systemPrompt, contextHistory, content)
-		responseModel := "dex-private-message-model"
 
 		streamMessageID, err := deps.Discord.InitStream(channelID, "<a:typing:1449387367315275786>")
 		if err != nil {

@@ -128,6 +128,12 @@ func main() {
 		log.Fatalf("FATAL: Could not load service-map.json: %v", err)
 	}
 
+	// Load options for MasterUserID
+	options, err := config.LoadOptions()
+	if err != nil {
+		log.Printf("Warning: Could not load options.json: %v. Master user features may be limited.", err)
+	}
+
 	var selfConfig *config.ServiceEntry
 	for _, service := range serviceMap.Services["cs"] {
 		if service.ID == ServiceName {
@@ -178,6 +184,7 @@ func main() {
 		Discord:         discord.NewClient(discordURL, eventURL),
 		Web:             web.NewClient(webURL),
 		Config:          serviceMap,
+		Options:         options,
 		EventServiceURL: eventURL,
 		TTSServiceURL:   ttsURL,
 	}

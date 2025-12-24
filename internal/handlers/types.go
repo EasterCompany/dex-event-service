@@ -17,6 +17,7 @@ type Dependencies struct {
 	Discord           *discord.Client
 	Web               *web.Client
 	Config            *config.ServiceMapConfig
+	Options           *config.OptionsConfig
 	EventServiceURL   string
 	TTSServiceURL     string
 	CheckInterruption func() bool

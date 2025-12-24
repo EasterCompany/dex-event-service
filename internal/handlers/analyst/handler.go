@@ -51,19 +51,21 @@ type AnalystHandler struct {
 	OllamaClient   *ollama.Client
 	DiscordClient  *discord.Client
 	WebClient      *web.Client
+	Options        *config.OptionsConfig
 	CancelFunc     context.CancelFunc
 	lastAnalyzedTS int64
 	lastCheckTS    int64
 }
 
 // NewAnalystHandler creates a new AnalystHandler instance.
-func NewAnalystHandler(redisClient *redis.Client, ollamaClient *ollama.Client, discordClient *discord.Client, webClient *web.Client) *AnalystHandler {
+func NewAnalystHandler(redisClient *redis.Client, ollamaClient *ollama.Client, discordClient *discord.Client, webClient *web.Client, options *config.OptionsConfig) *AnalystHandler {
 	now := time.Now().Unix()
 	return &AnalystHandler{
 		RedisClient:    redisClient,
 		OllamaClient:   ollamaClient,
 		DiscordClient:  discordClient,
 		WebClient:      webClient,
+		Options:        options,
 		lastAnalyzedTS: now - 3600,
 		lastCheckTS:    now,
 	}

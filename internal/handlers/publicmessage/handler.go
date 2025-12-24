@@ -448,46 +448,74 @@ Rules:
 		"1381915374181810236": true, // Memes
 	}
 
-	decisionStr := "NONE"
+	const MainChatChannelID = "1426957003108122656"
+	masterUserID := ""
+	if deps.Options != nil {
+		masterUserID = deps.Options.Discord.MasterUser
+	}
+
+	var decisionStr string
+	responseModel := "dex-fast-public-message-model" // Default to fast
+
 	if mentionedBot {
 		log.Printf("Bot was mentioned, forcing engagement.")
 		shouldEngage = true
 		decisionStr = "REPLY"
 		engagementReason = "Direct mention"
+		// Mentions in main chat get regular model, elsewhere get fast
+		if channelID == MainChatChannelID {
+			responseModel = "dex-public-message-model"
+		}
 	} else if restrictedChannels[channelID] {
 		log.Printf("Channel %s is restricted (analysis only). Skipping engagement check.", channelID)
 		shouldEngage = false
 		decisionStr = "NONE"
 		engagementReason = "Restricted Channel (Analysis Only)"
-	} else {
-		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Checking Engagement")
+	} else if channelID == MainChatChannelID {
+		// --- MAIN CHAT: High-Fidelity Engagement ---
+		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Evaluating Strategy")
 		prompt := fmt.Sprintf(`Context:
 %s
 
 Current Message:
 %s
 
-Your task is to decide how Dexter should engage with the current message.
-Output EXACTLY one of the following options (no prose):
-- "REPLY": If Dexter should send a full text response.
-- "REACTION:<emoji>": If Dexter should only react with an emoji. Example: "REACTION:👍", "REACTION:🔥", "REACTION:😂", "REACTION:🤔", "REACTION:👀", "REACTION:✅", "REACTION:❌".
-- "NONE": If Dexter should ignore the message.
+Your task is to decide how Dexter should engage with the current message in the Main Chat channel.
+Output EXACTLY one of the following tokens:
+- "IGNORE": No action.
+- "REACTION:<emoji>": React with a single emoji.
+- "ENGAGE_FAST": Quick response for simple banter/social.
+- "ENGAGE_REGULAR": Full response for complex topics or if the user is Owen.
 
-Consider the context and whether a response is truly necessary or if a simple emoji reaction is more appropriate for acknowledgment.`, contextHistory, content)
+User ID: %s (Master ID: %s)
+
+Output ONLY the token.`, contextHistory, content, userID, masterUserID)
+
 		var err error
 		engagementRaw, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
 		if err != nil {
-			log.Printf("Engagement check failed: %v", err)
+			log.Printf("Regular engagement check failed: %v, defaulting to IGNORE", err)
+			decisionStr = "NONE"
 		} else {
 			engagementRaw = strings.TrimSpace(engagementRaw)
 			upperRaw := strings.ToUpper(engagementRaw)
-			if strings.Contains(upperRaw, "REPLY") {
+
+			if userID == masterUserID {
+				log.Printf("Master user detected in Main Chat, forcing ENGAGE_REGULAR")
 				shouldEngage = true
-				decisionStr = "REPLY"
+				decisionStr = "ENGAGE_REGULAR"
+				responseModel = "dex-public-message-model"
+			} else if strings.Contains(upperRaw, "ENGAGE_REGULAR") {
+				shouldEngage = true
+				decisionStr = "ENGAGE_REGULAR"
+				responseModel = "dex-public-message-model"
+			} else if strings.Contains(upperRaw, "ENGAGE_FAST") {
+				shouldEngage = true
+				decisionStr = "ENGAGE_FAST"
+				responseModel = "dex-fast-public-message-model"
 			} else if strings.Contains(upperRaw, "REACTION:") {
 				shouldEngage = false
 				decisionStr = "REACTION"
-				// Extract emoji
 				parts := strings.SplitN(engagementRaw, ":", 2)
 				if len(parts) == 2 {
 					emoji := strings.TrimSpace(parts[1])
@@ -502,9 +530,21 @@ Consider the context and whether a response is truly necessary or if a simple em
 				}
 			} else {
 				shouldEngage = false
-				decisionStr = "NONE"
+				decisionStr = "IGNORE"
 			}
-			log.Printf("Engagement decision: %s (%v)", decisionStr, shouldEngage)
+		}
+	} else {
+		// --- OTHER CHANNELS: Fast Binary Engagement ---
+		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Vibe Check")
+		prompt := fmt.Sprintf("Analyze if Dexter should respond to this message. Output TRUE or FALSE.\n\nContext:\n%s\n\nMessage: %s", contextHistory, content)
+		engagementRaw, err = deps.Ollama.Generate("dex-fast-engagement-model", prompt, nil)
+		if err == nil && strings.Contains(strings.ToUpper(engagementRaw), "TRUE") {
+			shouldEngage = true
+			decisionStr = "ENGAGE_FAST"
+			responseModel = "dex-fast-public-message-model"
+		} else {
+			shouldEngage = false
+			decisionStr = "IGNORE"
 		}
 	}
 
@@ -537,7 +577,6 @@ Consider the context and whether a response is truly necessary or if a simple em
 
 		systemPrompt := utils.GetBaseSystemPrompt()
 		prompt := fmt.Sprintf("%s\n\nContext:\n%s\n\nUser: %s", systemPrompt, contextHistory, content)
-		responseModel := "dex-public-message-model"
 
 		streamMessageID, err := deps.Discord.InitStream(channelID, "<a:typing:1449387367315275786>")
 
