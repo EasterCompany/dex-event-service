@@ -121,22 +121,6 @@ func (h *AnalystHandler) runWorker(ctx context.Context) {
 	}
 }
 
-// reportProcessStatus updates the analyst's current state in Redis for dashboard visibility.
-func (h *AnalystHandler) reportProcessStatus(ctx context.Context, state string) {
-	key := "process:info:system-analyst"
-	data := map[string]interface{}{
-		"channel_id": "system-analyst",
-		"state":      state,
-		"retries":    0,
-		"start_time": time.Now().Unix(),
-		"pid":        os.Getpid(),
-		"updated_at": time.Now().Unix(),
-	}
-
-	jsonBytes, _ := json.Marshal(data)
-	h.RedisClient.Set(ctx, key, jsonBytes, 2*time.Minute)
-}
-
 // checkAndAnalyze determines if an analysis run is needed and executes it.
 func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	timelineKey := "events:timeline"
@@ -219,7 +203,7 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 
 	log.Printf("[%s] System idle threshold met. %d new events since last analysis. Initiating analysis...", HandlerName, newEventCount)
 
-	h.reportProcessStatus(ctx, fmt.Sprintf("Analyzing %d events", newEventCount))
+	h.reportProcessStatus(ctx, "Running automated tests")
 	defer h.RedisClient.Del(ctx, "process:info:system-analyst")
 
 	// Even if newEventCount is 0, we still perform analysis to check Logs and Service Status (Tier 1)
@@ -230,6 +214,7 @@ func (h *AnalystHandler) checkAndAnalyze(ctx context.Context) {
 	}
 
 	if len(results) > 0 {
+		h.reportProcessStatus(ctx, fmt.Sprintf("Emitting %d results", len(results)))
 		for _, res := range results {
 			h.emitResult(ctx, res)
 		}
@@ -286,6 +271,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 
 	// --- Tier 1: Guardian (Health & Stability) ---
 	// Runs on every analysis cycle.
+	h.reportProcessStatus(ctx, "Tier 1: Guardian Analysis")
 	guardianPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "guardian")
 	log.Printf("[%s] Executing Tier 1 (Guardian) Analysis...", HandlerName)
 	gResults, err := h.runAnalysisWithModel("dex-analyst-guardian", guardianPrompt)
@@ -299,6 +285,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	lastArchTS, _ := strconv.ParseInt(lastArchitectRun, 10, 64)
 
 	if time.Since(time.Unix(lastArchTS, 0)) >= 1*time.Hour {
+		h.reportProcessStatus(ctx, "Tier 2: Architect Analysis")
 		architectPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "architect")
 		log.Printf("[%s] Executing Tier 2 (Architect) Analysis...", HandlerName)
 		aResults, err := h.runAnalysisWithModel("dex-analyst-architect", architectPrompt)
@@ -314,6 +301,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	lastStratTS, _ := strconv.ParseInt(lastStrategistRun, 10, 64)
 
 	if time.Since(time.Unix(lastStratTS, 0)) >= 24*time.Hour {
+		h.reportProcessStatus(ctx, "Tier 3: Strategist Analysis")
 		strategistPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "strategist")
 		log.Printf("[%s] Executing Tier 3 (Strategist) Analysis...", HandlerName)
 		sResults, err := h.runAnalysisWithModel("dex-analyst-strategist", strategistPrompt)
@@ -678,4 +666,21 @@ func (h *AnalystHandler) emitResult(ctx context.Context, res AnalysisResult) {
 	} else {
 		log.Printf("[%s] Emitted %s: \"%s\"", HandlerName, res.Type, res.Title)
 	}
+}
+
+// reportProcessStatus updates the analyst's current state in Redis for dashboard visibility.
+func (h *AnalystHandler) reportProcessStatus(ctx context.Context, state string) {
+	key := "process:info:system-analyst"
+	data := map[string]interface{}{
+		"channel_id": "system-analyst",
+		"state":      state,
+		"retries":    0,
+		"start_time": time.Now().Unix(),
+		"pid":        os.Getpid(),
+		"updated_at": time.Now().Unix(),
+	}
+
+	jsonBytes, _ := json.Marshal(data)
+	// We don't use expiration here; it's cleared manually by checkAndAnalyze
+	h.RedisClient.Set(ctx, key, jsonBytes, 0)
 }
