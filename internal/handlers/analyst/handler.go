@@ -139,7 +139,8 @@ func (h *AnalystHandler) checkAndAnalyze() {
 		return
 	}
 
-	// Ensure we clear the process status when we finish (or error out)
+	// Ensure we clear the process status and active tier when we finish (or error out)
+	defer h.RedisClient.Del(h.ctx, "analyst:active_tier")
 	defer utils.ClearProcess(h.ctx, h.RedisClient, h.DiscordClient, ProcessID)
 
 	log.Printf("[%s] Analysis trigger: Idle=%v, Force=%v. Starting cycle...", HandlerName, isIdle, forceRun)
@@ -172,6 +173,7 @@ func (h *AnalystHandler) checkAndAnalyze() {
 
 func (h *AnalystHandler) runSystemTests(ctx context.Context) {
 	log.Printf("[%s] Running pre-analysis system tests...", HandlerName)
+	h.RedisClient.Set(ctx, "analyst:active_tier", "tests", 0)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Running System Tests")
 
 	// Execute 'dex test' command
@@ -206,6 +208,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	}
 
 	// --- Tier 1: Guardian ---
+	h.RedisClient.Set(ctx, "analyst:active_tier", "guardian", 0)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 1: Guardian Analysis")
 	guardianPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "guardian")
 
@@ -226,6 +229,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	lastArchTS, _ := strconv.ParseInt(lastArchitectRun, 10, 64)
 
 	if time.Since(time.Unix(lastArchTS, 0)) >= 2*time.Hour {
+		h.RedisClient.Set(ctx, "analyst:active_tier", "architect", 0)
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 2: Architect Analysis")
 		architectPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "architect")
 
@@ -248,6 +252,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	lastStratTS, _ := strconv.ParseInt(lastStrategistRun, 10, 64)
 
 	if time.Since(time.Unix(lastStratTS, 0)) >= 3*time.Hour {
+		h.RedisClient.Set(ctx, "analyst:active_tier", "strategist", 0)
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 3: Strategist Analysis")
 
 		roadmapItem := h.fetchOldestPublishedRoadmapItem(ctx)

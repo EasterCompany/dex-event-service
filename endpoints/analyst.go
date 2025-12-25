@@ -12,7 +12,8 @@ import (
 
 // AnalystStatusResponse returns the last and next run times for analyst tiers.
 type AnalystStatusResponse struct {
-	Guardian struct {
+	ActiveTier string `json:"active_tier,omitempty"`
+	Guardian   struct {
 		LastRun int64 `json:"last_run"`
 		NextRun int64 `json:"next_run"`
 	} `json:"guardian"`
@@ -37,6 +38,9 @@ func GetAnalystStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		ctx := context.Background()
 		var status AnalystStatusResponse
+
+		// Active Tier
+		status.ActiveTier, _ = redisClient.Get(ctx, "analyst:active_tier").Result()
 
 		// Last Analysis Key (Guardian/Global)
 		lastAnalysisTS, _ := redisClient.Get(ctx, "analyst:last_analysis_ts").Int64()
