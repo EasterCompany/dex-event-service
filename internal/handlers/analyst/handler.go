@@ -480,6 +480,11 @@ func (h *AnalystHandler) fetchEventsForAnalysis(ctx context.Context, sinceTS, un
 		var event types.Event
 		_ = json.Unmarshal([]byte(eventJSON), &event)
 
+		// Filter out dex-discord-service events to reduce context noise
+		if event.Service == "dex-discord-service" {
+			continue
+		}
+
 		var eventData map[string]interface{}
 		if err := json.Unmarshal(event.Event, &eventData); err == nil {
 			eventType, _ := eventData["type"].(string)
