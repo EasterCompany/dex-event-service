@@ -52,6 +52,9 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	userID, _ := input.EventData["user_id"].(string)
 	mentionedBot, _ := input.EventData["mentioned_bot"].(bool)
 
+	// Ensure we always clear the process status when we're done
+	defer utils.ClearProcess(context.Background(), deps.Redis, deps.Discord, channelID)
+
 	var attachments []map[string]interface{}
 	if att, ok := input.EventData["attachments"].([]interface{}); ok {
 		for _, a := range att {
@@ -279,7 +282,6 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	// Register process for dashboard visibility and sync Discord status
 	utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Thinking...")
-	defer utils.ClearProcess(context.Background(), deps.Redis, deps.Discord, channelID)
 
 	visualContext := ""
 	if len(attachments) > 0 {

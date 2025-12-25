@@ -125,6 +125,9 @@ func (h *AnalystHandler) checkAndAnalyze() {
 		return
 	}
 
+	// Ensure we clear the process status when we finish (or error out)
+	defer utils.ClearProcess(h.ctx, h.RedisClient, h.DiscordClient, ProcessID)
+
 	log.Printf("[%s] Analysis trigger: Idle=%v, Force=%v. Starting cycle...", HandlerName, isIdle, forceRun)
 
 	// TRIGGER: Run system tests before analysis to provide fresh data
