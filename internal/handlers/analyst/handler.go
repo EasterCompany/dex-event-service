@@ -519,8 +519,14 @@ func (h *AnalystHandler) fetchSystemStatus(ctx context.Context) (string, error) 
 }
 
 func (h *AnalystHandler) fetchRecentLogs(ctx context.Context) (string, error) {
-	logs, err := utils.FetchURL("http://127.0.0.1:8100/logs?limit=20", 5*time.Second)
-	return logs, err
+	dexPath := getDexBinaryPath()
+	// Run 'dex logs' to get recent logs from all services (defaults to tail -n 10 per service)
+	cmd := exec.CommandContext(ctx, dexPath, "logs")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to run dex logs: %v (output: %s)", err, string(output))
+	}
+	return string(output), nil
 }
 
 func (h *AnalystHandler) fetchTestResults(ctx context.Context) (string, error) {
