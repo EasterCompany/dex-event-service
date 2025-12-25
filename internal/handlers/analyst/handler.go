@@ -143,7 +143,7 @@ func (h *AnalystHandler) checkAndAnalyze() {
 	defer h.RedisClient.Del(h.ctx, "analyst:active_tier")
 	defer utils.ClearProcess(h.ctx, h.RedisClient, h.DiscordClient, ProcessID)
 
-	log.Printf("[%s] Analysis trigger: Idle=%v, Force=%v. Starting cycle...", HandlerName, isIdle, forceRun)
+	// log.Printf("[%s] Analysis trigger: Idle=%v, Force=%v. Starting cycle...", HandlerName, isIdle, forceRun)
 
 	// TRIGGER: Run system tests before analysis to provide fresh data
 	h.runSystemTests(h.ctx)
@@ -168,11 +168,11 @@ func (h *AnalystHandler) checkAndAnalyze() {
 	// ONLY update the timestamp if we finished successfully and weren't cancelled
 	h.lastAnalyzedTS = untilTS
 	h.RedisClient.Set(h.ctx, LastAnalysisKey, h.lastAnalyzedTS, 0)
-	log.Printf("[%s] Analysis coverage updated to %s.", HandlerName, time.Unix(h.lastAnalyzedTS, 0).Format(time.RFC3339))
+	// log.Printf("[%s] Analysis coverage updated to %s.", HandlerName, time.Unix(h.lastAnalyzedTS, 0).Format(time.RFC3339))
 }
 
 func (h *AnalystHandler) runSystemTests(ctx context.Context) {
-	log.Printf("[%s] Running pre-analysis system tests...", HandlerName)
+	// log.Printf("[%s] Running pre-analysis system tests...", HandlerName)
 	h.RedisClient.Set(ctx, "analyst:active_tier", "tests", 0)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Running System Tests")
 
@@ -182,8 +182,6 @@ func (h *AnalystHandler) runSystemTests(ctx context.Context) {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("[%s] System tests failed: %v (Output: %s)", HandlerName, err, string(output))
-	} else {
-		log.Printf("[%s] System tests completed successfully.", HandlerName)
 	}
 }
 

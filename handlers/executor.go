@@ -213,7 +213,6 @@ func executeHandlerInternal(
 	defer cancel()
 
 	log.Printf("Executing handler '%s' for event %s", handlerConfig.Name, event.ID)
-	startTime := time.Now()
 
 	var output types.HandlerOutput
 	var handlerErr error
@@ -248,8 +247,6 @@ func executeHandlerInternal(
 			handlerErr = fmt.Errorf("handler '%s' not implemented internally", handlerConfig.Name)
 		}
 	}
-
-	duration := time.Since(startTime)
 
 	if execCtx.Err() == context.DeadlineExceeded {
 		log.Printf("Handler '%s' timed out after %d seconds", handlerConfig.Name, timeout)
@@ -291,7 +288,7 @@ func executeHandlerInternal(
 		}
 	}
 
-	log.Printf("Handler '%s' completed in %v, created %d child events", handlerConfig.Name, duration, len(childIDs))
+	// log.Printf("Handler '%s' completed in %v, created %d child events", handlerConfig.Name, duration, len(childIDs))
 	return childIDs, nil
 }
 
