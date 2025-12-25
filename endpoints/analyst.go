@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -23,6 +24,7 @@ type AnalystStatusResponse struct {
 		LastRun int64 `json:"last_run"`
 		NextRun int64 `json:"next_run"`
 	} `json:"strategist"`
+	SystemIdleTime int64 `json:"system_idle_time"`
 }
 
 // GetAnalystStatusHandler returns the current timing status of the analyst worker.
@@ -50,6 +52,13 @@ func GetAnalystStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 		lastStratTS, _ := redisClient.Get(ctx, "analyst:last_run:strategist").Int64()
 		status.Strategist.LastRun = lastStratTS
 		status.Strategist.NextRun = lastStratTS + 3600 // 1 hour
+
+		// System Idle Time
+		lastEventTS, _ := redisClient.Get(ctx, "system:last_event_ts").Int64()
+		if lastEventTS > 0 {
+			now := time.Now().Unix()
+			status.SystemIdleTime = now - lastEventTS
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(status); err != nil {
