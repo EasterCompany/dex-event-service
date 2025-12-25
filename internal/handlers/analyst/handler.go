@@ -515,7 +515,7 @@ func (h *AnalystHandler) fetchSystemStatus(ctx context.Context) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("failed to run dex status: %v (output: %s)", err, string(output))
 	}
-	return string(output), nil
+	return utils.StripANSI(string(output)), nil
 }
 
 func (h *AnalystHandler) fetchRecentLogs(ctx context.Context) (string, error) {
@@ -526,7 +526,7 @@ func (h *AnalystHandler) fetchRecentLogs(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to run dex logs: %v (output: %s)", err, string(output))
 	}
-	return string(output), nil
+	return utils.StripANSI(string(output)), nil
 }
 
 func (h *AnalystHandler) fetchTestResults(ctx context.Context) (string, error) {
