@@ -166,6 +166,48 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 			return
 		}
 
+		// --- COGNITIVE IDLE TIMER LOGIC ---
+		// We track "Cognitive Idle Time" separately from raw "Last Event Time".
+		// Status checks and monitoring events should NOT reset the cognitive timer.
+		go func() {
+			isCognitive := true
+
+			// 1. Check Event Type
+			ignoredTypes := []string{
+				"system.cli.status",
+				"system.monitor.hardware",
+				"system.notification.generated", // Analyst generating notifications isn't a new cognitive input
+				"system.analysis.audit",         // Analyst audit logs
+			}
+			for _, t := range ignoredTypes {
+				if eventType == t {
+					isCognitive = false
+					break
+				}
+			}
+
+			// 2. Check CLI Commands (if applicable)
+			if isCognitive && eventType == "system.cli.command" {
+				if cmd, ok := eventData["command"].(string); ok {
+					ignoredCmds := []string{"status", "logs", "version", "help", "events", "test", "system", "monitor", "cache", "event", "config", "whisper", "discord"}
+					for _, ig := range ignoredCmds {
+						if cmd == ig {
+							isCognitive = false
+							break
+						}
+					}
+				}
+			}
+
+			// 3. Update Redis if Cognitive
+			if isCognitive {
+				redisClient.Set(ctx, "system:last_cognitive_event", time.Now().Unix(), 0)
+			}
+
+			// Always update the raw last event timestamp for low-level debugging
+			redisClient.Set(ctx, "system:last_event_ts", time.Now().Unix(), 0)
+		}()
+
 		// TRIGGER: CLI Status -> Discord
 		// If we receive a CLI status update, immediately register it as a process and push it to Discord
 		if eventType == string(types.EventTypeCLIStatus) {

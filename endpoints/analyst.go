@@ -58,7 +58,7 @@ func GetAnalystStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 		status.Strategist.NextRun = lastStratTS + 3600 // 1 hour
 
 		// System Idle Time
-		lastEventTS, _ := redisClient.Get(ctx, "system:last_event_ts").Int64()
+		lastEventTS, _ := redisClient.Get(ctx, "system:last_cognitive_event").Int64()
 		if lastEventTS > 0 {
 			now := time.Now().Unix()
 			status.SystemIdleTime = now - lastEventTS

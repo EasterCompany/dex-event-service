@@ -94,6 +94,15 @@ func RunCoreLogic(ctx context.Context) error {
 func initializePersistentResources(ctx context.Context) error {
 	log.Println("Core Logic: Initializing persistent resources...")
 
+	// Initialize cognitive idle timer if not present
+	if RedisClient != nil {
+		exists, err := RedisClient.Exists(ctx, "system:last_cognitive_event").Result()
+		if err == nil && exists == 0 {
+			RedisClient.Set(ctx, "system:last_cognitive_event", time.Now().Unix(), 0)
+			log.Println("Core Logic: Initialized system:last_cognitive_event")
+		}
+	}
+
 	// Redis is already initialized in main()
 
 	// TODO: Initialize other persistent resources
