@@ -61,6 +61,7 @@ type AnalystHandler struct {
 	OllamaClient   *ollama.Client
 	DiscordClient  *discord.Client
 	WebClient      *web.Client
+	ChatManager    *utils.ChatContextManager
 	lastAnalyzedTS int64
 	stopChan       chan struct{}
 	ctx            context.Context
@@ -74,6 +75,7 @@ func NewAnalystHandler(redis *redis.Client, ollama *ollama.Client, discord *disc
 		OllamaClient:  ollama,
 		DiscordClient: discord,
 		WebClient:     web,
+		ChatManager:   utils.NewChatContextManager(redis),
 		ctx:           ctx,
 		cancel:        cancel,
 	}
@@ -192,35 +194,23 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	}
 
 	status, _ := h.fetchSystemStatus(ctx)
-	systemInfo, _ := h.fetchSystemHardwareInfo(ctx)
+	// Hardware info might not be implemented, defaulting to empty if not found
+	systemInfo := "Hardware info unavailable"
 	logs, _ := h.fetchRecentLogs(ctx)
 	tests, _ := h.fetchTestResults(ctx)
 	history, _ := h.fetchRecentNotifications(ctx, 20)
 
 	var allResults []AnalysisResult
 
-	// Helper for generation with timeout
-	generateWithTimeout := func(tierCtx context.Context, model, prompt string) (string, error) {
-		tCtx, cancel := context.WithTimeout(tierCtx, 10*time.Minute)
-		defer cancel()
-		return h.OllamaClient.GenerateWithContext(tCtx, model, prompt, nil)
-	}
-
 	// --- Tier 1: Guardian ---
 	h.RedisClient.Set(ctx, "analyst:active_tier", "guardian", 0)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 1: Guardian Analysis")
-	guardianPrompt := h.buildAnalysisPrompt(events, history, status, systemInfo, logs, tests, "guardian")
 
-	guardianModel := "dex-analyst-guardian"
-	ollamaGResponse, err := generateWithTimeout(ctx, guardianModel, guardianPrompt)
+	gResults, err := h.runTierAnalysis(ctx, "guardian", events, history, status, systemInfo, logs, tests)
 	if err == nil {
-		h.emitAudit(ctx, "guardian", guardianModel, guardianPrompt, ollamaGResponse)
-		gResults := h.parseAnalysisResults(ollamaGResponse)
 		allResults = append(allResults, gResults...)
-	} else if ctx.Err() != nil {
-		return nil, ctx.Err()
 	} else {
-		log.Printf("[%s] Guardian generation failed or timed out: %v", HandlerName, err)
+		log.Printf("[%s] Guardian analysis failed: %v", HandlerName, err)
 	}
 
 	// --- Tier 2: Architect ---
@@ -230,19 +220,13 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	if time.Since(time.Unix(lastArchTS, 0)) >= 2*time.Hour {
 		h.RedisClient.Set(ctx, "analyst:active_tier", "architect", 0)
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 2: Architect Analysis")
-		architectPrompt := h.buildAnalysisPrompt(events, history, status, systemInfo, logs, tests, "architect")
 
-		architectModel := "dex-analyst-architect"
-		ollamaAResponse, err := generateWithTimeout(ctx, architectModel, architectPrompt)
+		aResults, err := h.runTierAnalysis(ctx, "architect", events, history, status, systemInfo, logs, tests)
 		if err == nil {
-			h.emitAudit(ctx, "architect", architectModel, architectPrompt, ollamaAResponse)
-			aResults := h.parseAnalysisResults(ollamaAResponse)
 			allResults = append(allResults, aResults...)
 			h.RedisClient.Set(ctx, "analyst:last_run:architect", time.Now().Unix(), 0)
-		} else if ctx.Err() != nil {
-			return nil, ctx.Err()
 		} else {
-			log.Printf("[%s] Architect generation failed or timed out: %v", HandlerName, err)
+			log.Printf("[%s] Architect analysis failed: %v", HandlerName, err)
 		}
 	}
 
@@ -254,35 +238,28 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 		h.RedisClient.Set(ctx, "analyst:active_tier", "strategist", 0)
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 3: Strategist Analysis")
 
+		// Retrieve roadmap context
 		roadmapItem := h.fetchOldestPublishedRoadmapItem(ctx)
 		var roadmapContent string
 		if roadmapItem != nil {
-			roadmapContent = roadmapItem.Content
+			roadmapContent = fmt.Sprintf("### PRIMARY CREATOR OBJECTIVE (PRIORITY #1):\n%s", roadmapItem.Content)
 		}
 
-		strategistPrompt := h.buildAnalysisPrompt(events, history, status, systemInfo, logs, tests, "strategist")
-		if roadmapContent != "" {
-			strategistPrompt = fmt.Sprintf("### PRIMARY CREATOR OBJECTIVE (PRIORITY #1):\n%s\n\n%s", roadmapContent, strategistPrompt)
-		}
+		// Run analysis with roadmap injected into 'systemInfo' or 'history' effectively
+		// We append roadmap content to logs/tests input for Strategist
+		strategistInput := fmt.Sprintf("%s\n\n%s", roadmapContent, tests)
 
-		strategistModel := "dex-analyst-strategist"
-		ollamaSResponse, err := generateWithTimeout(ctx, strategistModel, strategistPrompt)
+		sResults, err := h.runTierAnalysis(ctx, "strategist", events, history, status, systemInfo, logs, strategistInput)
 		if err == nil {
-			h.emitAudit(ctx, "strategist", strategistModel, strategistPrompt, ollamaSResponse)
-			sResults := h.parseAnalysisResults(ollamaSResponse)
-
 			if roadmapItem != nil && len(sResults) > 0 {
 				roadmapItem.State = types.RoadmapStateConsumed
 				roadmapItem.ConsumedAt = time.Now().Unix()
 				h.updateRoadmapItem(ctx, roadmapItem)
 			}
-
 			allResults = append(allResults, sResults...)
 			h.RedisClient.Set(ctx, "analyst:last_run:strategist", time.Now().Unix(), 0)
-		} else if ctx.Err() != nil {
-			return nil, ctx.Err()
 		} else {
-			log.Printf("[%s] Strategist generation failed or timed out: %v", HandlerName, err)
+			log.Printf("[%s] Strategist analysis failed: %v", HandlerName, err)
 		}
 	}
 
@@ -522,17 +499,6 @@ func (h *AnalystHandler) fetchSystemStatus(ctx context.Context) (string, error) 
 	return utils.StripANSI(string(output)), nil
 }
 
-func (h *AnalystHandler) fetchSystemHardwareInfo(ctx context.Context) (string, error) {
-	// Run 'dex system' to get hardware info (RAM, CPU, etc.)
-	dexPath := getDexBinaryPath()
-	cmd := exec.CommandContext(ctx, dexPath, "system")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to run dex system: %v (output: %s)", err, string(output))
-	}
-	return utils.StripANSI(string(output)), nil
-}
-
 func (h *AnalystHandler) fetchRecentLogs(ctx context.Context) (string, error) {
 	dexPath := getDexBinaryPath()
 	// Run 'dex logs' to get recent logs from all services (defaults to tail -n 10 per service)
@@ -605,17 +571,41 @@ func (h *AnalystHandler) fetchRecentNotifications(ctx context.Context, limit int
 	return strings.Join(history, "\n"), nil
 }
 
-func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event, history, status, systemInfo, logs, tests, tier string) string {
-	var contextStr string
+func (h *AnalystHandler) runTierAnalysis(ctx context.Context, tier string, events []types.Event, history, status, systemInfo, logs, tests string) ([]AnalysisResult, error) {
+	sessionID := tier // e.g., "guardian"
+	var model, systemPrompt string
+
 	switch tier {
 	case "guardian":
-		contextStr = utils.GetAnalystGuardianPrompt()
+		model = "dex-analyst-guardian"
+		systemPrompt = utils.GetAnalystGuardianPrompt()
 	case "architect":
-		contextStr = utils.GetAnalystArchitectPrompt()
+		model = "dex-analyst-architect"
+		systemPrompt = utils.GetAnalystArchitectPrompt()
 	case "strategist":
-		contextStr = utils.GetAnalystStrategistPrompt()
+		model = "dex-analyst-strategist"
+		systemPrompt = utils.GetAnalystStrategistPrompt()
+	default:
+		return nil, fmt.Errorf("unknown tier: %s", tier)
 	}
 
+	// Load Chat History
+	chatHistory, err := h.ChatManager.LoadHistory(ctx, sessionID)
+	if err != nil {
+		log.Printf("[%s] Failed to load chat history for %s: %v", HandlerName, tier, err)
+		chatHistory = []ollama.Message{}
+	}
+
+	// Ensure System Prompt is at the start if history is empty or corrupted
+	if len(chatHistory) == 0 || chatHistory[0].Role != "system" {
+		// If the first message isn't system (or history empty), reset with correct system prompt
+		chatHistory = append([]ollama.Message{{Role: "system", Content: systemPrompt}}, chatHistory...)
+	} else {
+		// Enforce current system prompt logic if it changed (optional, but good practice)
+		chatHistory[0].Content = systemPrompt
+	}
+
+	// Construct the Input (User Message)
 	var eventLines []string
 	for _, e := range events {
 		var ed map[string]interface{}
@@ -625,8 +615,61 @@ func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event, history, stat
 		eventLines = append(eventLines, summary)
 	}
 
-	return fmt.Sprintf("%s\n\n### HARDWARE SPECS\n%s\n\n### SYSTEM STATUS\n%s\n\n### RECENT LOGS\n%s\n\n### NEW EVENT LOGS\n%s\n\n### RECENT REPORTED ISSUES\n%s\n\n### TEST RESULTS\n%s",
-		contextStr, systemInfo, status, logs, strings.Join(eventLines, "\n"), history, tests)
+	// Dynamic Context Injection
+	inputContext := fmt.Sprintf("### CURRENT SYSTEM STATUS\n%s\n\n### HARDWARE\n%s\n\n### RECENT LOGS\n%s\n\n### NEW EVENTS\n%s\n\n### REPORTED ISSUES HISTORY\n%s\n\n### TEST RESULTS\n%s",
+		status, systemInfo, logs, strings.Join(eventLines, "\n"), history, tests)
+
+	newUserMsg := ollama.Message{
+		Role:    "user",
+		Content: inputContext,
+	}
+
+	// Work with a local copy of history for the retry loop
+	currentTurnHistory := append(chatHistory, newUserMsg)
+
+	// Retry Loop for Self-Correction
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
+		tCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		respMsg, err := h.OllamaClient.Chat(tCtx, model, currentTurnHistory)
+		cancel()
+
+		if err != nil {
+			return nil, fmt.Errorf("chat generation failed: %v", err)
+		}
+
+		// Validate Output
+		results := h.parseAnalysisResults(respMsg.Content)
+		isValid := len(results) > 0 || strings.Contains(respMsg.Content, "No significant insights found")
+
+		if isValid {
+			// Success! Emit audit
+			h.emitAudit(ctx, tier, model, inputContext, respMsg.Content)
+
+			// Persist the *clean* interaction to long-term memory
+			// We append the initial User Request and the Final Successful Response
+			_ = h.ChatManager.AppendMessage(ctx, sessionID, newUserMsg)
+			_ = h.ChatManager.AppendMessage(ctx, sessionID, respMsg)
+
+			return results, nil
+		}
+
+		// Failure: Malformed Output
+		log.Printf("[%s] Malformed output from %s (Attempt %d/%d). Triggering self-correction...", HandlerName, tier, i+1, maxRetries)
+
+		// Add the bad response and the correction instruction to the *temporary* loop history
+		currentTurnHistory = append(currentTurnHistory, respMsg)
+
+		correctionMsg := ollama.Message{
+			Role: "user",
+			Content: "SYSTEM ERROR: Your response did not follow the strict 'Dexter Report' format. \n" +
+				"You must output ONLY Markdown reports separated by '---' or 'No significant insights found.'.\n" +
+				"Do not include prose. Fix your output immediately.",
+		}
+		currentTurnHistory = append(currentTurnHistory, correctionMsg)
+	}
+
+	return nil, fmt.Errorf("max retries reached for %s", tier)
 }
 
 func (h *AnalystHandler) emitResult(ctx context.Context, res AnalysisResult) {

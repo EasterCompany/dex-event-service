@@ -36,6 +36,67 @@ type GenerateResponse struct {
 	Done     bool   `json:"done"`
 }
 
+type Message struct {
+	Role    string   `json:"role"`
+	Content string   `json:"content"`
+	Images  []string `json:"images,omitempty"`
+}
+
+type ChatRequest struct {
+	Model    string                 `json:"model"`
+	Messages []Message              `json:"messages"`
+	Stream   bool                   `json:"stream"`
+	Format   string                 `json:"format,omitempty"` // json or empty
+	Options  map[string]interface{} `json:"options,omitempty"`
+}
+
+type ChatResponse struct {
+	Model   string  `json:"model"`
+	Message Message `json:"message"`
+	Done    bool    `json:"done"`
+}
+
+func (c *Client) Chat(ctx context.Context, model string, messages []Message) (Message, error) {
+	reqBody := ChatRequest{
+		Model:    model,
+		Messages: messages,
+		Stream:   false,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return Message{}, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/chat", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return Message{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return Message{}, err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing ollama chat response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return Message{}, fmt.Errorf("ollama chat returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	var response ChatResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return Message{}, err
+	}
+	return response.Message, nil
+}
+
 func (c *Client) Generate(model, prompt string, images []string) (string, error) {
 	return c.GenerateWithContext(context.Background(), model, prompt, images)
 }
