@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/types"
+	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
@@ -100,7 +101,7 @@ func CreateRoadmapItemHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		data, _ := json.Marshal(item)
 		ctx := context.Background()
-		if err := redisClient.Set(ctx, roadmapKeyPrefix+item.ID, data, 0).Err(); err != nil {
+		if err := redisClient.Set(ctx, roadmapKeyPrefix+item.ID, data, utils.DefaultTTL).Err(); err != nil {
 			http.Error(w, "Failed to save item", http.StatusInternalServerError)
 			return
 		}
@@ -141,7 +142,7 @@ func UpdateRoadmapItemHandler(redisClient *redis.Client, id string) http.Handler
 		item.UpdatedAt = time.Now().Unix()
 
 		updatedData, _ := json.Marshal(item)
-		if err := redisClient.Set(ctx, key, updatedData, 0).Err(); err != nil {
+		if err := redisClient.Set(ctx, key, updatedData, utils.DefaultTTL).Err(); err != nil {
 			http.Error(w, "Failed to update item", http.StatusInternalServerError)
 			return
 		}

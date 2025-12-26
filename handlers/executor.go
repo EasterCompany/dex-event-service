@@ -10,6 +10,7 @@ import (
 
 	"github.com/EasterCompany/dex-event-service/templates"
 	"github.com/EasterCompany/dex-event-service/types"
+	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
@@ -331,7 +332,7 @@ func createChildEvent(redisClient *redis.Client, parent *types.Event, childEvent
 
 	pipe := redisClient.Pipeline()
 	eventKey := eventKeyPrefix + childID
-	pipe.Set(ctx, eventKey, childEventJSON, 0)
+	pipe.Set(ctx, eventKey, childEventJSON, utils.DefaultTTL)
 	pipe.ZAdd(ctx, timelineKey, redis.Z{Score: float64(timestamp), Member: childID})
 	serviceTimelineKey := fmt.Sprintf("events:service:%s", parent.Service)
 	pipe.ZAdd(ctx, serviceTimelineKey, redis.Z{Score: float64(timestamp), Member: childID})
@@ -382,7 +383,7 @@ func updateEvent(redisClient *redis.Client, event *types.Event) error {
 	}
 
 	eventKey := eventKeyPrefix + event.ID
-	if err := redisClient.Set(ctx, eventKey, eventJSON, 0).Err(); err != nil {
+	if err := redisClient.Set(ctx, eventKey, eventJSON, utils.DefaultTTL).Err(); err != nil {
 		return fmt.Errorf("failed to update event in Redis: %v", err)
 	}
 

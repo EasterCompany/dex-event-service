@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -90,7 +91,7 @@ func HandleUpdateAnalystStatus(redisClient *redis.Client) http.HandlerFunc {
 		}
 
 		ctx := context.Background()
-		if err := redisClient.Set(ctx, "analyst:active_tier", req.ActiveTier, 0).Err(); err != nil {
+		if err := redisClient.Set(ctx, "analyst:active_tier", req.ActiveTier, utils.DefaultTTL).Err(); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to update active tier: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -112,13 +113,13 @@ func ResetAnalystHandler(redisClient *redis.Client) http.HandlerFunc {
 		tier := r.URL.Query().Get("tier")
 
 		if tier == "" || tier == "all" || tier == "strategist" {
-			redisClient.Set(ctx, "analyst:last_run:strategist", 0, 0)
+			redisClient.Set(ctx, "analyst:last_run:strategist", 0, utils.DefaultTTL)
 		}
 		if tier == "all" || tier == "architect" {
-			redisClient.Set(ctx, "analyst:last_run:architect", 0, 0)
+			redisClient.Set(ctx, "analyst:last_run:architect", 0, utils.DefaultTTL)
 		}
 		if tier == "all" || tier == "guardian" {
-			redisClient.Set(ctx, "analyst:last_analysis_ts", 0, 0)
+			redisClient.Set(ctx, "analyst:last_analysis_ts", 0, utils.DefaultTTL)
 		}
 
 		// Also reset the check timer in the worker by marking it as needing immediate check

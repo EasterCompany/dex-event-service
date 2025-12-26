@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/gorilla/mux"
 )
 
@@ -51,7 +52,7 @@ func HandleProcessRegistration(w http.ResponseWriter, r *http.Request) {
 	pi.UpdatedAt = time.Now().Unix()
 
 	jsonBytes, _ := json.Marshal(pi)
-	if err := redisClient.Set(ctx, key, jsonBytes, 0).Err(); err != nil {
+	if err := redisClient.Set(ctx, key, jsonBytes, utils.DefaultTTL).Err(); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to save process info: %v", err), http.StatusInternalServerError)
 		return
 	}

@@ -11,6 +11,9 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// DefaultTTL defines the global expiration for all Redis keys (24 hours).
+const DefaultTTL = 24 * time.Hour
+
 // ReportProcess updates a process's state in Redis and synchronizes the Discord status.
 func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient *discord.Client, processID string, state string) {
 	key := fmt.Sprintf("process:info:%s", processID)
@@ -24,8 +27,8 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 	}
 
 	jsonBytes, _ := json.Marshal(data)
-	// We don't use expiration for standard processes; they must be cleared manually
-	redisClient.Set(ctx, key, jsonBytes, 0)
+	// Apply global 24-hour TTL
+	redisClient.Set(ctx, key, jsonBytes, DefaultTTL)
 
 	// Synchronize with Discord
 	if discordClient != nil {

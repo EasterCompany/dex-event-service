@@ -169,13 +169,13 @@ func (h *AnalystHandler) checkAndAnalyze() {
 
 	// ONLY update the timestamp if we finished successfully and weren't cancelled
 	h.lastAnalyzedTS = untilTS
-	h.RedisClient.Set(h.ctx, LastAnalysisKey, h.lastAnalyzedTS, 0)
+	h.RedisClient.Set(h.ctx, LastAnalysisKey, h.lastAnalyzedTS, utils.DefaultTTL)
 	// log.Printf("[%s] Analysis coverage updated to %s.", HandlerName, time.Unix(h.lastAnalyzedTS, 0).Format(time.RFC3339))
 }
 
 func (h *AnalystHandler) runSystemTests(ctx context.Context) {
 	// log.Printf("[%s] Running pre-analysis system tests...", HandlerName)
-	h.RedisClient.Set(ctx, "analyst:active_tier", "tests", 0)
+	h.RedisClient.Set(ctx, "analyst:active_tier", "tests", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Running System Tests")
 
 	// Execute 'dex test' command
@@ -203,7 +203,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	var allResults []AnalysisResult
 
 	// --- Tier 1: Guardian ---
-	h.RedisClient.Set(ctx, "analyst:active_tier", "guardian", 0)
+	h.RedisClient.Set(ctx, "analyst:active_tier", "guardian", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 1: Guardian Analysis")
 
 	gResults, err := h.runTierAnalysis(ctx, "guardian", events, history, status, systemInfo, logs, tests)
@@ -218,13 +218,13 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	lastArchTS, _ := strconv.ParseInt(lastArchitectRun, 10, 64)
 
 	if time.Since(time.Unix(lastArchTS, 0)) >= 2*time.Hour {
-		h.RedisClient.Set(ctx, "analyst:active_tier", "architect", 0)
+		h.RedisClient.Set(ctx, "analyst:active_tier", "architect", utils.DefaultTTL)
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 2: Architect Analysis")
 
 		aResults, err := h.runTierAnalysis(ctx, "architect", events, history, status, systemInfo, logs, tests)
 		if err == nil {
 			allResults = append(allResults, aResults...)
-			h.RedisClient.Set(ctx, "analyst:last_run:architect", time.Now().Unix(), 0)
+			h.RedisClient.Set(ctx, "analyst:last_run:architect", time.Now().Unix(), utils.DefaultTTL)
 		} else {
 			log.Printf("[%s] Architect analysis failed: %v", HandlerName, err)
 		}
@@ -235,7 +235,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	lastStratTS, _ := strconv.ParseInt(lastStrategistRun, 10, 64)
 
 	if time.Since(time.Unix(lastStratTS, 0)) >= 3*time.Hour {
-		h.RedisClient.Set(ctx, "analyst:active_tier", "strategist", 0)
+		h.RedisClient.Set(ctx, "analyst:active_tier", "strategist", utils.DefaultTTL)
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 3: Strategist Analysis")
 
 		// Retrieve roadmap context
@@ -257,7 +257,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 				h.updateRoadmapItem(ctx, roadmapItem)
 			}
 			allResults = append(allResults, sResults...)
-			h.RedisClient.Set(ctx, "analyst:last_run:strategist", time.Now().Unix(), 0)
+			h.RedisClient.Set(ctx, "analyst:last_run:strategist", time.Now().Unix(), utils.DefaultTTL)
 		} else {
 			log.Printf("[%s] Strategist analysis failed: %v", HandlerName, err)
 		}
@@ -414,7 +414,7 @@ func (h *AnalystHandler) emitAttentionExpired(ctx context.Context, tier string, 
 	}
 	fullEventJSON, _ := json.Marshal(event)
 	pipe := h.RedisClient.Pipeline()
-	pipe.Set(ctx, "event:"+eventID, fullEventJSON, 0)
+	pipe.Set(ctx, "event:"+eventID, fullEventJSON, utils.DefaultTTL)
 	pipe.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(timestamp), Member: eventID})
 	pipe.ZAdd(ctx, "events:service:"+HandlerName, redis.Z{Score: float64(timestamp), Member: eventID})
 	_, _ = pipe.Exec(ctx)
@@ -442,7 +442,7 @@ func (h *AnalystHandler) emitAudit(ctx context.Context, tier, model, input, outp
 	}
 	fullEventJSON, _ := json.Marshal(event)
 	pipe := h.RedisClient.Pipeline()
-	pipe.Set(ctx, "event:"+eventID, fullEventJSON, 0)
+	pipe.Set(ctx, "event:"+eventID, fullEventJSON, utils.DefaultTTL)
 	pipe.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(timestamp), Member: eventID})
 	pipe.ZAdd(ctx, "events:service:"+HandlerName, redis.Z{Score: float64(timestamp), Member: eventID})
 	_, _ = pipe.Exec(ctx)
@@ -646,7 +646,7 @@ func (h *AnalystHandler) runTierAnalysis(ctx context.Context, tier string, event
 	}
 
 	// Update Last Active Timestamp (Persistent)
-	h.RedisClient.Set(ctx, lastActiveKey, time.Now().Unix(), 0)
+	h.RedisClient.Set(ctx, lastActiveKey, time.Now().Unix(), utils.DefaultTTL)
 
 	// Construct the Input (User Message)
 	var eventLines []string
@@ -753,7 +753,7 @@ func (h *AnalystHandler) emitResult(ctx context.Context, res AnalysisResult) {
 	}
 	fullEventJSON, _ := json.Marshal(event)
 	pipe := h.RedisClient.Pipeline()
-	pipe.Set(ctx, "event:"+eventID, fullEventJSON, 0)
+	pipe.Set(ctx, "event:"+eventID, fullEventJSON, utils.DefaultTTL)
 	pipe.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(timestamp), Member: eventID})
 	pipe.ZAdd(ctx, "events:service:"+HandlerName, redis.Z{Score: float64(timestamp), Member: eventID})
 	_, _ = pipe.Exec(ctx)
@@ -791,5 +791,5 @@ func (h *AnalystHandler) fetchOldestPublishedRoadmapItem(ctx context.Context) *t
 
 func (h *AnalystHandler) updateRoadmapItem(ctx context.Context, item *types.RoadmapItem) {
 	data, _ := json.Marshal(item)
-	h.RedisClient.Set(ctx, "roadmap:"+item.ID, data, 0)
+	h.RedisClient.Set(ctx, "roadmap:"+item.ID, data, utils.DefaultTTL)
 }

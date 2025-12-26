@@ -202,11 +202,11 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 
 			// 3. Update Redis if Cognitive
 			if isCognitive {
-				redisClient.Set(ctx, "system:last_cognitive_event", time.Now().Unix(), 0)
+				redisClient.Set(ctx, "system:last_cognitive_event", time.Now().Unix(), utils.DefaultTTL)
 			}
 
 			// Always update the raw last event timestamp for low-level debugging
-			redisClient.Set(ctx, "system:last_event_ts", time.Now().Unix(), 0)
+			redisClient.Set(ctx, "system:last_event_ts", time.Now().Unix(), utils.DefaultTTL)
 		}()
 
 		// TRIGGER: CLI Status -> Discord
@@ -278,7 +278,7 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		// Store event data in a hash
 		eventKey := eventKeyPrefix + eventID
-		pipe.Set(ctx, eventKey, eventJSON, 0) // 0 = no expiration
+		pipe.Set(ctx, eventKey, eventJSON, utils.DefaultTTL)
 
 		// Add event ID to the global sorted set (timeline) with timestamp as score
 		pipe.ZAdd(ctx, timelineKey, redis.Z{
@@ -809,7 +809,7 @@ func removeChildFromParent(redisClient *redis.Client, ctx context.Context, paren
 		return err
 	}
 
-	if err := redisClient.Set(ctx, parentKey, updatedJSON, 0).Err(); err != nil {
+	if err := redisClient.Set(ctx, parentKey, updatedJSON, utils.DefaultTTL).Err(); err != nil {
 		return err
 	}
 

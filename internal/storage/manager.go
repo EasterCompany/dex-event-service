@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/types"
+	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -147,7 +148,7 @@ func (m *Manager) writeToClient(ctx context.Context, client *redis.Client, event
 
 	// Store event data
 	eventKey := EventKeyPrefix + event.ID
-	pipe.Set(ctx, eventKey, eventJSON, 0)
+	pipe.Set(ctx, eventKey, eventJSON, utils.DefaultTTL)
 
 	// Add to global timeline
 	pipe.ZAdd(ctx, TimelineKey, redis.Z{
