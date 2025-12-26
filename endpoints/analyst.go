@@ -3,6 +3,7 @@ package endpoints
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -68,6 +69,34 @@ func GetAnalystStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 		if err := json.NewEncoder(w).Encode(status); err != nil {
 			log.Printf("Error encoding analyst status: %v", err)
 		}
+	}
+}
+
+// HandleUpdateAnalystStatus updates the analyst status (e.g., setting the active tier).
+func HandleUpdateAnalystStatus(redisClient *redis.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if redisClient == nil {
+			http.Error(w, "Redis not connected", http.StatusServiceUnavailable)
+			return
+		}
+
+		var req struct {
+			ActiveTier string `json:"active_tier"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		ctx := context.Background()
+		if err := redisClient.Set(ctx, "analyst:active_tier", req.ActiveTier, 0).Err(); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to update active tier: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("Analyst status updated successfully"))
 	}
 }
 
