@@ -184,6 +184,43 @@ func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// SystemHardwareHandler returns the output of 'dex system' as plain text or JSON
+func SystemHardwareHandler(w http.ResponseWriter, r *http.Request) {
+	output, err := fetchSystemHardwareInfo(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch system info: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Just return the raw string output for now, the frontend can parse or display it.
+	// Or we could wrap it in a JSON object. Let's wrap it.
+	response := map[string]string{
+		"output": output,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+	}
+}
+
+func fetchSystemHardwareInfo(ctx context.Context) (string, error) {
+	// Run 'dex system' to get hardware info
+	// We need to find the binary path similar to the analyst handler
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dexPath := filepath.Join(home, "Dexter", "bin", "dex")
+
+	cmd := exec.CommandContext(ctx, dexPath, "system")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to run dex system: %v (output: %s)", err, string(output))
+	}
+	return utils.StripANSI(string(output)), nil
+}
+
 // checkModelsStatus reports on all models currently downloaded in Ollama, filtering out duplicate base models.
 func checkModelsStatus() []ModelReport {
 	downloadedModels, err := utils.ListOllamaModels()

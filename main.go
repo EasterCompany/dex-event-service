@@ -203,6 +203,7 @@ func main() {
 	router.HandleFunc("/service", endpoints.ServiceHandler).Methods("GET")
 	router.HandleFunc("/events", endpoints.EventsHandler(redisClient)).Methods("POST", "GET", "DELETE")
 	router.HandleFunc("/system_monitor", endpoints.SystemMonitorHandler).Methods("GET")
+	router.HandleFunc("/system/hardware", endpoints.SystemHardwareHandler).Methods("GET")
 	router.HandleFunc("/processes", endpoints.ListProcessesHandler).Methods("GET")
 	router.HandleFunc("/logs", endpoints.LogsHandler).Methods("GET", "DELETE")
 	router.HandleFunc("/analyst/status", endpoints.GetAnalystStatusHandler(redisClient)).Methods("GET")
