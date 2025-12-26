@@ -212,7 +212,7 @@ func executeHandlerInternal(
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	log.Printf("Executing handler '%s' for event %s", handlerConfig.Name, event.ID)
+	// log.Printf("Executing handler '%s' for event %s", handlerConfig.Name, event.ID)
 
 	var output types.HandlerOutput
 	var handlerErr error
