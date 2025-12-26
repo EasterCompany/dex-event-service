@@ -393,6 +393,33 @@ func (h *AnalystHandler) parseSingleMarkdownReport(input string) AnalysisResult 
 	return res
 }
 
+func (h *AnalystHandler) emitAttentionExpired(ctx context.Context, tier string, lastActive int64) {
+	eventID := uuid.New().String()
+	timestamp := time.Now().Unix()
+
+	payload := map[string]interface{}{
+		"type":        "system.attention.expired",
+		"tier":        tier,
+		"last_active": lastActive,
+		"expired_at":  time.Unix(lastActive, 0).Add(utils.DefaultAttentionSpan).Unix(),
+		"timestamp":   timestamp,
+	}
+
+	eventJSON, _ := json.Marshal(payload)
+	event := types.Event{
+		ID:        eventID,
+		Service:   HandlerName,
+		Event:     eventJSON,
+		Timestamp: timestamp,
+	}
+	fullEventJSON, _ := json.Marshal(event)
+	pipe := h.RedisClient.Pipeline()
+	pipe.Set(ctx, "event:"+eventID, fullEventJSON, 0)
+	pipe.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(timestamp), Member: eventID})
+	pipe.ZAdd(ctx, "events:service:"+HandlerName, redis.Z{Score: float64(timestamp), Member: eventID})
+	_, _ = pipe.Exec(ctx)
+}
+
 func (h *AnalystHandler) emitAudit(ctx context.Context, tier, model, input, output string) {
 	eventID := uuid.New().String()
 	timestamp := time.Now().Unix()
@@ -604,6 +631,22 @@ func (h *AnalystHandler) runTierAnalysis(ctx context.Context, tier string, event
 		// Enforce current system prompt logic if it changed (optional, but good practice)
 		chatHistory[0].Content = systemPrompt
 	}
+
+	// Check for "Attention Expiration"
+	lastActiveKey := "analyst:memory:last_active:" + sessionID
+	lastActiveTS, _ := h.RedisClient.Get(ctx, lastActiveKey).Int64()
+
+	// If history is effectively empty (just system prompt) and we had a previous active session
+	if len(chatHistory) <= 1 && lastActiveTS > 0 {
+		sinceActive := time.Since(time.Unix(lastActiveTS, 0))
+		// If last active was > AttentionSpan (expired) but < 24 hours (recent enough to care)
+		if sinceActive > utils.DefaultAttentionSpan && sinceActive < 24*time.Hour {
+			h.emitAttentionExpired(ctx, tier, lastActiveTS)
+		}
+	}
+
+	// Update Last Active Timestamp (Persistent)
+	h.RedisClient.Set(ctx, lastActiveKey, time.Now().Unix(), 0)
 
 	// Construct the Input (User Message)
 	var eventLines []string
