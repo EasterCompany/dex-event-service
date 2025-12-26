@@ -95,7 +95,7 @@ func handleDeleteLogs(w http.ResponseWriter, r *http.Request) {
 
 func getLogReport(service config.ServiceEntry) types.LogReport {
 	logPath := getLogPath(service.ID)
-	logs, err := readLastNLines(logPath, 100)
+	logs, err := readLastNLines(logPath, 25)
 	if err != nil {
 		return types.LogReport{
 			ID:   service.ID,
