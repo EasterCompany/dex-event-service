@@ -65,6 +65,12 @@ func HandleProcessRegistration(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusAccepted)
 	_, _ = w.Write([]byte("Process registered successfully"))
+
+	// Emit Event
+	utils.SendEvent(ctx, redisClient, "process-manager", "system.process.registered", map[string]interface{}{
+		"id":    req.ID,
+		"state": req.State,
+	})
 }
 
 // HandleProcessUnregistration removes a process from Redis.
@@ -92,4 +98,9 @@ func HandleProcessUnregistration(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("Process unregistered successfully"))
+
+	// Emit Event
+	utils.SendEvent(ctx, redisClient, "process-manager", "system.process.unregistered", map[string]interface{}{
+		"id": id,
+	})
 }

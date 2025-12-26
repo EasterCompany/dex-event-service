@@ -470,6 +470,9 @@ func (h *AnalystHandler) fetchEventsForAnalysis(ctx context.Context, sinceTS, un
 		string(types.EventTypeMessagingUserSpeakingStarted),
 		string(types.EventTypeMessagingUserSpeakingStopped),
 		string(types.EventTypeSystemAnalysisAudit),
+		"system.roadmap.updated",
+		"system.process.registered",
+		"system.process.unregistered",
 	}
 
 	events := make([]types.Event, 0, len(eventIDs))

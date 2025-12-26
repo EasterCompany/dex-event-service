@@ -109,6 +109,13 @@ func CreateRoadmapItemHandler(redisClient *redis.Client) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(item)
+
+		// Emit Event
+		utils.SendEvent(ctx, redisClient, "roadmap", "system.roadmap.created", map[string]interface{}{
+			"id":      item.ID,
+			"content": item.Content,
+			"state":   item.State,
+		})
 	}
 }
 
@@ -149,6 +156,12 @@ func UpdateRoadmapItemHandler(redisClient *redis.Client, id string) http.Handler
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(item)
+
+		// Emit Event
+		utils.SendEvent(ctx, redisClient, "roadmap", "system.roadmap.updated", map[string]interface{}{
+			"id":    item.ID,
+			"state": item.State,
+		})
 	}
 }
 
