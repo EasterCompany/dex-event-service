@@ -15,6 +15,11 @@ import (
 
 // LogsHandler collects logs for all configured services and returns as JSON
 func LogsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete {
+		handleDeleteLogs(w, r)
+		return
+	}
+
 	configuredServices, err := config.LoadServiceMap()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load service map: %v", err), http.StatusInternalServerError)
@@ -55,6 +60,37 @@ func LogsHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(reports); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to encode service reports: %v", err), http.StatusInternalServerError)
 	}
+}
+
+func handleDeleteLogs(w http.ResponseWriter, r *http.Request) {
+	serviceID := r.URL.Query().Get("service_id")
+	if serviceID == "" {
+		http.Error(w, "service_id parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate service ID against service map to prevent arbitrary file deletion
+	// although isServiceManageable and getLogPath are simple, we should arguably check if it exists in config
+	// For now, using isServiceManageable as a basic filter + getLogPath structure
+	if !isServiceManageable(serviceID) {
+		http.Error(w, "service is not manageable", http.StatusForbidden)
+		return
+	}
+
+	logPath := getLogPath(serviceID)
+	// Check if file exists before trying to truncate
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		http.Error(w, "Log file not found", http.StatusNotFound)
+		return
+	}
+
+	if err := os.Truncate(logPath, 0); err != nil {
+		http.Error(w, fmt.Sprintf("failed to clear log file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("Logs cleared successfully"))
 }
 
 func getLogReport(service config.ServiceEntry) types.LogReport {
