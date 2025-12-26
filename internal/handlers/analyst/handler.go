@@ -192,6 +192,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	}
 
 	status, _ := h.fetchSystemStatus(ctx)
+	systemInfo, _ := h.fetchSystemHardwareInfo(ctx)
 	logs, _ := h.fetchRecentLogs(ctx)
 	tests, _ := h.fetchTestResults(ctx)
 	history, _ := h.fetchRecentNotifications(ctx, 20)
@@ -208,7 +209,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	// --- Tier 1: Guardian ---
 	h.RedisClient.Set(ctx, "analyst:active_tier", "guardian", 0)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 1: Guardian Analysis")
-	guardianPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "guardian")
+	guardianPrompt := h.buildAnalysisPrompt(events, history, status, systemInfo, logs, tests, "guardian")
 
 	guardianModel := "dex-analyst-guardian"
 	ollamaGResponse, err := generateWithTimeout(ctx, guardianModel, guardianPrompt)
@@ -229,7 +230,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	if time.Since(time.Unix(lastArchTS, 0)) >= 2*time.Hour {
 		h.RedisClient.Set(ctx, "analyst:active_tier", "architect", 0)
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Tier 2: Architect Analysis")
-		architectPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "architect")
+		architectPrompt := h.buildAnalysisPrompt(events, history, status, systemInfo, logs, tests, "architect")
 
 		architectModel := "dex-analyst-architect"
 		ollamaAResponse, err := generateWithTimeout(ctx, architectModel, architectPrompt)
@@ -259,7 +260,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 			roadmapContent = roadmapItem.Content
 		}
 
-		strategistPrompt := h.buildAnalysisPrompt(events, history, status, logs, tests, "strategist")
+		strategistPrompt := h.buildAnalysisPrompt(events, history, status, systemInfo, logs, tests, "strategist")
 		if roadmapContent != "" {
 			strategistPrompt = fmt.Sprintf("### PRIMARY CREATOR OBJECTIVE (PRIORITY #1):\n%s\n\n%s", roadmapContent, strategistPrompt)
 		}
@@ -521,6 +522,17 @@ func (h *AnalystHandler) fetchSystemStatus(ctx context.Context) (string, error) 
 	return utils.StripANSI(string(output)), nil
 }
 
+func (h *AnalystHandler) fetchSystemHardwareInfo(ctx context.Context) (string, error) {
+	// Run 'dex system' to get hardware info (RAM, CPU, etc.)
+	dexPath := getDexBinaryPath()
+	cmd := exec.CommandContext(ctx, dexPath, "system")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to run dex system: %v (output: %s)", err, string(output))
+	}
+	return utils.StripANSI(string(output)), nil
+}
+
 func (h *AnalystHandler) fetchRecentLogs(ctx context.Context) (string, error) {
 	dexPath := getDexBinaryPath()
 	// Run 'dex logs' to get recent logs from all services (defaults to tail -n 10 per service)
@@ -593,7 +605,7 @@ func (h *AnalystHandler) fetchRecentNotifications(ctx context.Context, limit int
 	return strings.Join(history, "\n"), nil
 }
 
-func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event, history, status, logs, tests, tier string) string {
+func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event, history, status, systemInfo, logs, tests, tier string) string {
 	var contextStr string
 	switch tier {
 	case "guardian":
@@ -613,8 +625,8 @@ func (h *AnalystHandler) buildAnalysisPrompt(events []types.Event, history, stat
 		eventLines = append(eventLines, summary)
 	}
 
-	return fmt.Sprintf("%s\n\n### SYSTEM STATUS\n%s\n\n### RECENT LOGS\n%s\n\n### NEW EVENT LOGS\n%s\n\n### RECENT REPORTED ISSUES\n%s\n\n### TEST RESULTS\n%s",
-		contextStr, status, logs, strings.Join(eventLines, "\n"), history, tests)
+	return fmt.Sprintf("%s\n\n### HARDWARE SPECS\n%s\n\n### SYSTEM STATUS\n%s\n\n### RECENT LOGS\n%s\n\n### NEW EVENT LOGS\n%s\n\n### RECENT REPORTED ISSUES\n%s\n\n### TEST RESULTS\n%s",
+		contextStr, systemInfo, status, logs, strings.Join(eventLines, "\n"), history, tests)
 }
 
 func (h *AnalystHandler) emitResult(ctx context.Context, res AnalysisResult) {
