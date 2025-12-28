@@ -187,11 +187,16 @@ func (h *AnalystHandler) runSystemTests(ctx context.Context) {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("[%s] System tests failed: %v (Output: %s)", HandlerName, err, string(output))
+	} else {
+		log.Printf("[%s] System tests completed successfully.", HandlerName)
 	}
 }
 
 func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS int64) ([]AnalysisResult, error) {
 	events, err := h.fetchEventsForAnalysis(ctx, sinceTS, untilTS)
+	// ... (skipping to fetchTestResults modification location, wait, I need to find fetchTestResults definition)
+	// I will just modify runSystemTests first as it is visible in the context I have.
+	// I will search for fetchTestResults definition to modify it separately.
 	if err != nil {
 		return nil, err
 	}
@@ -603,6 +608,7 @@ func (h *AnalystHandler) fetchTestResults(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	log.Printf("[%s] Scanned %d events for test results.", HandlerName, len(eventIDs))
 
 	var testSummaries []string
 	seenServices := make(map[string]bool)
@@ -719,8 +725,8 @@ func (h *AnalystHandler) runTierAnalysis(ctx context.Context, tier string, event
 	}
 
 	// Dynamic Context Injection
-	inputContext := fmt.Sprintf("### CURRENT SYSTEM STATUS\n%s\n\n### HARDWARE\n%s\n\n### RECENT LOGS\n%s\n\n### NEW EVENTS\n%s\n\n### REPORTED ISSUES HISTORY\n%s\n\n### TEST RESULTS\n%s",
-		status, systemInfo, logs, strings.Join(eventLines, "\n"), history, tests)
+	inputContext := fmt.Sprintf("### CURRENT SYSTEM STATUS\n%s\n\n### TEST RESULTS\n%s\n\n### HARDWARE\n%s\n\n### RECENT LOGS\n%s\n\n### NEW EVENTS\n%s\n\n### REPORTED ISSUES HISTORY\n%s",
+		status, tests, systemInfo, logs, strings.Join(eventLines, "\n"), history)
 
 	newUserMsg := ollama.Message{
 		Role:    "user",
