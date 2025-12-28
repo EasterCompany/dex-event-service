@@ -54,6 +54,7 @@ type AnalysisResult struct {
 	AffectedServices   []string `json:"affected_services"`
 	ImplementationPath []string `json:"implementation_path"`
 	RelatedEventIDs    []string `json:"related_event_ids"`
+	AuditEventID       string   `json:"audit_event_id,omitempty"`
 }
 
 type AnalystHandler struct {
@@ -164,7 +165,9 @@ func (h *AnalystHandler) checkAndAnalyze() {
 	}
 
 	for _, res := range results {
-		h.emitResult(h.ctx, res)
+		if _, err := h.emitResult(h.ctx, res); err != nil {
+			log.Printf("[%s] Failed to emit result for %s: %v", HandlerName, res.Title, err)
+		}
 	}
 
 	// ONLY update the timestamp if we finished successfully and weren't cancelled
@@ -420,7 +423,7 @@ func (h *AnalystHandler) emitAttentionExpired(ctx context.Context, tier string, 
 	_, _ = pipe.Exec(ctx)
 }
 
-func (h *AnalystHandler) emitAudit(ctx context.Context, tier, model, input, output string) {
+func (h *AnalystHandler) emitAudit(ctx context.Context, tier, model, input, output string) (string, error) {
 	eventID := uuid.New().String()
 	timestamp := time.Now().Unix()
 
@@ -445,7 +448,8 @@ func (h *AnalystHandler) emitAudit(ctx context.Context, tier, model, input, outp
 	pipe.Set(ctx, "event:"+eventID, fullEventJSON, utils.DefaultTTL)
 	pipe.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(timestamp), Member: eventID})
 	pipe.ZAdd(ctx, "events:service:"+HandlerName, redis.Z{Score: float64(timestamp), Member: eventID})
-	_, _ = pipe.Exec(ctx)
+	_, err := pipe.Exec(ctx)
+	return eventID, err
 }
 
 func (h *AnalystHandler) fetchEventsForAnalysis(ctx context.Context, sinceTS, untilTS int64) ([]types.Event, error) {
@@ -690,7 +694,11 @@ func (h *AnalystHandler) runTierAnalysis(ctx context.Context, tier string, event
 
 		if isValid {
 			// Success! Emit audit
-			h.emitAudit(ctx, tier, model, inputContext, respMsg.Content)
+			auditID, _ := h.emitAudit(ctx, tier, model, inputContext, respMsg.Content)
+
+			for i := range results {
+				results[i].AuditEventID = auditID
+			}
 
 			// Persist the *clean* interaction to long-term memory
 			// We append the initial User Request and the Final Successful Response
@@ -718,7 +726,7 @@ func (h *AnalystHandler) runTierAnalysis(ctx context.Context, tier string, event
 	return nil, fmt.Errorf("max retries reached for %s", tier)
 }
 
-func (h *AnalystHandler) emitResult(ctx context.Context, res AnalysisResult) {
+func (h *AnalystHandler) emitResult(ctx context.Context, res AnalysisResult) (string, error) {
 	eventID := uuid.New().String()
 	timestamp := time.Now().Unix()
 
@@ -730,6 +738,10 @@ func (h *AnalystHandler) emitResult(ctx context.Context, res AnalysisResult) {
 		"body":              res.Body,
 		"related_event_ids": res.RelatedEventIDs,
 		"read":              false,
+	}
+
+	if res.AuditEventID != "" {
+		payload["audit_event_id"] = res.AuditEventID
 	}
 
 	switch res.Type {
@@ -759,8 +771,9 @@ func (h *AnalystHandler) emitResult(ctx context.Context, res AnalysisResult) {
 	pipe.Set(ctx, "event:"+eventID, fullEventJSON, utils.DefaultTTL)
 	pipe.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(timestamp), Member: eventID})
 	pipe.ZAdd(ctx, "events:service:"+HandlerName, redis.Z{Score: float64(timestamp), Member: eventID})
-	_, _ = pipe.Exec(ctx)
+	_, err := pipe.Exec(ctx)
 	log.Printf("[%s] Emitted %s: \"%s\"", HandlerName, res.Type, res.Title)
+	return eventID, err
 }
 
 func (h *AnalystHandler) fetchOldestPublishedRoadmapItem(ctx context.Context) *types.RoadmapItem {
