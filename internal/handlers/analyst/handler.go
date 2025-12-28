@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -181,12 +182,20 @@ func (h *AnalystHandler) runSystemTests(ctx context.Context) {
 	h.RedisClient.Set(ctx, "analyst:active_tier", "tests", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, ProcessID, "Running System Tests")
 
+	// Create a context with timeout for tests (15 minutes)
+	testCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+
 	// Execute 'dex test' command
 	dexPath := getDexBinaryPath()
-	cmd := exec.CommandContext(ctx, dexPath, "test")
+	cmd := exec.CommandContext(testCtx, dexPath, "test")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("[%s] System tests failed: %v (Output: %s)", HandlerName, err, string(output))
+		if testCtx.Err() == context.DeadlineExceeded {
+			log.Printf("[%s] System tests timed out after 15 minutes.", HandlerName)
+		} else {
+			log.Printf("[%s] System tests failed: %v (Output: %s)", HandlerName, err, string(output))
+		}
 	} else {
 		log.Printf("[%s] System tests completed successfully.", HandlerName)
 	}
@@ -279,7 +288,9 @@ func (h *AnalystHandler) parseAnalysisResults(response string) []AnalysisResult 
 	}
 
 	var results []AnalysisResult
-	sections := strings.Split(response, "---")
+	// Split by '---' only when it's on its own line to avoid splitting on markdown tables
+	re := regexp.MustCompile(`(?m)^\s*---\s*$`)
+	sections := re.Split(response, -1)
 	for _, section := range sections {
 		res := h.parseSingleMarkdownReport(section)
 		if res.Title != "" {
@@ -345,15 +356,18 @@ func (h *AnalystHandler) parseSingleMarkdownReport(input string) AnalysisResult 
 			continue
 		}
 
-		if strings.HasPrefix(trimmed, "## Summary") {
+		if strings.HasPrefix(trimmed, "## Summary") || strings.HasPrefix(trimmed, "### Summary") || strings.HasPrefix(trimmed, "**Summary**") {
 			currentSection = "summary"
 			continue
 		}
-		if strings.HasPrefix(trimmed, "## Content") {
+		if strings.HasPrefix(trimmed, "## Content") || strings.HasPrefix(trimmed, "### Content") || strings.HasPrefix(trimmed, "**Content**") ||
+			strings.HasPrefix(trimmed, "## Insight") || strings.HasPrefix(trimmed, "### Insight") || strings.HasPrefix(trimmed, "**Insight**") ||
+			strings.HasPrefix(trimmed, "## Analysis") || strings.HasPrefix(trimmed, "### Analysis") ||
+			strings.HasPrefix(trimmed, "## Observations") || strings.HasPrefix(trimmed, "### Observations") {
 			currentSection = "content"
 			continue
 		}
-		if strings.HasPrefix(trimmed, "## Implementation Path") {
+		if strings.HasPrefix(trimmed, "## Implementation Path") || strings.HasPrefix(trimmed, "### Implementation Path") || strings.HasPrefix(trimmed, "**Implementation Path**") {
 			currentSection = "path"
 			continue
 		}

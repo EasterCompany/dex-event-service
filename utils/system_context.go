@@ -140,96 +140,15 @@ If no patterns are found, return ONLY: "No significant insights found."`
 
 // GetAnalystGuardianPrompt returns the full system prompt for Tier 1 analysis.
 func GetAnalystGuardianPrompt() string {
-	return `### SYSTEM_ROLE: TECHNICAL_AUDIT_BOT
-### TASK: Audit system status and logs.
-### FORMAT: PURE MARKDOWN ONLY. NO PROSE.
-
-### FEW-SHOT EXAMPLES:
-
-INPUT: (Offline services, error logs)
-OUTPUT:
-# Service Failure Alert
-**Type**: alert
-**Priority**: high
-**Category**: system
-**Affected**: dex-tts-service
-**Related IDs**: none
-
-## Summary
-The TTS service is offline due to CUDA memory exhaustion.
-
-## Content
-Logs show "RuntimeError: CUDA out of memory". Process 12345.
----
-
-INPUT: (All OK)
-OUTPUT: No significant insights found.
-
-### END EXAMPLES.
-
-### CURRENT DATA TO AUDIT:`
+	return AnalystIdentity + "\n\n" + AnalystGuardianContext + "\n\n" + AnalystOutputConstraints + "\n\n### CURRENT DATA TO AUDIT:"
 }
 
 // GetAnalystArchitectPrompt returns the full system prompt for Tier 2 analysis.
 func GetAnalystArchitectPrompt() string {
-	return `### SYSTEM_ROLE: ARCHITECT_BOT
-### TASK: Audit code patterns and architecture.
-### FORMAT: PURE MARKDOWN ONLY. NO PROSE.
-
-### FEW-SHOT EXAMPLES:
-
-INPUT: (Repeated log patterns)
-OUTPUT:
-# Log Aggregation Blueprint
-**Type**: blueprint
-**Priority**: medium
-**Category**: architecture
-**Affected**: dex-event-service
-**Related IDs**: none
-
-## Summary
-Implement middleware to aggregate repetitive error logs.
-
-## Content
-Analysis shows 50+ identical timeout errors. Standardizing these into a single event type with a "count" field will reduce timeline noise.
----
-
-INPUT: (No improvements needed)
-OUTPUT: No significant insights found.
-
-### END EXAMPLES.
-
-### CURRENT DATA TO AUDIT:`
+	return AnalystIdentity + "\n\n" + AnalystArchitectContext + "\n\n" + AnalystOutputConstraints + "\n\n### CURRENT DATA TO AUDIT:"
 }
 
 // GetAnalystStrategistPrompt returns the full system prompt for Tier 3 analysis.
 func GetAnalystStrategistPrompt() string {
-	return `### SYSTEM_ROLE: STRATEGIST_BOT
-### TASK: Execute Roadmap and Vision.
-### FORMAT: PURE MARKDOWN ONLY. NO PROSE.
-
-### FEW-SHOT EXAMPLES:
-
-INPUT: (Objective: "Improve Security")
-OUTPUT:
-# OAuth2 Integration Blueprint
-**Type**: blueprint
-**Priority**: high
-**Category**: security
-**Affected**: dex-cli, dex-event-service
-**Related IDs**: none
-
-## Summary
-Replace basic auth with OAuth2 for CLI-to-Service communication.
-
-## Content
-Roadmap requires "Hardened Security". Transitioning to token-based auth reduces secret exposure risk in logs.
----
-
-INPUT: (No strategic shifts needed)
-OUTPUT: No significant insights found.
-
-### END EXAMPLES.
-
-### CURRENT DATA TO AUDIT:`
+	return AnalystIdentity + "\n\n" + AnalystStrategistContext + "\n\n" + AnalystOutputConstraints + "\n\n### CURRENT DATA TO AUDIT:"
 }

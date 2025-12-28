@@ -14,12 +14,16 @@ import (
 type Client struct {
 	BaseURL     string
 	EventSvcURL string // Needed for fetchContext legacy call, or maybe we move that logic?
+	httpClient  *http.Client
 }
 
 func NewClient(baseURL, eventSvcURL string) *Client {
 	return &Client{
 		BaseURL:     baseURL,
 		EventSvcURL: eventSvcURL,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
 	}
 }
 
@@ -30,7 +34,7 @@ func (c *Client) InitStream(channelID string, initialContent string) (string, er
 	}
 	jsonData, _ := json.Marshal(reqBody)
 
-	resp, err := http.Post(c.BaseURL+"/message/stream/start", "application/json", bytes.NewBuffer(jsonData))
+	resp, err := c.httpClient.Post(c.BaseURL+"/message/stream/start", "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", err
 	}
@@ -135,7 +139,7 @@ func (c *Client) AddReaction(channelID, messageID, emoji string) error {
 		return err
 	}
 
-	resp, err := http.Post(c.BaseURL+"/message/react", "application/json", bytes.NewBuffer(jsonData))
+	resp, err := c.httpClient.Post(c.BaseURL+"/message/react", "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
@@ -156,7 +160,7 @@ func (c *Client) TriggerTyping(channelID string) {
 	reqBody := map[string]string{"channel_id": channelID}
 	jsonData, _ := json.Marshal(reqBody)
 
-	resp, err := http.Post(c.BaseURL+"/typing", "application/json", bytes.NewBuffer(jsonData))
+	resp, err := c.httpClient.Post(c.BaseURL+"/typing", "application/json", bytes.NewBuffer(jsonData))
 	if err == nil {
 		defer func() { _ = resp.Body.Close() }()
 	}
@@ -170,7 +174,7 @@ func (c *Client) UpdateBotStatus(text string, status string, activityType int) {
 	}
 	jsonData, _ := json.Marshal(reqBody)
 
-	resp, err := http.Post(c.BaseURL+"/status", "application/json", bytes.NewBuffer(jsonData))
+	resp, err := c.httpClient.Post(c.BaseURL+"/status", "application/json", bytes.NewBuffer(jsonData))
 	if err == nil {
 		defer func() { _ = resp.Body.Close() }()
 	}
@@ -187,7 +191,7 @@ func (c *Client) FetchContext(channelID string, maxLength int) (string, error) {
 	// Use EventSvcURL here
 	url := fmt.Sprintf("%s/events?channel=%s&max_length=%d&order=desc&format=text&exclude_types=engagement.decision", c.EventSvcURL, channelID, maxLength)
 
-	resp, err := http.Get(url)
+	resp, err := c.httpClient.Get(url)
 	if err != nil {
 		return "", err
 	}
@@ -231,8 +235,7 @@ func (c *Client) FetchChannelMembers(channelID string) ([]UserContext, string, e
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("X-Service-Name", "dex-event-service")
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, "", err
 	}
@@ -275,9 +278,7 @@ func (c *Client) PlayAudio(audioData []byte) error {
 
 	req.Header.Set("X-Service-Name", "dex-event-service")
 
-	client := &http.Client{Timeout: 30 * time.Second}
-
-	resp, err := client.Do(req)
+	resp, err := c.httpClient.Do(req)
 
 	if err != nil {
 
@@ -309,9 +310,7 @@ func (c *Client) GetVoiceChannelUserCount(channelID string) (int, error) {
 
 	req.Header.Set("X-Service-Name", "dex-event-service")
 
-	client := &http.Client{Timeout: 5 * time.Second}
-
-	resp, err := client.Do(req)
+	resp, err := c.httpClient.Do(req)
 
 	if err != nil {
 
@@ -365,8 +364,7 @@ func (c *Client) PlayMusic(url string) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Service-Name", "dex-event-service")
 
-	client := &http.Client{Timeout: 5 * time.Second} // Short timeout for firing the request
-	resp, err := client.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
