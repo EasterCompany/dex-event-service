@@ -115,11 +115,105 @@ func EventsHandler(redisClient *redis.Client) http.HandlerFunc {
 			if path != "" {
 				DeleteEventHandler(redisClient, path)(w, r)
 			} else {
-				http.Error(w, "Event ID required", http.StatusBadRequest)
+				BulkDeleteEventHandler(redisClient)(w, r)
 			}
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
+	}
+}
+
+// BulkDeleteEventHandler deletes multiple events based on filters
+func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		query := r.URL.Query()
+		targetType := query.Get("type")
+		category := query.Get("category")
+
+		// Define categories matching frontend
+		categories := map[string][]string{
+			"messaging": {
+				"message_received", "messaging.user.sent_message", "messaging.bot.sent_message",
+				"messaging.user.transcribed", "voice_transcribed", "bot_response",
+				"messaging.user.joined_voice", "messaging.user.left_voice",
+				"messaging.bot.joined_voice", "messaging.bot.voice_response",
+				"messaging.user.speaking.started", "messaging.user.speaking.stopped",
+				"messaging.webhook.message",
+			},
+			"system": {
+				"system.cli.command", "system.cli.status", "system.status.change",
+				"metric_recorded", "log_entry", "error_occurred", "webhook.processed",
+				"messaging.bot.status_update", "messaging.user.joined_server",
+				"system.test.completed", "system.build.completed",
+				"system.roadmap.created", "system.roadmap.updated",
+				"system.process.registered", "system.process.unregistered",
+			},
+			"cognitive": {
+				"engagement.decision", "system.analysis.audit", "system.blueprint.generated",
+				"analysis.link.completed", "analysis.visual.completed",
+			},
+			"moderation": {
+				"moderation.explicit_content.deleted",
+			},
+		}
+
+		targetTypes := make(map[string]bool)
+		if targetType != "" {
+			targetTypes[targetType] = true
+		}
+		if category != "" {
+			if typesList, ok := categories[category]; ok {
+				for _, t := range typesList {
+					targetTypes[t] = true
+				}
+			}
+		}
+
+		// Get all events from timeline
+		eventIDs, err := redisClient.ZRange(ctx, timelineKey, 0, -1).Result()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to retrieve timeline: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		deletedCount := 0
+		for _, eventID := range eventIDs {
+			// Optimization: If no filters, delete everything
+			if targetType == "" && category == "" {
+				if err := deleteEventByID(redisClient, ctx, eventID); err == nil {
+					deletedCount++
+				}
+				continue
+			}
+
+			// Check type
+			eventKey := eventKeyPrefix + eventID
+			eventJSON, err := redisClient.Get(ctx, eventKey).Result()
+			if err != nil {
+				continue // Skip missing
+			}
+
+			var event types.Event
+			if err := json.Unmarshal([]byte(eventJSON), &event); err != nil {
+				continue
+			}
+
+			var eventData map[string]interface{}
+			if err := json.Unmarshal(event.Event, &eventData); err != nil {
+				continue
+			}
+
+			eventType, _ := eventData["type"].(string)
+			if targetTypes[eventType] {
+				if err := deleteEventByID(redisClient, ctx, eventID); err == nil {
+					deletedCount++
+				}
+			}
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "Deleted %d events", deletedCount)
 	}
 }
 
