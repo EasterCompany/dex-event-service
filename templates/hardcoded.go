@@ -681,6 +681,40 @@ func GetTemplates() map[string]EventTemplate {
 			},
 		},
 
+		string(types.EventTypeSystemTestCompleted): {
+			Description: "A service test suite has completed",
+			Format:      "Tests completed for {service_name} ({duration})",
+			Fields: map[string]FieldSpec{
+				"service_name": {Type: "string", Required: true},
+				"format":       {Type: "object", Required: true},
+				"lint":         {Type: "object", Required: true},
+				"test":         {Type: "object", Required: true},
+				"duration":     {Type: "string", Required: true},
+			},
+		},
+
+		string(types.EventTypeSystemBuildCompleted): {
+			Description: "A service build has completed",
+			Format:      "Build completed for {service_name}: {status}",
+			Fields: map[string]FieldSpec{
+				"service_name": {Type: "string", Required: true},
+				"version":      {Type: "string", Required: true},
+				"duration":     {Type: "string", Required: true},
+				"status":       {Type: "string", Required: true},
+			},
+		},
+
+		string(types.EventTypeSystemStatusChange): {
+			Description: "A system-wide status or state change",
+			Format:      "{entity} changed status to {new_status}",
+			Fields: map[string]FieldSpec{
+				"entity":     {Type: "string", Required: true},
+				"new_status": {Type: "string", Required: true},
+				"old_status": {Type: "string", Required: false},
+				"reason":     {Type: "string", Required: false},
+			},
+		},
+
 		// END NEW MESSAGING EVENTS
 
 		"voice_speaking_started": {
