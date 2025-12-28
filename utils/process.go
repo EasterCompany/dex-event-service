@@ -40,6 +40,22 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 // ClearProcess removes a process from Redis and attempts to restore an idle Discord status if appropriate.
 func ClearProcess(ctx context.Context, redisClient *redis.Client, discordClient *discord.Client, processID string) {
 	key := fmt.Sprintf("process:info:%s", processID)
+
+	// Save history before deleting
+	val, err := redisClient.Get(ctx, key).Result()
+	if err == nil {
+		var p map[string]interface{}
+		if jsonErr := json.Unmarshal([]byte(val), &p); jsonErr == nil {
+			p["end_time"] = time.Now().Unix()
+			p["state"] = "completed"
+
+			if histBytes, marshalErr := json.Marshal(p); marshalErr == nil {
+				redisClient.LPush(ctx, "process:history", histBytes)
+				redisClient.LTrim(ctx, "process:history", 0, 9)
+			}
+		}
+	}
+
 	redisClient.Del(ctx, key)
 
 	// Sync Discord status based on remaining processes
