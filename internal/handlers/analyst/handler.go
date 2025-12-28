@@ -396,9 +396,42 @@ func (h *AnalystHandler) parseSingleMarkdownReport(input string) AnalysisResult 
 	return res
 }
 
+func (h *AnalystHandler) fetchLastAudit(ctx context.Context, tier string) (string, string, error) {
+	ids, err := h.RedisClient.ZRevRange(ctx, "events:service:"+HandlerName, 0, 50).Result()
+	if err != nil {
+		return "", "", err
+	}
+
+	for _, id := range ids {
+		val, err := h.RedisClient.Get(ctx, "event:"+id).Result()
+		if err != nil {
+			continue
+		}
+
+		var evt types.Event
+		if json.Unmarshal([]byte(val), &evt) != nil {
+			continue
+		}
+
+		var payload map[string]interface{}
+		if json.Unmarshal(evt.Event, &payload) != nil {
+			continue
+		}
+
+		if payload["type"] == string(types.EventTypeSystemAnalysisAudit) && payload["tier"] == tier {
+			input, _ := payload["raw_input"].(string)
+			output, _ := payload["raw_output"].(string)
+			return input, output, nil
+		}
+	}
+	return "", "", fmt.Errorf("no recent audit found")
+}
+
 func (h *AnalystHandler) emitAttentionExpired(ctx context.Context, tier string, lastActive int64) {
 	eventID := uuid.New().String()
 	timestamp := time.Now().Unix()
+
+	input, output, _ := h.fetchLastAudit(ctx, tier)
 
 	payload := map[string]interface{}{
 		"type":        "system.attention.expired",
@@ -406,6 +439,8 @@ func (h *AnalystHandler) emitAttentionExpired(ctx context.Context, tier string, 
 		"last_active": lastActive,
 		"expired_at":  time.Unix(lastActive, 0).Add(utils.DefaultAttentionSpan).Unix(),
 		"timestamp":   timestamp,
+		"last_input":  input,
+		"last_output": output,
 	}
 
 	eventJSON, _ := json.Marshal(payload)
