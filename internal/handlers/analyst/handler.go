@@ -617,12 +617,12 @@ func (h *AnalystHandler) fetchRecentLogs(ctx context.Context) (string, error) {
 }
 
 func (h *AnalystHandler) fetchTestResults(ctx context.Context) (string, error) {
-	// Query last 100 events to find system.test.completed
-	eventIDs, err := h.RedisClient.ZRevRange(ctx, "events:timeline", 0, 100).Result()
+	// Query last 250 events to find system.test.completed (increased from 100)
+	eventIDs, err := h.RedisClient.ZRevRange(ctx, "events:timeline", 0, 250).Result()
 	if err != nil {
 		return "", err
 	}
-	log.Printf("[%s] Scanned %d events for test results.", HandlerName, len(eventIDs))
+	// log.Printf("[%s] Scanned %d events for test results.", HandlerName, len(eventIDs))
 
 	var testSummaries []string
 	seenServices := make(map[string]bool)
@@ -635,12 +635,12 @@ func (h *AnalystHandler) fetchTestResults(ctx context.Context) (string, error) {
 			_ = json.Unmarshal(e.Event, &ed)
 
 			if ed["type"] == string(types.EventTypeSystemTestCompleted) {
-				svc := ed["service_name"].(string)
-				if !seenServices[svc] {
+				svc, _ := ed["service_name"].(string)
+				if svc != "" && !seenServices[svc] {
 					// Format a nice summary line
-					format := ed["format"].(map[string]interface{})
-					lint := ed["lint"].(map[string]interface{})
-					test := ed["test"].(map[string]interface{})
+					format, _ := ed["format"].(map[string]interface{})
+					lint, _ := ed["lint"].(map[string]interface{})
+					test, _ := ed["test"].(map[string]interface{})
 
 					summary := fmt.Sprintf("[%s] Format: %s, Lint: %s, Test: %s (%s)",
 						svc, format["status"], lint["status"], test["details"], ed["duration"])
@@ -652,6 +652,7 @@ func (h *AnalystHandler) fetchTestResults(ctx context.Context) (string, error) {
 	}
 
 	if len(testSummaries) == 0 {
+		log.Printf("[%s] WARNING: No system.test.completed events found in the last %d events.", HandlerName, len(eventIDs))
 		return "No recent test results available.", nil
 	}
 
