@@ -25,6 +25,7 @@ import (
 	"github.com/EasterCompany/dex-event-service/middleware"
 	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/gorilla/mux"
+	redis "github.com/redis/go-redis/v9"
 )
 
 const ServiceName = "dex-event-service"
@@ -92,6 +93,9 @@ func main() {
 			}
 		}()
 		endpoints.SetRedisClient(redisClient) // Set for endpoints
+
+		// Perform startup cleanup
+		performStartupCleanup(ctx, redisClient)
 	}
 
 	// Handle delete mode
@@ -349,4 +353,44 @@ func RunTestSuite() error {
 
 	log.Println("Test suite completed successfully")
 	return nil
+}
+
+func performStartupCleanup(ctx context.Context, rdb *redis.Client) {
+	log.Println("Performing startup cleanup...")
+
+	// 1. Clear Process History
+	if err := rdb.Del(ctx, "process:history").Err(); err != nil {
+		log.Printf("Failed to clear process history: %v", err)
+	}
+
+	// 2. Clear Active Processes
+	iter := rdb.Scan(ctx, 0, "process:info:*", 0).Iterator()
+	for iter.Next(ctx) {
+		if err := rdb.Del(ctx, iter.Val()).Err(); err != nil {
+			log.Printf("Failed to delete process key %s: %v", iter.Val(), err)
+		}
+	}
+	if err := iter.Err(); err != nil {
+		log.Printf("Error scanning process keys: %v", err)
+	}
+
+	// 3. Clear Logs
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Printf("Failed to get user home dir for log cleanup: %v", err)
+		return
+	}
+	logDir := filepath.Join(home, "Dexter", "logs")
+	files, err := filepath.Glob(filepath.Join(logDir, "*.log"))
+	if err != nil {
+		log.Printf("Failed to glob log files: %v", err)
+		return
+	}
+
+	for _, file := range files {
+		if err := os.Truncate(file, 0); err != nil {
+			log.Printf("Failed to truncate log file %s: %v", file, err)
+		}
+	}
+	log.Println("Startup cleanup completed.")
 }
