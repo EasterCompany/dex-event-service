@@ -91,6 +91,21 @@ func HandleProcessUnregistration(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	key := fmt.Sprintf("process:info:%s", id)
 
+	// Save to history before deleting
+	val, err := redisClient.Get(ctx, key).Result()
+	if err == nil {
+		var pi ProcessInfo
+		if jsonErr := json.Unmarshal([]byte(val), &pi); jsonErr == nil {
+			pi.EndTime = time.Now().Unix()
+			pi.State = "completed"
+
+			if histBytes, marshalErr := json.Marshal(pi); marshalErr == nil {
+				redisClient.LPush(ctx, "process:history", histBytes)
+				redisClient.LTrim(ctx, "process:history", 0, 9)
+			}
+		}
+	}
+
 	if err := redisClient.Del(ctx, key).Err(); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to delete process info: %v", err), http.StatusInternalServerError)
 		return

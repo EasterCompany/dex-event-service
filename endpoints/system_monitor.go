@@ -34,6 +34,7 @@ type ProcessInfo struct {
 	StartTime int64  `json:"start_time"`
 	PID       int    `json:"pid"`
 	UpdatedAt int64  `json:"updated_at"`
+	EndTime   int64  `json:"end_time,omitempty"`
 }
 
 // ModelReport for a single model's status
@@ -67,7 +68,6 @@ func ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
 		key := iter.Val()
 		val, err := redisClient.Get(ctx, key).Result()
 		if err != nil {
-			// Log error but continue with other keys
 			fmt.Printf("Error fetching process info for key %s: %v\n", key, err)
 			continue
 		}
@@ -84,8 +84,31 @@ func ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fetch History
+	historyProcesses := []ProcessInfo{}
+	historyVals, err := redisClient.LRange(ctx, "process:history", 0, -1).Result()
+	if err == nil {
+		oneHourAgo := time.Now().Unix() - 3600
+		for _, val := range historyVals {
+			var pi ProcessInfo
+			if err := json.Unmarshal([]byte(val), &pi); err == nil {
+				if pi.EndTime > oneHourAgo {
+					historyProcesses = append(historyProcesses, pi)
+				}
+			}
+		}
+	}
+
+	response := struct {
+		Active  []ProcessInfo `json:"active"`
+		History []ProcessInfo `json:"history"`
+	}{
+		Active:  activeProcesses,
+		History: historyProcesses,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(activeProcesses); err != nil {
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
 	}
 }
