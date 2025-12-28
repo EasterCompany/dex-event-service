@@ -363,7 +363,7 @@ func performStartupCleanup(ctx context.Context, rdb *redis.Client) {
 		log.Printf("Failed to clear process history: %v", err)
 	}
 
-	// 2. Clear Active Processes
+	// 2. Clear Active Processes and Metrics
 	iter := rdb.Scan(ctx, 0, "process:info:*", 0).Iterator()
 	for iter.Next(ctx) {
 		if err := rdb.Del(ctx, iter.Val()).Err(); err != nil {
@@ -372,6 +372,16 @@ func performStartupCleanup(ctx context.Context, rdb *redis.Client) {
 	}
 	if err := iter.Err(); err != nil {
 		log.Printf("Error scanning process keys: %v", err)
+	}
+
+	iterMetrics := rdb.Scan(ctx, 0, "system:metrics:*", 0).Iterator()
+	for iterMetrics.Next(ctx) {
+		if err := rdb.Del(ctx, iterMetrics.Val()).Err(); err != nil {
+			log.Printf("Failed to delete metric key %s: %v", iterMetrics.Val(), err)
+		}
+	}
+	if err := iterMetrics.Err(); err != nil {
+		log.Printf("Error scanning metric keys: %v", err)
 	}
 
 	// 3. Clear Logs

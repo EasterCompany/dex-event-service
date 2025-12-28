@@ -27,7 +27,10 @@ type AnalystStatusResponse struct {
 		LastRun int64 `json:"last_run"`
 		NextRun int64 `json:"next_run"`
 	} `json:"strategist"`
-	SystemIdleTime int64 `json:"system_idle_time"`
+	SystemIdleTime  int64 `json:"system_idle_time"`
+	TotalActiveTime int64 `json:"total_active_time"`
+	TotalIdleTime   int64 `json:"total_idle_time"`
+	TotalWasteTime  int64 `json:"total_waste_time"`
 }
 
 // GetAnalystStatusHandler returns the current timing status of the analyst worker.
@@ -59,12 +62,25 @@ func GetAnalystStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 		status.Strategist.LastRun = lastStratTS
 		status.Strategist.NextRun = lastStratTS + 3600 // 1 hour
 
-		// System Idle Time
+		// System Idle Time (Current)
 		lastEventTS, _ := redisClient.Get(ctx, "system:last_cognitive_event").Int64()
 		if lastEventTS > 0 {
 			now := time.Now().Unix()
 			status.SystemIdleTime = now - lastEventTS
 		}
+
+		// Total Metrics
+		active, _ := redisClient.Get(ctx, "system:metrics:cognitive_active_seconds").Int64()
+		waste, _ := redisClient.Get(ctx, "system:metrics:cognitive_waste_seconds").Int64()
+		uptime := utils.GetUptimeSeconds()
+
+		status.TotalActiveTime = active
+		status.TotalWasteTime = waste
+		idle := uptime - active - waste
+		if idle < 0 {
+			idle = 0
+		}
+		status.TotalIdleTime = idle
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(status); err != nil {

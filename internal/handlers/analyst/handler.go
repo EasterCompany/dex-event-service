@@ -431,6 +431,10 @@ func (h *AnalystHandler) emitAttentionExpired(ctx context.Context, tier string, 
 	eventID := uuid.New().String()
 	timestamp := time.Now().Unix()
 
+	// Track Waste Time
+	waste := timestamp - lastActive
+	h.RedisClient.IncrBy(ctx, "system:metrics:cognitive_waste_seconds", waste)
+
 	input, output, _ := h.fetchLastAudit(ctx, tier)
 
 	payload := map[string]interface{}{
@@ -458,9 +462,12 @@ func (h *AnalystHandler) emitAttentionExpired(ctx context.Context, tier string, 
 	_, _ = pipe.Exec(ctx)
 }
 
-func (h *AnalystHandler) emitAudit(ctx context.Context, tier, model, input, output string) (string, error) {
+func (h *AnalystHandler) emitAudit(ctx context.Context, tier, model, input, output string, duration int64) (string, error) {
 	eventID := uuid.New().String()
 	timestamp := time.Now().Unix()
+
+	// Track Active Time
+	h.RedisClient.IncrBy(ctx, "system:metrics:cognitive_active_seconds", duration)
 
 	payload := map[string]interface{}{
 		"type":       string(types.EventTypeSystemAnalysisAudit),
@@ -468,6 +475,7 @@ func (h *AnalystHandler) emitAudit(ctx context.Context, tier, model, input, outp
 		"model":      model,
 		"raw_input":  input,
 		"raw_output": output,
+		"duration":   duration,
 		"timestamp":  timestamp,
 	}
 
@@ -713,6 +721,7 @@ func (h *AnalystHandler) runTierAnalysis(ctx context.Context, tier string, event
 	currentTurnHistory := append(chatHistory, newUserMsg)
 
 	// Retry Loop for Self-Correction
+	startTime := time.Now().Unix()
 	maxRetries := 3
 	for i := 0; i < maxRetries; i++ {
 		tCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -729,7 +738,8 @@ func (h *AnalystHandler) runTierAnalysis(ctx context.Context, tier string, event
 
 		if isValid {
 			// Success! Emit audit
-			auditID, _ := h.emitAudit(ctx, tier, model, inputContext, respMsg.Content)
+			duration := time.Now().Unix() - startTime
+			auditID, _ := h.emitAudit(ctx, tier, model, inputContext, respMsg.Content, duration)
 
 			for i := range results {
 				results[i].AuditEventID = auditID
