@@ -197,8 +197,7 @@ func (h *AnalystHandler) PerformAnalysis(ctx context.Context, sinceTS, untilTS i
 	}
 
 	status, _ := h.fetchSystemStatus(ctx)
-	// Hardware info might not be implemented, defaulting to empty if not found
-	systemInfo := "Hardware info unavailable"
+	systemInfo, _ := h.fetchSystemHardware(ctx)
 	logs, _ := h.fetchRecentLogs(ctx)
 	tests, _ := h.fetchTestResults(ctx)
 	history, _ := h.fetchRecentNotifications(ctx, 20)
@@ -572,6 +571,17 @@ func (h *AnalystHandler) fetchSystemStatus(ctx context.Context) (string, error) 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to run dex status: %v (output: %s)", err, string(output))
+	}
+	return utils.StripANSI(string(output)), nil
+}
+
+func (h *AnalystHandler) fetchSystemHardware(ctx context.Context) (string, error) {
+	// Run 'dex system' to get hardware info
+	dexPath := getDexBinaryPath()
+	cmd := exec.CommandContext(ctx, dexPath, "system")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to run dex system: %v (output: %s)", err, string(output))
 	}
 	return utils.StripANSI(string(output)), nil
 }
