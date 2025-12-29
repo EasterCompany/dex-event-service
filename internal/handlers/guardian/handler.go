@@ -344,7 +344,7 @@ func (h *GuardianHandler) runTierAnalysis(ctx context.Context, tier string, even
 		}
 
 		results := h.parseAnalysisResults(respMsg.Content)
-		if len(results) > 0 || strings.Contains(respMsg.Content, "No significant insights found") {
+		if len(results) > 0 || strings.Contains(respMsg.Content, "No significant insights found") || strings.Contains(respMsg.Content, "<NO_ISSUES/>") {
 			// Success
 			activeDur := time.Now().Unix() - startTime - totalWaste
 			h.RedisClient.Incr(ctx, "system:metrics:model:"+model+":attempts")
@@ -377,7 +377,7 @@ func (h *GuardianHandler) runTierAnalysis(ctx context.Context, tier string, even
 }
 
 func (h *GuardianHandler) parseAnalysisResults(response string) []AnalysisResult {
-	if strings.Contains(response, "No significant insights found") {
+	if strings.Contains(response, "No significant insights found") || strings.Contains(response, "<NO_ISSUES/>") {
 		return nil
 	}
 	var results []AnalysisResult
