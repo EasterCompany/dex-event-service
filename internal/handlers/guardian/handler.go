@@ -380,9 +380,6 @@ func (h *GuardianHandler) runTierAnalysis(ctx context.Context, tier string, even
 }
 
 func (h *GuardianHandler) parseAnalysisResults(response string) []AnalysisResult {
-	// Clean up potential model hallucinations of prompt markers
-	response = strings.ReplaceAll(response, "### CURRENT DATA TO AUDIT:", "")
-
 	if strings.Contains(response, "No significant insights found") || strings.Contains(response, "<NO_ISSUES/>") {
 		return nil
 	}
@@ -444,6 +441,12 @@ func (h *GuardianHandler) parseSingleMarkdownReport(input string) AnalysisResult
 		}
 		if strings.Contains(lower, "implementation path") {
 			currentSection = "path"
+			continue
+		}
+
+		// Detect unknown headers and stop capturing content
+		if strings.HasPrefix(trimmed, "#") {
+			currentSection = ""
 			continue
 		}
 
