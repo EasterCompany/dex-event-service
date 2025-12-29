@@ -274,9 +274,10 @@ func (h *GuardianHandler) emitResult(ctx context.Context, res agent.AnalysisResu
 	pipe := h.RedisClient.Pipeline()
 	// 1. Save main record (Workspaces/Alerts)
 	pipe.Set(ctx, "event:"+eventID, fullJSON, utils.DefaultTTL)
+	pipe.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(timestamp), Member: eventID})
 	pipe.ZAdd(ctx, "events:service:"+HandlerName, redis.Z{Score: float64(timestamp), Member: eventID})
 
-	// 2. Save log record (Timeline)
+	// 2. Save log record (Timeline display only)
 	pipe.Set(ctx, "event:"+logEventID, fullLogJSON, utils.DefaultTTL)
 	pipe.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(timestamp), Member: logEventID})
 

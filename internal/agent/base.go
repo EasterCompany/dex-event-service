@@ -160,17 +160,28 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, m
 
 // ParseAnalysisResults handles multi-report responses with an optional limit.
 func (b *BaseAgent) ParseAnalysisResults(response string, limit int) []AnalysisResult {
+	// Clean markdown code blocks if the model wrapped its entire response
+	cleanResponse := strings.TrimSpace(response)
+	if strings.HasPrefix(cleanResponse, "```") {
+		// Find first newline
+		if firstNewline := strings.Index(cleanResponse, "\n"); firstNewline != -1 {
+			cleanResponse = cleanResponse[firstNewline+1:]
+		}
+		// Remove trailing ```
+		cleanResponse = strings.TrimSuffix(strings.TrimSpace(cleanResponse), "```")
+	}
+
 	for _, token := range b.StopTokens {
-		if strings.Contains(response, token) {
+		if strings.Contains(cleanResponse, token) {
 			return nil
 		}
 	}
-	if strings.Contains(response, "No significant insights found") {
+	if strings.Contains(cleanResponse, "No significant insights found") {
 		return nil
 	}
 	var results []AnalysisResult
 	re := regexp.MustCompile(`(?m)^\s*---\s*$`)
-	for _, section := range re.Split(response, -1) {
+	for _, section := range re.Split(cleanResponse, -1) {
 		if limit > 0 && len(results) >= limit {
 			break
 		}
