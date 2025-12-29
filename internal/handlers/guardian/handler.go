@@ -266,8 +266,10 @@ func (h *GuardianHandler) runTierAnalysis(ctx context.Context, tier string, even
 		eventData = "\n\n### RECENT EVENTS:\n" + strings.Join(lines, "\n")
 	}
 
-	inputContext := fmt.Sprintf("### SYSTEM STATUS\n%s\n\n### HARDWARE & CONTEXT\n%s\n\n### RECENT LOGS\n%s\n\n### TEST RESULTS\n%s%s\n\n### REPORTED ISSUES HISTORY\n%s",
-		status, systemInfo, logs, tests, eventData, history)
+	// Dynamic Context Injection
+	cliHelp, _ := h.fetchCLICapabilities(ctx)
+	inputContext := fmt.Sprintf("### SYSTEM STATUS\n%s\n\n### CLI CAPABILITIES\n%s\n\n### HARDWARE & CONTEXT\n%s\n\n### RECENT LOGS\n%s\n\n### TEST RESULTS\n%s%s\n\n### REPORTED ISSUES HISTORY\n%s",
+		status, cliHelp, systemInfo, logs, tests, eventData, history)
 
 	newUserMsg := ollama.Message{Role: "user", Content: inputContext}
 	currentTurnHistory := append(chatHistory, newUserMsg)
@@ -551,4 +553,11 @@ func (h *GuardianHandler) fetchRecentNotifications(ctx context.Context, limit in
 		}
 	}
 	return strings.Join(history, "\n"), nil
+}
+
+func (h *GuardianHandler) fetchCLICapabilities(ctx context.Context) (string, error) {
+	dexPath := getDexBinaryPath()
+	cmd := exec.CommandContext(ctx, dexPath, "help")
+	out, _ := cmd.CombinedOutput()
+	return utils.StripANSI(string(out)), nil
 }
