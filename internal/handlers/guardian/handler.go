@@ -170,8 +170,8 @@ func (h *GuardianHandler) isActuallyBusy(ctx context.Context) bool {
 	}
 
 	for _, k := range keys {
-		// Ignore persistent background heartbeats and ourselves
-		if strings.HasSuffix(k, ":system-discord") || strings.HasSuffix(k, ":"+ProcessID) {
+		// Ignore ourselves
+		if strings.HasSuffix(k, ":"+ProcessID) {
 			continue
 		}
 		// If ANY other process exists, we are busy
@@ -184,13 +184,7 @@ func (h *GuardianHandler) isActuallyBusy(ctx context.Context) bool {
 // cleanupBusyCount resyncs the busy_ref_count metric if it drifts from the actual number of process keys.
 func (h *GuardianHandler) cleanupBusyCount(ctx context.Context) {
 	keys, _ := h.RedisClient.Keys(ctx, "process:info:*").Result()
-	actualCount := 0
-	for _, k := range keys {
-		if strings.HasSuffix(k, ":system-discord") {
-			continue
-		}
-		actualCount++
-	}
+	actualCount := len(keys)
 
 	currentCount, _ := h.RedisClient.Get(ctx, "system:busy_ref_count").Int()
 	if actualCount != currentCount {
