@@ -155,6 +155,7 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 				"system.test.completed", "system.build.completed",
 				"system.roadmap.created", "system.roadmap.updated",
 				"system.process.registered", "system.process.unregistered",
+				"system.notification.logged",
 			},
 			"cognitive": {
 				"engagement.decision", "system.analysis.audit", "system.blueprint.logged",
@@ -171,6 +172,11 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 				excludedTypesMap[strings.TrimSpace(t)] = true
 			}
 		}
+
+		// ALWAYS exclude actual structural records from general clearing
+		// They must be deleted via their specific windows or explicit type filtering
+		excludedTypesMap[string(types.EventTypeSystemBlueprintGenerated)] = true
+		excludedTypesMap[string(types.EventTypeSystemNotificationGenerated)] = true
 
 		targetTypes := make(map[string]bool)
 		if targetType != "" {
@@ -212,22 +218,12 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 
 			eventType, _ := eventData["type"].(string)
 
-			// Skip if excluded via query param
+			// Skip if excluded via query param OR if it is a protected type
 			if excludedTypesMap[eventType] {
 				continue
 			}
 
-			// PROTECTION: If we are doing a general "CLEAR ALL" (no category or type filter),
-			// protect mission-critical UI elements (Blueprints and Alerts).
-			if targetType == "" && category == "" {
-				isProtectedBlueprint, _ := eventData["blueprint"].(bool)
-				isProtectedAlert, _ := eventData["alert"].(bool)
-				if isProtectedBlueprint || isProtectedAlert {
-					continue
-				}
-			}
-
-			// Optimization: If no filters, delete everything (that wasn't excluded or protected)
+			// Optimization: If no filters, delete everything (that wasn't excluded)
 			if targetType == "" && category == "" {
 				if err := deleteEventByID(redisClient, ctx, eventID); err == nil {
 					deletedCount++

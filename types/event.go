@@ -51,7 +51,9 @@ const (
 
 	// System Notifications
 	EventTypeSystemNotificationGenerated EventType = "system.notification.generated"
+	EventTypeSystemNotificationLogged    EventType = "system.notification.logged"
 	EventTypeSystemBlueprintGenerated    EventType = "system.blueprint.generated"
+	EventTypeSystemBlueprintLogged       EventType = "system.blueprint.logged"
 	EventTypeSystemAnalysisAudit         EventType = "system.analysis.audit"
 )
 
