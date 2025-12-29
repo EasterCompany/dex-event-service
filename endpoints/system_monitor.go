@@ -69,6 +69,22 @@ func ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fetch Queue
+	queuedProcesses := []ProcessInfo{}
+	qIter := redisClient.Scan(ctx, 0, "process:queued:*", 0).Iterator()
+	for qIter.Next(ctx) {
+		key := qIter.Val()
+		val, err := redisClient.Get(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		var pi ProcessInfo
+		if err := json.Unmarshal([]byte(val), &pi); err == nil {
+			queuedProcesses = append(queuedProcesses, pi)
+		}
+	}
+
 	// Fetch History
 	historyProcesses := []ProcessInfo{}
 	historyVals, err := redisClient.LRange(ctx, "process:history", 0, -1).Result()
@@ -83,9 +99,11 @@ func ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
 
 	response := struct {
 		Active  []ProcessInfo `json:"active"`
+		Queue   []ProcessInfo `json:"queue"`
 		History []ProcessInfo `json:"history"`
 	}{
 		Active:  activeProcesses,
+		Queue:   queuedProcesses,
 		History: historyProcesses,
 	}
 
