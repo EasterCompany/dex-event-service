@@ -136,6 +136,7 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 		query := r.URL.Query()
 		targetType := query.Get("type")
 		category := query.Get("category")
+		excludeTypes := query.Get("exclude_types")
 
 		// Define categories matching frontend
 		categories := map[string][]string{
@@ -164,6 +165,13 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 			},
 		}
 
+		excludedTypesMap := make(map[string]bool)
+		if excludeTypes != "" {
+			for _, t := range strings.Split(excludeTypes, ",") {
+				excludedTypesMap[strings.TrimSpace(t)] = true
+			}
+		}
+
 		targetTypes := make(map[string]bool)
 		if targetType != "" {
 			targetTypes[targetType] = true
@@ -185,14 +193,6 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		deletedCount := 0
 		for _, eventID := range eventIDs {
-			// Optimization: If no filters, delete everything
-			if targetType == "" && category == "" {
-				if err := deleteEventByID(redisClient, ctx, eventID); err == nil {
-					deletedCount++
-				}
-				continue
-			}
-
 			// Check type
 			eventKey := eventKeyPrefix + eventID
 			eventJSON, err := redisClient.Get(ctx, eventKey).Result()
@@ -211,6 +211,20 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 			}
 
 			eventType, _ := eventData["type"].(string)
+
+			// Skip if excluded
+			if excludedTypesMap[eventType] {
+				continue
+			}
+
+			// Optimization: If no filters, delete everything (that wasn't excluded)
+			if targetType == "" && category == "" {
+				if err := deleteEventByID(redisClient, ctx, eventID); err == nil {
+					deletedCount++
+				}
+				continue
+			}
+
 			if targetTypes[eventType] {
 				if err := deleteEventByID(redisClient, ctx, eventID); err == nil {
 					deletedCount++
