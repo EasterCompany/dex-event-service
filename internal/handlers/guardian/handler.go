@@ -29,9 +29,9 @@ const (
 	ProcessID       = "system-guardian"
 	DefaultModelT1  = "dex-guardian-t1"
 	DefaultModelT2  = "dex-guardian-t2"
-	T1Cooldown      = 300 // 5 minutes
-	T2Cooldown      = 900 // 15 minutes
-	IdleRequirement = 300 // 5 minutes
+	T1Cooldown      = 1800 // 30 minutes
+	T2Cooldown      = 1800 // 30 minutes
+	IdleRequirement = 300  // 5 minutes
 )
 
 // getDexBinaryPath returns the absolute path to the dex binary in the user's home directory.
