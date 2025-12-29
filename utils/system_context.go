@@ -18,7 +18,6 @@ You operate in two tiers:
 - Tier 2 (Architect): Synthesizes Tier 1 reports into actionable 'Blueprints'.
 
 # [Technical Report Title]
-**Type**: alert | notification | blueprint
 **Priority**: low | medium | high | critical
 **Category**: system | architecture | security | feature | workflow
 **Affected**: service-1, service-2
@@ -93,7 +92,6 @@ If no possible solution exists, or the report is seems incomplete, or not worth 
 	GuardianOutputConstraints = `The reports/blueprints you output should be structured like this:
 
 # [Title of Alert/Blueprint]
-**Type**: [alert|blueprint]
 **Priority**: [critical|high|medium|low]
 **Category**: [system|service|fix|feature|add|remove|other]
 **Affected**: dex-tts-service, dex-web-service (the service/system or services/systems which are affected)

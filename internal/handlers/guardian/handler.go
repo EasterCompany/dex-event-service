@@ -346,6 +346,15 @@ func (h *GuardianHandler) runTierAnalysis(ctx context.Context, tier string, even
 
 			for j := range results {
 				results[j].AuditEventID = auditID
+				// Enforce type based on tier
+				switch tier {
+				case "t1":
+					results[j].Type = "alert"
+				case "t2":
+					results[j].Type = "blueprint"
+					// Fix Body for blueprint (should be Summary, but parser defaults to Content if type unknown)
+					results[j].Body = results[j].Summary
+				}
 			}
 
 			_ = h.ChatManager.AppendMessage(ctx, sessionID, newUserMsg)
@@ -409,10 +418,6 @@ func (h *GuardianHandler) parseSingleMarkdownReport(input string) AnalysisResult
 		}
 
 		lower := strings.ToLower(trimmed)
-		if strings.HasPrefix(lower, "**type**:") {
-			res.Type = strings.TrimSpace(trimmed[strings.Index(trimmed, ":")+1:])
-			continue
-		}
 		if strings.HasPrefix(lower, "**priority**:") {
 			res.Priority = strings.TrimSpace(trimmed[strings.Index(trimmed, ":")+1:])
 			continue
