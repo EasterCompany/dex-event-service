@@ -155,10 +155,9 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 				"system.test.completed", "system.build.completed",
 				"system.roadmap.created", "system.roadmap.updated",
 				"system.process.registered", "system.process.unregistered",
-				"system.notification.logged",
 			},
 			"cognitive": {
-				"engagement.decision", "system.analysis.audit", "system.blueprint.logged",
+				"engagement.decision", "system.analysis.audit", "system.blueprint.generated",
 				"analysis.link.completed", "analysis.visual.completed",
 			},
 			"moderation": {

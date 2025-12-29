@@ -237,10 +237,8 @@ func (h *GuardianHandler) emitResult(ctx context.Context, res agent.AnalysisResu
 	}
 
 	var eventType string
-	var logType string
 	if res.Type == "blueprint" {
 		eventType = string(types.EventTypeSystemBlueprintGenerated)
-		logType = string(types.EventTypeSystemBlueprintLogged)
 		payload["blueprint"] = true
 		payload["summary"] = res.Summary
 		payload["content"] = res.Content
@@ -248,7 +246,6 @@ func (h *GuardianHandler) emitResult(ctx context.Context, res agent.AnalysisResu
 		payload["implementation_path"] = res.ImplementationPath
 	} else {
 		eventType = string(types.EventTypeSystemNotificationGenerated)
-		logType = string(types.EventTypeSystemNotificationLogged)
 		if res.Type == "alert" || res.Priority == "high" || res.Priority == "critical" {
 			payload["alert"] = true
 		}
@@ -258,31 +255,18 @@ func (h *GuardianHandler) emitResult(ctx context.Context, res agent.AnalysisResu
 	event := types.Event{ID: eventID, Service: HandlerName, Event: eventJSON, Timestamp: timestamp}
 	fullJSON, _ := json.Marshal(event)
 
-	// Emit THE LOG EVENT (for timeline only)
-	logPayload := map[string]interface{}{
-		"type":     logType,
-		"title":    res.Title,
-		"priority": res.Priority,
-		"category": res.Category,
-		"id":       eventID, // Link to actual record
-	}
-	logJSON, _ := json.Marshal(logPayload)
-	logEventID := uuid.New().String()
-	logEvent := types.Event{ID: logEventID, Service: HandlerName, Event: logJSON, Timestamp: timestamp}
-	fullLogJSON, _ := json.Marshal(logEvent)
-
 	pipe := h.RedisClient.Pipeline()
-	// 1. Save main record (Structural: Alerts/Workspaces)
+	// 1. Store main record
 	pipe.Set(ctx, "event:"+eventID, fullJSON, utils.DefaultTTL)
-	pipe.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(timestamp), Member: eventID})
-	pipe.ZAdd(ctx, "events:service:"+HandlerName, redis.Z{Score: float64(timestamp), Member: eventID})
-	pipe.ZAdd(ctx, "events:type:"+eventType, redis.Z{Score: float64(timestamp), Member: eventID})
 
-	// 2. Save log record (Visual Log: Timeline only)
-	pipe.Set(ctx, "event:"+logEventID, fullLogJSON, utils.DefaultTTL)
-	pipe.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(timestamp), Member: logEventID})
-	pipe.ZAdd(ctx, "events:service:"+HandlerName, redis.Z{Score: float64(timestamp), Member: logEventID})
-	pipe.ZAdd(ctx, "events:type:"+logType, redis.Z{Score: float64(timestamp), Member: logEventID})
+	// 2. Add to global timeline (Discovery)
+	pipe.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(timestamp), Member: eventID})
+
+	// 3. Add to service timeline
+	pipe.ZAdd(ctx, "events:service:"+HandlerName, redis.Z{Score: float64(timestamp), Member: eventID})
+
+	// 4. Add to type timeline (Alerts/Workspaces/etc)
+	pipe.ZAdd(ctx, "events:type:"+eventType, redis.Z{Score: float64(timestamp), Member: eventID})
 
 	_, err := pipe.Exec(ctx)
 	return eventID, err

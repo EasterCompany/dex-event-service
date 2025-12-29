@@ -42,7 +42,10 @@ func SendEvent(ctx context.Context, redisClient *redis.Client, service string, e
 	// 3. Add to service timeline
 	pipe.ZAdd(ctx, "events:service:"+service, redis.Z{Score: float64(timestamp), Member: eventID})
 
-	// 4. Add to channel timeline if applicable
+	// 4. Add to type timeline
+	pipe.ZAdd(ctx, "events:type:"+eventType, redis.Z{Score: float64(timestamp), Member: eventID})
+
+	// 5. Add to channel timeline if applicable
 	var channelID string
 	if cid, ok := eventData["channel_id"].(string); ok {
 		channelID = cid
