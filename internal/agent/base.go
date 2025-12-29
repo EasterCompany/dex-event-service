@@ -97,10 +97,12 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, m
 	}()
 
 	chatHistory, _ := b.ChatManager.LoadHistory(ctx, sessionID)
-	if len(chatHistory) == 0 || chatHistory[0].Role != "system" {
-		chatHistory = append([]ollama.Message{{Role: "system", Content: systemPrompt}}, chatHistory...)
-	} else {
-		chatHistory[0].Content = systemPrompt
+	if systemPrompt != "" {
+		if len(chatHistory) == 0 || chatHistory[0].Role != "system" {
+			chatHistory = append([]ollama.Message{{Role: "system", Content: systemPrompt}}, chatHistory...)
+		} else {
+			chatHistory[0].Content = systemPrompt
+		}
 	}
 
 	newUserMsg := ollama.Message{Role: "user", Content: inputContext}
