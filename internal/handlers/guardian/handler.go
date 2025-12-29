@@ -380,6 +380,9 @@ func (h *GuardianHandler) runTierAnalysis(ctx context.Context, tier string, even
 }
 
 func (h *GuardianHandler) parseAnalysisResults(response string) []AnalysisResult {
+	// Clean up potential model hallucinations of prompt markers
+	response = strings.ReplaceAll(response, "### CURRENT DATA TO AUDIT:", "")
+
 	if strings.Contains(response, "No significant insights found") || strings.Contains(response, "<NO_ISSUES/>") {
 		return nil
 	}
