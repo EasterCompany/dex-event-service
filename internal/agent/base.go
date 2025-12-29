@@ -251,8 +251,8 @@ func (b *BaseAgent) ParseSingleMarkdownReport(input string) AnalysisResult {
 		}
 	}
 
-	res.Summary = strings.Join(summaryLines, " ")
-	res.Content = strings.Join(contentLines, "\n")
+	res.Summary = strings.TrimSpace(strings.Join(summaryLines, " "))
+	res.Content = strings.TrimSpace(strings.Join(contentLines, "\n"))
 	res.ImplementationPath = pathLines
 
 	// Default Body logic (will be refined by specific agent tiers)
