@@ -109,7 +109,8 @@ func (b *BaseAgent) ParseAnalysisResults(response string) []AnalysisResult {
 	re := regexp.MustCompile(`(?m)^\s*---\s*$`)
 	for _, section := range re.Split(response, -1) {
 		res := b.ParseSingleMarkdownReport(section)
-		if res.Title != "" {
+		// Validation: Must have Title AND (Summary OR Content)
+		if res.Title != "" && (res.Summary != "" || res.Content != "") {
 			results = append(results, res)
 		}
 	}
