@@ -157,28 +157,34 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 	var allResults []agent.AnalysisResult
 
 	// Tier 1: Technical Sentry
+	var t1Results []agent.AnalysisResult
 	if tier == 0 || tier == 1 {
 		h.RedisClient.Set(ctx, "guardian:active_tier", "t1", utils.DefaultTTL)
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Tier 1: Technical Sentry")
 
 		input := h.gatherContext(ctx, "t1", nil)
-		t1Results, err := h.RunCognitiveLoop(ctx, h.Config.Models["t1"], "t1", utils.GetGuardianTier1Prompt(), input)
+		results, err := h.RunCognitiveLoop(ctx, h.Config.Models["t1"], "t1", utils.GetGuardianTier1Prompt(), input)
 
 		if err == nil {
-			for i := range t1Results {
-				t1Results[i].Type = "alert"
+			for i := range results {
+				results[i].Type = "alert"
 			}
+			t1Results = results
 			allResults = append(allResults, t1Results...)
 			h.RedisClient.Set(ctx, "guardian:last_run:t1", time.Now().Unix(), 0)
 		}
 	}
 
+	// Determine if Tier 2 should run
+	// Run if explicitly requested (tier 2) OR if full cycle (tier 0) AND Tier 1 found issues
+	shouldRunT2 := (tier == 2) || (tier == 0 && len(t1Results) > 0)
+
 	// Tier 2: Architect
-	if tier == 0 || tier == 2 {
+	if shouldRunT2 {
 		h.RedisClient.Set(ctx, "guardian:active_tier", "t2", utils.DefaultTTL)
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Tier 2: Architect Analysis")
 
-		input := h.gatherContext(ctx, "t2", allResults)
+		input := h.gatherContext(ctx, "t2", t1Results)
 		t2Results, err := h.RunCognitiveLoop(ctx, h.Config.Models["t2"], "t2", utils.GetGuardianTier2Prompt(), input)
 
 		if err == nil {
@@ -190,7 +196,6 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 			h.RedisClient.Set(ctx, "guardian:last_run:t2", time.Now().Unix(), 0)
 		}
 	}
-
 	return allResults, nil
 }
 
