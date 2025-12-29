@@ -41,3 +41,20 @@ type Agent interface {
 type CognitiveModule interface {
 	ChatWithRetry(ctx context.Context, model string, history []ollama.Message, prompt string) ([]AnalysisResult, error)
 }
+
+// AuditPayload represents the comprehensive data captured for every agent run.
+type AuditPayload struct {
+	Type          string           `json:"type"` // system.analysis.audit
+	AgentName     string           `json:"agent_name"`
+	Tier          string           `json:"tier"`
+	Model         string           `json:"model"`
+	SystemPrompt  string           `json:"system_prompt"`
+	InputContext  string           `json:"input_context"`
+	RawOutput     string           `json:"raw_output"`
+	ParsedResults []AnalysisResult `json:"parsed_results"`
+	Error         string           `json:"error,omitempty"`
+	Duration      string           `json:"duration"`
+	Timestamp     int64            `json:"timestamp"`
+	Attempts      int              `json:"attempts"`
+	Success       bool             `json:"success"`
+}

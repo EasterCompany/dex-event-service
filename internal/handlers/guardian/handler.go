@@ -163,7 +163,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Tier 1: Technical Sentry")
 
 		input := h.gatherContext(ctx, "t1", nil)
-		results, err := h.RunCognitiveLoop(ctx, h.Config.Models["t1"], "t1", utils.GetGuardianTier1Prompt(), input, 1)
+		results, err := h.RunCognitiveLoop(ctx, h.Config.Name, "t1", h.Config.Models["t1"], "t1", utils.GetGuardianTier1Prompt(), input, 1)
 
 		if err == nil {
 			for i := range results {
@@ -185,7 +185,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Tier 2: Architect Analysis")
 
 		input := h.gatherContext(ctx, "t2", t1Results)
-		t2Results, err := h.RunCognitiveLoop(ctx, h.Config.Models["t2"], "t2", utils.GetGuardianTier2Prompt(), input, 1)
+		t2Results, err := h.RunCognitiveLoop(ctx, h.Config.Name, "t2", h.Config.Models["t2"], "t2", utils.GetGuardianTier2Prompt(), input, 1)
 
 		if err == nil {
 			for i := range t2Results {

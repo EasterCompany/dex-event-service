@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -55,7 +56,46 @@ func (b *BaseAgent) CleanupBusyCount(ctx context.Context) {
 }
 
 // RunCognitiveLoop executes the 3-attempt chat process with retry logic.
-func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, model, sessionID, systemPrompt, inputContext string, limit int) ([]AnalysisResult, error) {
+// It ALWAYS produces a system.analysis.audit event regardless of outcome.
+func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, model, sessionID, systemPrompt, inputContext string, limit int) ([]AnalysisResult, error) {
+	startTime := time.Now()
+	var results []AnalysisResult
+	var lastError error
+	var rawOutput string
+	attempts := 0
+	success := false
+
+	defer func() {
+		duration := time.Since(startTime).String()
+		errStr := ""
+		if lastError != nil {
+			errStr = lastError.Error()
+		}
+
+		audit := AuditPayload{
+			Type:          "system.analysis.audit",
+			AgentName:     agentName,
+			Tier:          tierName,
+			Model:         model,
+			SystemPrompt:  systemPrompt,
+			InputContext:  inputContext,
+			RawOutput:     rawOutput,
+			ParsedResults: results,
+			Error:         errStr,
+			Duration:      duration,
+			Timestamp:     time.Now().Unix(),
+			Attempts:      attempts,
+			Success:       success,
+		}
+
+		// Convert to map for SendEvent
+		var auditMap map[string]interface{}
+		auditJSON, _ := json.Marshal(audit)
+		_ = json.Unmarshal(auditJSON, &auditMap)
+
+		utils.SendEvent(ctx, b.RedisClient, "dex-event-service", "system.analysis.audit", auditMap)
+	}()
+
 	chatHistory, _ := b.ChatManager.LoadHistory(ctx, sessionID)
 	if len(chatHistory) == 0 || chatHistory[0].Role != "system" {
 		chatHistory = append([]ollama.Message{{Role: "system", Content: systemPrompt}}, chatHistory...)
@@ -67,9 +107,9 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, model, sessionID, syst
 	currentTurnHistory := append(chatHistory, newUserMsg)
 
 	maxRetries := 3
-	var lastError error
 
 	for i := 0; i < maxRetries; i++ {
+		attempts++
 		tCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		respMsg, err := b.OllamaClient.Chat(tCtx, model, currentTurnHistory)
 		cancel()
@@ -80,10 +120,14 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, model, sessionID, syst
 			continue
 		}
 
-		results := b.ParseAnalysisResults(respMsg.Content, limit)
+		rawOutput = respMsg.Content
+		results = b.ParseAnalysisResults(respMsg.Content, limit)
+
+		// Check for valid results or explicit "no issues" signals
 		if len(results) > 0 || strings.Contains(respMsg.Content, "No significant insights found") || strings.Contains(respMsg.Content, "<NO_ISSUES/>") {
 			_ = b.ChatManager.AppendMessage(ctx, sessionID, newUserMsg)
 			_ = b.ChatManager.AppendMessage(ctx, sessionID, respMsg)
+			success = true
 			return results, nil
 		}
 
@@ -96,7 +140,8 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, model, sessionID, syst
 		})
 	}
 
-	return nil, fmt.Errorf("max retries reached or cognitive failure: %v", lastError)
+	lastError = fmt.Errorf("max retries reached or cognitive failure: %v", lastError)
+	return nil, lastError
 }
 
 // ParseAnalysisResults handles multi-report responses with an optional limit.
