@@ -64,7 +64,7 @@ func GetGuardianStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 		// Tier 2
 		lastT2TS, _ := redisClient.Get(ctx, "guardian:last_run:t2").Int64()
 		status.Tier2.LastRun = lastT2TS
-		status.Tier2.NextRun = lastT2TS + 900 // 15 minutes
+		status.Tier2.NextRun = lastT2TS + 1800 // 30 minutes
 		status.Tier2.Model = "dex-guardian-t2"
 		status.Tier2.Attempts, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Tier2.Model+":attempts").Int64()
 		status.Tier2.Failures, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Tier2.Model+":failures").Int64()
