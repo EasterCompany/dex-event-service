@@ -32,10 +32,11 @@ type GuardianStatusResponse struct {
 		AbsoluteFailures int64  `json:"absolute_failures"`
 		Model            string `json:"model"`
 	} `json:"t2"`
-	SystemIdleTime  int64 `json:"system_idle_time"`
-	TotalActiveTime int64 `json:"total_active_time"`
-	TotalIdleTime   int64 `json:"total_idle_time"`
-	TotalWasteTime  int64 `json:"total_waste_time"`
+	SystemState     string `json:"system_state"`
+	SystemStateTime int64  `json:"system_state_time"`
+	TotalActiveTime int64  `json:"total_active_time"`
+	TotalIdleTime   int64  `json:"total_idle_time"`
+	TotalWasteTime  int64  `json:"total_waste_time"`
 }
 
 // GetGuardianStatusHandler returns the current timing status of the guardian worker.
@@ -70,11 +71,15 @@ func GetGuardianStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 		status.Tier2.Failures, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Tier2.Model+":failures").Int64()
 		status.Tier2.AbsoluteFailures, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Tier2.Model+":absolute_failures").Int64()
 
-		// System Idle Time (Current)
-		lastEventTS, _ := redisClient.Get(ctx, "system:last_cognitive_event").Int64()
-		if lastEventTS > 0 {
+		// System State & Time (Current)
+		lastTransition, _ := redisClient.Get(ctx, "system:last_transition_ts").Int64()
+		status.SystemState, _ = redisClient.Get(ctx, "system:state").Result()
+		if status.SystemState == "" {
+			status.SystemState = "idle"
+		}
+		if lastTransition > 0 {
 			now := time.Now().Unix()
-			status.SystemIdleTime = now - lastEventTS
+			status.SystemStateTime = now - lastTransition
 		}
 
 		// Total Metrics

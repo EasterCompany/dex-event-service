@@ -14,23 +14,45 @@ import (
 // DefaultTTL defines the global expiration for all Redis keys (24 hours).
 const DefaultTTL = 24 * time.Hour
 
+// TransitionToBusy handles the state change from Idle to Busy.
+func TransitionToBusy(ctx context.Context, redisClient *redis.Client) {
+	lastState, _ := redisClient.Get(ctx, "system:state").Result()
+	if lastState == "busy" {
+		return
+	}
+
+	lastTransition, _ := redisClient.Get(ctx, "system:last_transition_ts").Int64()
+	if lastTransition > 0 {
+		idleDuration := time.Now().Unix() - lastTransition
+		if idleDuration > 0 {
+			redisClient.IncrBy(ctx, "system:metrics:total_idle_seconds", idleDuration)
+		}
+	}
+	redisClient.Set(ctx, "system:state", "busy", 0)
+	redisClient.Set(ctx, "system:last_transition_ts", time.Now().Unix(), 0)
+}
+
+// TransitionToIdle handles the state change from Busy to Idle.
+func TransitionToIdle(ctx context.Context, redisClient *redis.Client) {
+	lastState, _ := redisClient.Get(ctx, "system:state").Result()
+	if lastState == "idle" {
+		return
+	}
+
+	// Note: total_active_seconds is handled by individual process completion in ClearProcess.
+	// This function primarily marks the transition time for the NEXT idle period to be measured correctly.
+	redisClient.Set(ctx, "system:state", "idle", 0)
+	redisClient.Set(ctx, "system:last_transition_ts", time.Now().Unix(), 0)
+}
+
 // ReportProcess updates a process's state in Redis and synchronizes the Discord status.
 func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient *discord.Client, processID string, state string) {
-	// --- ABSOLUTE STATE MACHINE LOGIC ---
 	// 1. Increment Ref Count
 	newCount, _ := redisClient.Incr(ctx, "system:busy_ref_count").Result()
 
-	// 2. If transitioning from Idle (0 -> 1), record Idle time
+	// 2. If transitioning from Idle (0 -> 1), handle transition
 	if newCount == 1 {
-		lastTransition, _ := redisClient.Get(ctx, "system:last_transition_ts").Int64()
-		if lastTransition > 0 {
-			idleDuration := time.Now().Unix() - lastTransition
-			if idleDuration > 0 {
-				redisClient.IncrBy(ctx, "system:metrics:total_idle_seconds", idleDuration)
-			}
-		}
-		redisClient.Set(ctx, "system:state", "busy", 0)
-		redisClient.Set(ctx, "system:last_transition_ts", time.Now().Unix(), 0)
+		TransitionToBusy(ctx, redisClient)
 	}
 
 	key := fmt.Sprintf("process:info:%s", processID)
@@ -76,7 +98,7 @@ func ClearProcess(ctx context.Context, redisClient *redis.Client, discordClient 
 			if outcome == "waste" || outcome == "error" || outcome == "failure" {
 				redisClient.IncrBy(ctx, "system:metrics:total_waste_seconds", duration)
 			} else {
-				// Default to active if success or unknown (we'll improve this)
+				// Default to active if success or unknown
 				redisClient.IncrBy(ctx, "system:metrics:total_active_seconds", duration)
 			}
 
@@ -89,7 +111,6 @@ func ClearProcess(ctx context.Context, redisClient *redis.Client, discordClient 
 
 	redisClient.Del(ctx, key)
 
-	// --- ABSOLUTE STATE MACHINE LOGIC ---
 	// 1. Decrement Ref Count
 	newCount, _ := redisClient.Decr(ctx, "system:busy_ref_count").Result()
 	if newCount < 0 {
@@ -99,8 +120,7 @@ func ClearProcess(ctx context.Context, redisClient *redis.Client, discordClient 
 
 	// 2. If transitioning to Idle (1 -> 0), mark transition
 	if newCount == 0 {
-		redisClient.Set(ctx, "system:state", "idle", 0)
-		redisClient.Set(ctx, "system:last_transition_ts", time.Now().Unix(), 0)
+		TransitionToIdle(ctx, redisClient)
 	}
 
 	// Sync Discord status based on remaining processes

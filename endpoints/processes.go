@@ -57,11 +57,9 @@ func HandleProcessRegistration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update Discord status if possible (similar to ReportProcess)
-	// We need access to the Discord client here.
-	// Since endpoints is a package, we might need a way to pass dependencies.
-	// But dex-event-service's endpoints package doesn't seem to have a global discord client.
-	// Wait, internal/handlers has it.
+	// Update system state
+	utils.TransitionToBusy(ctx, redisClient)
+	redisClient.Incr(ctx, "system:busy_ref_count")
 
 	w.WriteHeader(http.StatusAccepted)
 	_, _ = w.Write([]byte("Process registered successfully"))
@@ -109,6 +107,13 @@ func HandleProcessUnregistration(w http.ResponseWriter, r *http.Request) {
 	if err := redisClient.Del(ctx, key).Err(); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to delete process info: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Update system state
+	newCount, _ := redisClient.Decr(ctx, "system:busy_ref_count").Result()
+	if newCount <= 0 {
+		redisClient.Set(ctx, "system:busy_ref_count", 0, 0)
+		utils.TransitionToIdle(ctx, redisClient)
 	}
 
 	w.WriteHeader(http.StatusOK)

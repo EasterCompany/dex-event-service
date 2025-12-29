@@ -45,18 +45,17 @@ func (b *BaseAgent) CleanupBusyCount(ctx context.Context) {
 
 	currentCount, _ := b.RedisClient.Get(ctx, "system:busy_ref_count").Int()
 	if actualCount != currentCount {
-		b.RedisClient.Set(ctx, "system:busy_ref_count", actualCount, 0)
-		if actualCount == 0 {
-			b.RedisClient.Set(ctx, "system:state", "idle", 0)
-			b.RedisClient.Set(ctx, "system:last_transition_ts", time.Now().Unix(), 0)
-		} else {
-			b.RedisClient.Set(ctx, "system:state", "busy", 0)
+		if actualCount > 0 && currentCount == 0 {
+			utils.TransitionToBusy(ctx, b.RedisClient)
+		} else if actualCount == 0 && currentCount > 0 {
+			utils.TransitionToIdle(ctx, b.RedisClient)
 		}
+		b.RedisClient.Set(ctx, "system:busy_ref_count", actualCount, 0)
 	}
 }
 
 // RunCognitiveLoop executes the 3-attempt chat process with retry logic.
-func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, model, sessionID, systemPrompt, inputContext string) ([]AnalysisResult, error) {
+func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, model, sessionID, systemPrompt, inputContext string, limit int) ([]AnalysisResult, error) {
 	chatHistory, _ := b.ChatManager.LoadHistory(ctx, sessionID)
 	if len(chatHistory) == 0 || chatHistory[0].Role != "system" {
 		chatHistory = append([]ollama.Message{{Role: "system", Content: systemPrompt}}, chatHistory...)
@@ -81,7 +80,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, model, sessionID, syst
 			continue
 		}
 
-		results := b.ParseAnalysisResults(respMsg.Content)
+		results := b.ParseAnalysisResults(respMsg.Content, limit)
 		if len(results) > 0 || strings.Contains(respMsg.Content, "No significant insights found") || strings.Contains(respMsg.Content, "<NO_ISSUES/>") {
 			_ = b.ChatManager.AppendMessage(ctx, sessionID, newUserMsg)
 			_ = b.ChatManager.AppendMessage(ctx, sessionID, respMsg)
@@ -100,14 +99,17 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, model, sessionID, syst
 	return nil, fmt.Errorf("max retries reached or cognitive failure: %v", lastError)
 }
 
-// ParseAnalysisResults handles multi-report responses.
-func (b *BaseAgent) ParseAnalysisResults(response string) []AnalysisResult {
+// ParseAnalysisResults handles multi-report responses with an optional limit.
+func (b *BaseAgent) ParseAnalysisResults(response string, limit int) []AnalysisResult {
 	if strings.Contains(response, "No significant insights found") || strings.Contains(response, "<NO_ISSUES/>") {
 		return nil
 	}
 	var results []AnalysisResult
 	re := regexp.MustCompile(`(?m)^\s*---\s*$`)
 	for _, section := range re.Split(response, -1) {
+		if limit > 0 && len(results) >= limit {
+			break
+		}
 		res := b.ParseSingleMarkdownReport(section)
 		// Validation: Must have Title AND (Summary OR Content)
 		if res.Title != "" && (res.Summary != "" || res.Content != "") {
