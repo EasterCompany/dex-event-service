@@ -480,37 +480,72 @@ func (h *AnalystHandler) emitAttentionExpired(ctx context.Context, tier string, 
 	_, _ = pipe.Exec(ctx)
 }
 
-func (h *AnalystHandler) emitAudit(ctx context.Context, tier, model, input, output string, duration int64) (string, error) {
+func (h *AnalystHandler) emitAuditExtended(ctx context.Context, tier, model, input, output string, duration, waste int64, attempts, failures int, absolute bool) (string, error) {
+
 	eventID := uuid.New().String()
+
 	timestamp := time.Now().Unix()
 
 	// Track Active Time
-	h.RedisClient.IncrBy(ctx, "system:metrics:cognitive_active_seconds", duration)
+
+	if duration > 0 {
+
+		h.RedisClient.IncrBy(ctx, "system:metrics:cognitive_active_seconds", duration)
+
+	}
 
 	payload := map[string]interface{}{
-		"type":       string(types.EventTypeSystemAnalysisAudit),
-		"tier":       tier,
-		"model":      model,
-		"raw_input":  input,
+
+		"type": string(types.EventTypeSystemAnalysisAudit),
+
+		"tier": tier,
+
+		"model": model,
+
+		"raw_input": input,
+
 		"raw_output": output,
-		"duration":   duration,
-		"timestamp":  timestamp,
+
+		"duration": duration,
+
+		"wasted_seconds": waste,
+
+		"attempts_count": attempts,
+
+		"failure_count": failures,
+
+		"is_absolute_failure": absolute,
+
+		"timestamp": timestamp,
 	}
 
 	eventJSON, _ := json.Marshal(payload)
+
 	event := types.Event{
-		ID:        eventID,
-		Service:   HandlerName,
-		Event:     eventJSON,
+
+		ID: eventID,
+
+		Service: HandlerName,
+
+		Event: eventJSON,
+
 		Timestamp: timestamp,
 	}
+
 	fullEventJSON, _ := json.Marshal(event)
+
 	pipe := h.RedisClient.Pipeline()
+
 	pipe.Set(ctx, "event:"+eventID, fullEventJSON, utils.DefaultTTL)
+
 	pipe.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(timestamp), Member: eventID})
+
 	pipe.ZAdd(ctx, "events:service:"+HandlerName, redis.Z{Score: float64(timestamp), Member: eventID})
+
 	_, err := pipe.Exec(ctx)
+
 	return eventID, err
+
 }
 
 func (h *AnalystHandler) fetchEventsForAnalysis(ctx context.Context, sinceTS, untilTS int64) ([]types.Event, error) {
@@ -753,14 +788,29 @@ func (h *AnalystHandler) runTierAnalysis(ctx context.Context, tier string, event
 
 	// Retry Loop for Self-Correction
 	startTime := time.Now().Unix()
+	totalWastedSeconds := int64(0)
+	attempts := 0
+	failures := 0
 	maxRetries := 3
+
 	for i := 0; i < maxRetries; i++ {
+		attempts++
+		attemptStart := time.Now().Unix()
+
 		tCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		respMsg, err := h.OllamaClient.Chat(tCtx, model, currentTurnHistory)
 		cancel()
 
+		attemptDuration := time.Now().Unix() - attemptStart
+
 		if err != nil {
-			return nil, fmt.Errorf("chat generation failed: %v", err)
+			failures++
+			totalWastedSeconds += attemptDuration
+			h.RedisClient.Incr(ctx, "system:metrics:model:"+model+":failures")
+			h.RedisClient.IncrBy(ctx, "system:metrics:total_waste_seconds", attemptDuration)
+
+			log.Printf("[%s] Chat generation failed for %s (Attempt %d/%d): %v", HandlerName, tier, i+1, maxRetries, err)
+			continue
 		}
 
 		// Validate Output
@@ -769,8 +819,13 @@ func (h *AnalystHandler) runTierAnalysis(ctx context.Context, tier string, event
 
 		if isValid {
 			// Success! Emit audit
-			duration := time.Now().Unix() - startTime
-			auditID, _ := h.emitAudit(ctx, tier, model, inputContext, respMsg.Content, duration)
+			utils.RecordProcessOutcome(ctx, h.RedisClient, ProcessID, "success")
+			totalActiveDuration := time.Now().Unix() - startTime - totalWastedSeconds
+
+			// Record global model success stats
+			h.RedisClient.Incr(ctx, "system:metrics:model:"+model+":attempts")
+
+			auditID, _ := h.emitAuditExtended(ctx, tier, model, inputContext, respMsg.Content, totalActiveDuration, totalWastedSeconds, attempts, failures, false)
 
 			for i := range results {
 				results[i].AuditEventID = auditID
@@ -785,6 +840,11 @@ func (h *AnalystHandler) runTierAnalysis(ctx context.Context, tier string, event
 		}
 
 		// Failure: Malformed Output
+		failures++
+		totalWastedSeconds += attemptDuration
+		h.RedisClient.Incr(ctx, "system:metrics:model:"+model+":failures")
+		h.RedisClient.IncrBy(ctx, "system:metrics:total_waste_seconds", attemptDuration)
+
 		log.Printf("[%s] Malformed output from %s (Attempt %d/%d). Triggering self-correction...", HandlerName, tier, i+1, maxRetries)
 
 		// Add the bad response and the correction instruction to the *temporary* loop history
@@ -798,6 +858,13 @@ func (h *AnalystHandler) runTierAnalysis(ctx context.Context, tier string, event
 		}
 		currentTurnHistory = append(currentTurnHistory, correctionMsg)
 	}
+
+	// If we reach here, it's an ABSOLUTE FAILURE
+	h.RedisClient.Incr(ctx, "system:metrics:model:"+model+":attempts")
+	h.RedisClient.Incr(ctx, "system:metrics:model:"+model+":absolute_failures")
+	utils.RecordProcessOutcome(ctx, h.RedisClient, ProcessID, "waste")
+
+	_, _ = h.emitAuditExtended(ctx, tier, model, inputContext, "MAX RETRIES REACHED - ABSOLUTE FAILURE", 0, totalWastedSeconds, attempts, failures, true)
 
 	return nil, fmt.Errorf("max retries reached for %s", tier)
 }

@@ -114,6 +114,21 @@ func initializePersistentResources(ctx context.Context) error {
 	// - File watchers
 	// - etc.
 
+	// Initialize absolute state machine if not present
+	if RedisClient != nil {
+		exists, err := RedisClient.Exists(ctx, "system:last_transition_ts").Result()
+		if err == nil && exists == 0 {
+			RedisClient.Set(ctx, "system:last_transition_ts", time.Now().Unix(), 0) // Persist across sessions
+			log.Println("Core Logic: Initialized system:last_transition_ts")
+		}
+
+		exists, err = RedisClient.Exists(ctx, "system:busy_ref_count").Result()
+		if err == nil && exists == 0 {
+			RedisClient.Set(ctx, "system:busy_ref_count", 0, 0)
+			log.Println("Core Logic: Initialized system:busy_ref_count")
+		}
+	}
+
 	log.Println("Core Logic: Persistent resources initialized successfully")
 
 	return nil

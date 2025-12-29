@@ -321,6 +321,19 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 					discordSvcURL := "http://127.0.0.1:8300"
 					dClient := discord.NewClient(discordSvcURL, "")
 
+					// Map CLI status to machine outcome
+					outcome := "unknown"
+					switch s {
+					case "success":
+						outcome = "success"
+					case "failure", "error":
+						outcome = "waste"
+					}
+
+					if outcome != "unknown" {
+						utils.RecordProcessOutcome(ctx, redisClient, processID, outcome)
+					}
+
 					utils.ReportProcess(ctx, redisClient, dClient, processID, m)
 
 					// CLI statuses are usually self-completing or updated by the next event.

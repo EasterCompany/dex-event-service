@@ -16,16 +16,28 @@ import (
 type AnalystStatusResponse struct {
 	ActiveTier string `json:"active_tier,omitempty"`
 	Guardian   struct {
-		LastRun int64 `json:"last_run"`
-		NextRun int64 `json:"next_run"`
+		LastRun          int64  `json:"last_run"`
+		NextRun          int64  `json:"next_run"`
+		Attempts         int64  `json:"attempts"`
+		Failures         int64  `json:"failures"`
+		AbsoluteFailures int64  `json:"absolute_failures"`
+		Model            string `json:"model"`
 	} `json:"guardian"`
 	Architect struct {
-		LastRun int64 `json:"last_run"`
-		NextRun int64 `json:"next_run"`
+		LastRun          int64  `json:"last_run"`
+		NextRun          int64  `json:"next_run"`
+		Attempts         int64  `json:"attempts"`
+		Failures         int64  `json:"failures"`
+		AbsoluteFailures int64  `json:"absolute_failures"`
+		Model            string `json:"model"`
 	} `json:"architect"`
 	Strategist struct {
-		LastRun int64 `json:"last_run"`
-		NextRun int64 `json:"next_run"`
+		LastRun          int64  `json:"last_run"`
+		NextRun          int64  `json:"next_run"`
+		Attempts         int64  `json:"attempts"`
+		Failures         int64  `json:"failures"`
+		AbsoluteFailures int64  `json:"absolute_failures"`
+		Model            string `json:"model"`
 	} `json:"strategist"`
 	SystemIdleTime  int64 `json:"system_idle_time"`
 	TotalActiveTime int64 `json:"total_active_time"`
@@ -47,20 +59,32 @@ func GetAnalystStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 		// Active Tier
 		status.ActiveTier, _ = redisClient.Get(ctx, "analyst:active_tier").Result()
 
-		// Last Analysis Key (Guardian/Global)
+		// Guardian
 		lastAnalysisTS, _ := redisClient.Get(ctx, "analyst:last_analysis_ts").Int64()
 		status.Guardian.LastRun = lastAnalysisTS
 		status.Guardian.NextRun = lastAnalysisTS + 300 // 5 minutes
+		status.Guardian.Model = "dex-analyst-guardian"
+		status.Guardian.Attempts, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Guardian.Model+":attempts").Int64()
+		status.Guardian.Failures, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Guardian.Model+":failures").Int64()
+		status.Guardian.AbsoluteFailures, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Guardian.Model+":absolute_failures").Int64()
 
 		// Architect
 		lastArchTS, _ := redisClient.Get(ctx, "analyst:last_run:architect").Int64()
 		status.Architect.LastRun = lastArchTS
 		status.Architect.NextRun = lastArchTS + 900 // 15 minutes
+		status.Architect.Model = "dex-analyst-architect"
+		status.Architect.Attempts, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Architect.Model+":attempts").Int64()
+		status.Architect.Failures, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Architect.Model+":failures").Int64()
+		status.Architect.AbsoluteFailures, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Architect.Model+":absolute_failures").Int64()
 
 		// Strategist
 		lastStratTS, _ := redisClient.Get(ctx, "analyst:last_run:strategist").Int64()
 		status.Strategist.LastRun = lastStratTS
 		status.Strategist.NextRun = lastStratTS + 3600 // 1 hour
+		status.Strategist.Model = "dex-analyst-strategist"
+		status.Strategist.Attempts, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Strategist.Model+":attempts").Int64()
+		status.Strategist.Failures, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Strategist.Model+":failures").Int64()
+		status.Strategist.AbsoluteFailures, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Strategist.Model+":absolute_failures").Int64()
 
 		// System Idle Time (Current)
 		lastEventTS, _ := redisClient.Get(ctx, "system:last_cognitive_event").Int64()
@@ -70,16 +94,12 @@ func GetAnalystStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 		}
 
 		// Total Metrics
-		active, _ := redisClient.Get(ctx, "system:metrics:cognitive_active_seconds").Int64()
-		waste, _ := redisClient.Get(ctx, "system:metrics:cognitive_waste_seconds").Int64()
-		uptime := utils.GetUptimeSeconds()
+		active, _ := redisClient.Get(ctx, "system:metrics:total_active_seconds").Int64()
+		waste, _ := redisClient.Get(ctx, "system:metrics:total_waste_seconds").Int64()
+		idle, _ := redisClient.Get(ctx, "system:metrics:total_idle_seconds").Int64()
 
 		status.TotalActiveTime = active
 		status.TotalWasteTime = waste
-		idle := uptime - active - waste
-		if idle < 0 {
-			idle = 0
-		}
 		status.TotalIdleTime = idle
 
 		w.Header().Set("Content-Type", "application/json")

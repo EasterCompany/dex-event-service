@@ -16,6 +16,23 @@ const DefaultTTL = 24 * time.Hour
 
 // ReportProcess updates a process's state in Redis and synchronizes the Discord status.
 func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient *discord.Client, processID string, state string) {
+	// --- ABSOLUTE STATE MACHINE LOGIC ---
+	// 1. Increment Ref Count
+	newCount, _ := redisClient.Incr(ctx, "system:busy_ref_count").Result()
+
+	// 2. If transitioning from Idle (0 -> 1), record Idle time
+	if newCount == 1 {
+		lastTransition, _ := redisClient.Get(ctx, "system:last_transition_ts").Int64()
+		if lastTransition > 0 {
+			idleDuration := time.Now().Unix() - lastTransition
+			if idleDuration > 0 {
+				redisClient.IncrBy(ctx, "system:metrics:total_idle_seconds", idleDuration)
+			}
+		}
+		redisClient.Set(ctx, "system:state", "busy", 0)
+		redisClient.Set(ctx, "system:last_transition_ts", time.Now().Unix(), 0)
+	}
+
 	key := fmt.Sprintf("process:info:%s", processID)
 	data := map[string]interface{}{
 		"channel_id": processID, // Legacy field name for dashboard compatibility
@@ -24,6 +41,7 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 		"start_time": time.Now().Unix(),
 		"pid":        os.Getpid(),
 		"updated_at": time.Now().Unix(),
+		"outcome":    "unknown", // Default outcome
 	}
 
 	jsonBytes, _ := json.Marshal(data)
@@ -41,13 +59,26 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 func ClearProcess(ctx context.Context, redisClient *redis.Client, discordClient *discord.Client, processID string) {
 	key := fmt.Sprintf("process:info:%s", processID)
 
-	// Save history before deleting
+	// Save history and record metrics before deleting
 	val, err := redisClient.Get(ctx, key).Result()
 	if err == nil {
 		var p map[string]interface{}
 		if jsonErr := json.Unmarshal([]byte(val), &p); jsonErr == nil {
-			p["end_time"] = time.Now().Unix()
+			now := time.Now().Unix()
+			p["end_time"] = now
 			p["state"] = "completed"
+
+			startTime, _ := p["start_time"].(float64)
+			duration := now - int64(startTime)
+
+			// Record Metrics based on outcome
+			outcome, _ := p["outcome"].(string)
+			if outcome == "waste" || outcome == "error" || outcome == "failure" {
+				redisClient.IncrBy(ctx, "system:metrics:total_waste_seconds", duration)
+			} else {
+				// Default to active if success or unknown (we'll improve this)
+				redisClient.IncrBy(ctx, "system:metrics:total_active_seconds", duration)
+			}
 
 			if histBytes, marshalErr := json.Marshal(p); marshalErr == nil {
 				redisClient.LPush(ctx, "process:history", histBytes)
@@ -58,9 +89,40 @@ func ClearProcess(ctx context.Context, redisClient *redis.Client, discordClient 
 
 	redisClient.Del(ctx, key)
 
+	// --- ABSOLUTE STATE MACHINE LOGIC ---
+	// 1. Decrement Ref Count
+	newCount, _ := redisClient.Decr(ctx, "system:busy_ref_count").Result()
+	if newCount < 0 {
+		redisClient.Set(ctx, "system:busy_ref_count", 0, 0)
+		newCount = 0
+	}
+
+	// 2. If transitioning to Idle (1 -> 0), mark transition
+	if newCount == 0 {
+		redisClient.Set(ctx, "system:state", "idle", 0)
+		redisClient.Set(ctx, "system:last_transition_ts", time.Now().Unix(), 0)
+	}
+
 	// Sync Discord status based on remaining processes
 	if discordClient != nil {
 		SyncDiscordStatus(ctx, redisClient, discordClient)
+	}
+}
+
+// RecordProcessOutcome sets the outcome of a process (success, waste, error)
+func RecordProcessOutcome(ctx context.Context, redisClient *redis.Client, processID string, outcome string) {
+	key := fmt.Sprintf("process:info:%s", processID)
+	val, err := redisClient.Get(ctx, key).Result()
+	if err != nil {
+		return
+	}
+
+	var p map[string]interface{}
+	if err := json.Unmarshal([]byte(val), &p); err == nil {
+		p["outcome"] = outcome
+		p["updated_at"] = time.Now().Unix()
+		jsonBytes, _ := json.Marshal(p)
+		redisClient.Set(ctx, key, jsonBytes, DefaultTTL)
 	}
 }
 
