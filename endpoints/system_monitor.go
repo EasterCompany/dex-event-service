@@ -37,21 +37,6 @@ type ProcessInfo struct {
 	EndTime   int64  `json:"end_time,omitempty"`
 }
 
-// ModelReport for a single model's status
-type ModelReport struct {
-	Name   string `json:"name"`
-	Type   string `json:"type"`   // "base" or "custom"
-	Status string `json:"status"` // "Downloaded" or "Missing"
-	Size   int64  `json:"size"`
-}
-
-// SystemMonitorResponse is the top-level response for the system monitor endpoint
-type SystemMonitorResponse struct {
-	Services []types.ServiceReport `json:"services"`
-	Models   []ModelReport         `json:"models"`
-	Whisper  *WhisperStatusReport  `json:"whisper,omitempty"`
-}
-
 // ListProcessesHandler fetches and returns information about active event handler processes
 func ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
 	if redisClient == nil {
@@ -91,7 +76,7 @@ func ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
 		oneHourAgo := time.Now().Unix() - 3600
 		for _, val := range historyVals {
 			var pi ProcessInfo
-			if err := json.Unmarshal([]byte(val), &pi); err == nil {
+			if err := json.Unmarshal([]byte(val), &pi); err != nil {
 				if pi.EndTime > oneHourAgo {
 					historyProcesses = append(historyProcesses, pi)
 				}
@@ -113,8 +98,32 @@ func ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ModelReport for a single model's status
+type ModelReport struct {
+	Name   string `json:"name"`
+	Type   string `json:"type"`   // "base" or "custom"
+	Status string `json:"status"` // "Downloaded" or "Missing"
+	Size   int64  `json:"size"`
+}
+
+// SystemMonitorResponse is the top-level response for the system monitor endpoint
+type SystemMonitorResponse struct {
+	Services []types.ServiceReport `json:"services"`
+	Models   []ModelReport         `json:"models"`
+	Whisper  *WhisperStatusReport  `json:"whisper,omitempty"`
+	XTTS     *XTTSStatusReport     `json:"xtts,omitempty"`
+}
+
+// ... (omitting middle parts for now, will find exact locations)
+
 // WhisperStatusReport provides status for the Whisper model environment
 type WhisperStatusReport struct {
+	Status string `json:"status"` // "Ready" or "Not Initialized"
+	Path   string `json:"path"`
+}
+
+// XTTSStatusReport provides status for the XTTS model environment
+type XTTSStatusReport struct {
 	Status string `json:"status"` // "Ready" or "Not Initialized"
 	Path   string `json:"path"`
 }
@@ -129,6 +138,24 @@ func checkWhisperStatus() *WhisperStatusReport {
 
 	report := &WhisperStatusReport{Path: modelDir}
 	if _, err := os.Stat(modelDir); err == nil {
+		report.Status = "Ready"
+	} else {
+		report.Status = "Not Initialized"
+	}
+	return report
+}
+
+// checkXTTSStatus checks if the XTTS model has been initialized
+func checkXTTSStatus() *XTTSStatusReport {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	modelDir := filepath.Join(home, "Dexter", "models", "xtts")
+
+	report := &XTTSStatusReport{Path: modelDir}
+	// XTTS is ready if the directory exists and contains a config.json (or just check dir)
+	if _, err := os.Stat(filepath.Join(modelDir, "config.json")); err == nil {
 		report.Status = "Ready"
 	} else {
 		report.Status = "Not Initialized"
@@ -194,11 +221,15 @@ func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
 	// Get whisper status report
 	whisperReport := checkWhisperStatus()
 
+	// Get XTTS status report
+	xttsReport := checkXTTSStatus()
+
 	// Combine into the final response
 	response := SystemMonitorResponse{
 		Services: serviceReports,
 		Models:   modelReports,
 		Whisper:  whisperReport,
+		XTTS:     xttsReport,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
