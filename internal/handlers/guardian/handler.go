@@ -239,6 +239,7 @@ func (h *GuardianHandler) emitResult(ctx context.Context, res agent.AnalysisResu
 	var eventType string
 	if res.Type == "blueprint" {
 		eventType = string(types.EventTypeSystemBlueprintGenerated)
+		payload["blueprint"] = true
 		payload["summary"] = res.Summary
 		payload["content"] = res.Content
 		payload["affected_services"] = res.AffectedServices

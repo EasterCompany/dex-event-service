@@ -157,7 +157,7 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 				"system.process.registered", "system.process.unregistered",
 			},
 			"cognitive": {
-				"engagement.decision", "system.analysis.audit", "system.blueprint.generated",
+				"engagement.decision", "system.analysis.audit", "system.blueprint.logged",
 				"analysis.link.completed", "analysis.visual.completed",
 			},
 			"moderation": {
@@ -212,12 +212,22 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 
 			eventType, _ := eventData["type"].(string)
 
-			// Skip if excluded
+			// Skip if excluded via query param
 			if excludedTypesMap[eventType] {
 				continue
 			}
 
-			// Optimization: If no filters, delete everything (that wasn't excluded)
+			// PROTECTION: If we are doing a general "CLEAR ALL" (no category or type filter),
+			// protect mission-critical UI elements (Blueprints and Alerts).
+			if targetType == "" && category == "" {
+				isProtectedBlueprint, _ := eventData["blueprint"].(bool)
+				isProtectedAlert, _ := eventData["alert"].(bool)
+				if isProtectedBlueprint || isProtectedAlert {
+					continue
+				}
+			}
+
+			// Optimization: If no filters, delete everything (that wasn't excluded or protected)
 			if targetType == "" && category == "" {
 				if err := deleteEventByID(redisClient, ctx, eventID); err == nil {
 					deletedCount++
