@@ -112,6 +112,8 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, m
 
 	for i := 0; i < maxRetries; i++ {
 		attempts++
+		b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":attempts")
+
 		tCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		respMsg, err := b.OllamaClient.Chat(tCtx, model, currentTurnHistory)
 		cancel()
@@ -142,6 +144,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, m
 		})
 	}
 
+	b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":absolute_failures")
 	lastError = fmt.Errorf("max retries reached or cognitive failure: %v", lastError)
 	return nil, lastError
 }
