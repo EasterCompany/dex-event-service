@@ -73,13 +73,10 @@ func ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
 	historyProcesses := []ProcessInfo{}
 	historyVals, err := redisClient.LRange(ctx, "process:history", 0, -1).Result()
 	if err == nil {
-		oneHourAgo := time.Now().Unix() - 3600
 		for _, val := range historyVals {
 			var pi ProcessInfo
-			if err := json.Unmarshal([]byte(val), &pi); err != nil {
-				if pi.EndTime > oneHourAgo {
-					historyProcesses = append(historyProcesses, pi)
-				}
+			if err := json.Unmarshal([]byte(val), &pi); err == nil {
+				historyProcesses = append(historyProcesses, pi)
 			}
 		}
 	}

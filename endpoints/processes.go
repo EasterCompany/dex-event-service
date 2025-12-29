@@ -99,7 +99,7 @@ func HandleProcessUnregistration(w http.ResponseWriter, r *http.Request) {
 
 			if histBytes, marshalErr := json.Marshal(pi); marshalErr == nil {
 				redisClient.LPush(ctx, "process:history", histBytes)
-				redisClient.LTrim(ctx, "process:history", 0, 9)
+				redisClient.LTrim(ctx, "process:history", 0, 19)
 			}
 		}
 	}
