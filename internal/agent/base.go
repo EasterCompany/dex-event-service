@@ -18,6 +18,7 @@ type BaseAgent struct {
 	RedisClient  *redis.Client
 	OllamaClient *ollama.Client
 	ChatManager  *utils.ChatContextManager
+	StopTokens   []string
 }
 
 // IsActuallyBusy checks if the system is currently processing tasks.
@@ -127,8 +128,16 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, m
 		rawOutput = respMsg.Content
 		results = b.ParseAnalysisResults(respMsg.Content, limit)
 
-		// Check for valid results or explicit "no issues" signals
-		if len(results) > 0 || strings.Contains(respMsg.Content, "No significant insights found") || strings.Contains(respMsg.Content, "<NO_ISSUES/>") {
+		// Check for valid results or explicit stop tokens (flexible "no issues" signals)
+		isStopped := false
+		for _, token := range b.StopTokens {
+			if strings.Contains(respMsg.Content, token) {
+				isStopped = true
+				break
+			}
+		}
+
+		if len(results) > 0 || isStopped || strings.Contains(respMsg.Content, "No significant insights found") {
 			_ = b.ChatManager.AppendMessage(ctx, sessionID, newUserMsg)
 			_ = b.ChatManager.AppendMessage(ctx, sessionID, respMsg)
 			success = true
@@ -151,7 +160,12 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, m
 
 // ParseAnalysisResults handles multi-report responses with an optional limit.
 func (b *BaseAgent) ParseAnalysisResults(response string, limit int) []AnalysisResult {
-	if strings.Contains(response, "No significant insights found") || strings.Contains(response, "<NO_ISSUES/>") {
+	for _, token := range b.StopTokens {
+		if strings.Contains(response, token) {
+			return nil
+		}
+	}
+	if strings.Contains(response, "No significant insights found") {
 		return nil
 	}
 	var results []AnalysisResult

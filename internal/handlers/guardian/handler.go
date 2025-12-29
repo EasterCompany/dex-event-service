@@ -43,6 +43,7 @@ func NewGuardianHandler(redis *redis.Client, ollama *ollama.Client, discord *dis
 			RedisClient:  redis,
 			OllamaClient: ollama,
 			ChatManager:  utils.NewChatContextManager(redis),
+			StopTokens:   []string{"<NO_ALERT/>", "<NO_BLUEPRINT/>", "<NO_ISSUES/>"},
 		},
 		Config: agent.AgentConfig{
 			Name:      "Guardian",
