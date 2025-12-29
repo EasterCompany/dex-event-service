@@ -166,12 +166,15 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 		results, err := h.RunCognitiveLoop(ctx, h.Config.Name, "t1", h.Config.Models["t1"], "t1", utils.GetGuardianTier1Prompt(), input, 1)
 
 		if err == nil {
+			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
 			for i := range results {
 				results[i].Type = "alert"
 			}
 			t1Results = results
 			allResults = append(allResults, t1Results...)
 			h.RedisClient.Set(ctx, "guardian:last_run:t1", time.Now().Unix(), 0)
+		} else {
+			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
 		}
 	}
 
@@ -188,12 +191,15 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 		t2Results, err := h.RunCognitiveLoop(ctx, h.Config.Name, "t2", h.Config.Models["t2"], "t2", utils.GetGuardianTier2Prompt(), input, 1)
 
 		if err == nil {
+			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
 			for i := range t2Results {
 				t2Results[i].Type = "blueprint"
 				t2Results[i].Body = t2Results[i].Summary
 			}
 			allResults = append(allResults, t2Results...)
 			h.RedisClient.Set(ctx, "guardian:last_run:t2", time.Now().Unix(), 0)
+		} else {
+			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
 		}
 	}
 	return allResults, nil

@@ -13,34 +13,22 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// GuardianStatusResponse returns the last and next run times for guardian tiers.
-type GuardianStatusResponse struct {
-	ActiveTier string `json:"active_tier,omitempty"`
-	Tier1      struct {
-		LastRun          int64  `json:"last_run"`
-		NextRun          int64  `json:"next_run"`
-		Attempts         int64  `json:"attempts"`
-		Failures         int64  `json:"failures"`
-		AbsoluteFailures int64  `json:"absolute_failures"`
-		Model            string `json:"model"`
-	} `json:"t1"`
-	Tier2 struct {
-		LastRun          int64  `json:"last_run"`
-		NextRun          int64  `json:"next_run"`
-		Attempts         int64  `json:"attempts"`
-		Failures         int64  `json:"failures"`
-		AbsoluteFailures int64  `json:"absolute_failures"`
-		Model            string `json:"model"`
-	} `json:"t2"`
-	SystemState     string `json:"system_state"`
-	SystemStateTime int64  `json:"system_state_time"`
-	TotalActiveTime int64  `json:"total_active_time"`
-	TotalIdleTime   int64  `json:"total_idle_time"`
-	TotalWasteTime  int64  `json:"total_waste_time"`
+// AgentStatusResponse returns the status of all agents and system state.
+type AgentStatusResponse struct {
+	Agents map[string]interface{} `json:"agents"`
+	System struct {
+		State     string `json:"state"`
+		StateTime int64  `json:"state_time"`
+		Metrics   struct {
+			Active int64 `json:"total_active_time"`
+			Idle   int64 `json:"total_idle_time"`
+			Waste  int64 `json:"total_waste_time"`
+		} `json:"metrics"`
+	} `json:"system"`
 }
 
-// GetGuardianStatusHandler returns the current timing status of the guardian worker.
-func GetGuardianStatusHandler(redisClient *redis.Client) http.HandlerFunc {
+// GetAgentStatusHandler returns the current timing status of the guardian worker and system state.
+func GetAgentStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if redisClient == nil {
 			http.Error(w, "Redis not connected", http.StatusServiceUnavailable)
@@ -48,52 +36,67 @@ func GetGuardianStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 		}
 
 		ctx := context.Background()
-		var status GuardianStatusResponse
+		var status AgentStatusResponse
+		status.Agents = make(map[string]interface{})
 
-		// Active Tier
-		status.ActiveTier, _ = redisClient.Get(ctx, "guardian:active_tier").Result()
+		// 1. Guardian Agent Specifics (Legacy structure for frontend compatibility)
+		guardian := make(map[string]interface{})
+		activeTier, _ := redisClient.Get(ctx, "guardian:active_tier").Result()
+		guardian["active_tier"] = activeTier
 
-		// Tier 1
+		// T1
 		lastT1TS, _ := redisClient.Get(ctx, "guardian:last_run:t1").Int64()
-		status.Tier1.LastRun = lastT1TS
-		status.Tier1.NextRun = lastT1TS + 1800 // 30 minutes
-		status.Tier1.Model = "dex-guardian-t1"
-		status.Tier1.Attempts, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Tier1.Model+":attempts").Int64()
-		status.Tier1.Failures, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Tier1.Model+":failures").Int64()
-		status.Tier1.AbsoluteFailures, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Tier1.Model+":absolute_failures").Int64()
+		t1Model := "dex-guardian-t1"
+		t1Attempts, _ := redisClient.Get(ctx, "system:metrics:model:"+t1Model+":attempts").Int64()
+		t1Failures, _ := redisClient.Get(ctx, "system:metrics:model:"+t1Model+":failures").Int64()
+		t1Absolute, _ := redisClient.Get(ctx, "system:metrics:model:"+t1Model+":absolute_failures").Int64()
+		guardian["t1"] = map[string]interface{}{
+			"last_run": lastT1TS, "next_run": lastT1TS + 1800, "model": t1Model,
+			"attempts": t1Attempts, "failures": t1Failures, "absolute_failures": t1Absolute,
+		}
 
-		// Tier 2
+		// T2
 		lastT2TS, _ := redisClient.Get(ctx, "guardian:last_run:t2").Int64()
-		status.Tier2.LastRun = lastT2TS
-		status.Tier2.NextRun = lastT2TS + 1800 // 30 minutes
-		status.Tier2.Model = "dex-guardian-t2"
-		status.Tier2.Attempts, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Tier2.Model+":attempts").Int64()
-		status.Tier2.Failures, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Tier2.Model+":failures").Int64()
-		status.Tier2.AbsoluteFailures, _ = redisClient.Get(ctx, "system:metrics:model:"+status.Tier2.Model+":absolute_failures").Int64()
+		t2Model := "dex-guardian-t2"
+		t2Attempts, _ := redisClient.Get(ctx, "system:metrics:model:"+t2Model+":attempts").Int64()
+		t2Failures, _ := redisClient.Get(ctx, "system:metrics:model:"+t2Model+":failures").Int64()
+		t2Absolute, _ := redisClient.Get(ctx, "system:metrics:model:"+t2Model+":absolute_failures").Int64()
+		guardian["t2"] = map[string]interface{}{
+			"last_run": lastT2TS, "next_run": lastT2TS + 1800, "model": t2Model,
+			"attempts": t2Attempts, "failures": t2Failures, "absolute_failures": t2Absolute,
+		}
 
-		// System State & Time (Current)
+		status.Agents["guardian"] = guardian
+
+		// 2. System State & Metrics
 		lastTransition, _ := redisClient.Get(ctx, "system:last_transition_ts").Int64()
-		status.SystemState, _ = redisClient.Get(ctx, "system:state").Result()
-		if status.SystemState == "" {
-			status.SystemState = "idle"
+		status.System.State, _ = redisClient.Get(ctx, "system:state").Result()
+		if status.System.State == "" {
+			status.System.State = "idle"
 		}
 		if lastTransition > 0 {
-			now := time.Now().Unix()
-			status.SystemStateTime = now - lastTransition
+			status.System.StateTime = time.Now().Unix() - lastTransition
 		}
 
-		// Total Metrics
-		active, _ := redisClient.Get(ctx, "system:metrics:total_active_seconds").Int64()
-		waste, _ := redisClient.Get(ctx, "system:metrics:total_waste_seconds").Int64()
-		idle, _ := redisClient.Get(ctx, "system:metrics:total_idle_seconds").Int64()
+		status.System.Metrics.Active, _ = redisClient.Get(ctx, "system:metrics:total_active_seconds").Int64()
+		status.System.Metrics.Waste, _ = redisClient.Get(ctx, "system:metrics:total_waste_seconds").Int64()
+		status.System.Metrics.Idle, _ = redisClient.Get(ctx, "system:metrics:total_idle_seconds").Int64()
 
-		status.TotalActiveTime = active
-		status.TotalWasteTime = waste
-		status.TotalIdleTime = idle
+		// 3. Flatten for frontend compatibility (Legacy structure)
+		// The frontend expects the fields at the root of the object
+		response := make(map[string]interface{})
+		response["active_tier"] = guardian["active_tier"]
+		response["t1"] = guardian["t1"]
+		response["t2"] = guardian["t2"]
+		response["system_state"] = status.System.State
+		response["system_state_time"] = status.System.StateTime
+		response["total_active_time"] = status.System.Metrics.Active
+		response["total_idle_time"] = status.System.Metrics.Idle
+		response["total_waste_time"] = status.System.Metrics.Waste
 
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(status); err != nil {
-			log.Printf("Error encoding guardian status: %v", err)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Error encoding agent status: %v", err)
 		}
 	}
 }

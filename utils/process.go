@@ -47,15 +47,20 @@ func TransitionToIdle(ctx context.Context, redisClient *redis.Client) {
 
 // ReportProcess updates a process's state in Redis and synchronizes the Discord status.
 func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient *discord.Client, processID string, state string) {
-	// 1. Increment Ref Count
-	newCount, _ := redisClient.Incr(ctx, "system:busy_ref_count").Result()
+	key := fmt.Sprintf("process:info:%s", processID)
 
-	// 2. If transitioning from Idle (0 -> 1), handle transition
-	if newCount == 1 {
-		TransitionToBusy(ctx, redisClient)
+	// 1. Check if process already exists
+	exists, _ := redisClient.Exists(ctx, key).Result()
+
+	// 2. Increment Ref Count ONLY if it's a new process
+	if exists == 0 {
+		newCount, _ := redisClient.Incr(ctx, "system:busy_ref_count").Result()
+		// If transitioning from Idle (0 -> 1), handle transition
+		if newCount == 1 {
+			TransitionToBusy(ctx, redisClient)
+		}
 	}
 
-	key := fmt.Sprintf("process:info:%s", processID)
 	data := map[string]interface{}{
 		"channel_id": processID, // Legacy field name for dashboard compatibility
 		"state":      state,
@@ -64,6 +69,18 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 		"pid":        os.Getpid(),
 		"updated_at": time.Now().Unix(),
 		"outcome":    "unknown", // Default outcome
+	}
+
+	// Use start_time from existing process if it exists to maintain duration metrics
+	if exists > 0 {
+		if val, err := redisClient.Get(ctx, key).Result(); err == nil {
+			var p map[string]interface{}
+			if jsonErr := json.Unmarshal([]byte(val), &p); jsonErr == nil {
+				if st, ok := p["start_time"]; ok {
+					data["start_time"] = st
+				}
+			}
+		}
 	}
 
 	jsonBytes, _ := json.Marshal(data)
@@ -80,6 +97,12 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 // ClearProcess removes a process from Redis and attempts to restore an idle Discord status if appropriate.
 func ClearProcess(ctx context.Context, redisClient *redis.Client, discordClient *discord.Client, processID string) {
 	key := fmt.Sprintf("process:info:%s", processID)
+
+	// 1. Check if process exists before trying to clear it
+	exists, _ := redisClient.Exists(ctx, key).Result()
+	if exists == 0 {
+		return
+	}
 
 	// Save history and record metrics before deleting
 	val, err := redisClient.Get(ctx, key).Result()
@@ -111,14 +134,14 @@ func ClearProcess(ctx context.Context, redisClient *redis.Client, discordClient 
 
 	redisClient.Del(ctx, key)
 
-	// 1. Decrement Ref Count
+	// 2. Decrement Ref Count
 	newCount, _ := redisClient.Decr(ctx, "system:busy_ref_count").Result()
 	if newCount < 0 {
 		redisClient.Set(ctx, "system:busy_ref_count", 0, 0)
 		newCount = 0
 	}
 
-	// 2. If transitioning to Idle (1 -> 0), mark transition
+	// 3. If transitioning to Idle (1 -> 0), mark transition
 	if newCount == 0 {
 		TransitionToIdle(ctx, redisClient)
 	}
