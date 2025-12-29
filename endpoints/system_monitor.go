@@ -271,45 +271,35 @@ func fetchSystemHardwareInfo(ctx context.Context) ([]byte, error) {
 	return output, nil
 }
 
-// checkModelsStatus reports on all models currently downloaded in Ollama, filtering out duplicate base models.
+// checkModelsStatus reports on all models currently downloaded in Ollama.
 func checkModelsStatus() []ModelReport {
 	downloadedModels, err := utils.ListOllamaModels()
 	if err != nil {
 		return []ModelReport{} // Ollama is likely offline
 	}
 
-	// Use a map to select the best tag for each base model.
-	// We prefer specific tags over "latest" for base models.
-	bestModels := make(map[string]utils.ModelInfo)
+	// Filter redundant ":latest" tags if a specific tag already exists for the SAME model.
+	// e.g. if we have "gemma3:12b" and "gemma3:12b:latest", we only show "gemma3:12b".
+	// But we MUST keep "gemma3:1b" and "gemma3:12b" as distinct entries.
+	finalModels := make(map[string]utils.ModelInfo)
 
 	for _, model := range downloadedModels {
-		isCustom := strings.HasPrefix(model.Name, "dex-")
-		baseName := strings.Split(model.Name, ":")[0]
-		isLatest := strings.HasSuffix(model.Name, ":latest")
+		cleanName := strings.TrimSuffix(model.Name, ":latest")
 
-		// Always include custom models directly.
-		if isCustom {
-			bestModels[model.Name] = model
-			continue
-		}
-
-		existing, exists := bestModels[baseName]
+		existing, exists := finalModels[cleanName]
 		if !exists {
-			// First time seeing this base model, add it.
-			bestModels[baseName] = model
+			finalModels[cleanName] = model
 		} else {
-			// We've seen this base model before. If the existing one is a "latest"
-			// and the new one is not, replace it with the more specific tag.
-			isExistingLatest := strings.HasSuffix(existing.Name, ":latest")
-			if isExistingLatest && !isLatest {
-				bestModels[baseName] = model
+			// If we have a conflict, prefer the one that DOESN'T have ":latest" in its raw name
+			if strings.HasSuffix(existing.Name, ":latest") && !strings.HasSuffix(model.Name, ":latest") {
+				finalModels[cleanName] = model
 			}
 		}
 	}
 
 	// Now, create the final reports from the filtered map.
 	var reports []ModelReport
-	for _, model := range bestModels {
+	for _, model := range finalModels {
 		report := ModelReport{
 			Name:   model.Name,
 			Status: "Downloaded",
