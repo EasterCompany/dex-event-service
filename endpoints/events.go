@@ -296,7 +296,16 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 
 			// 3. Update Redis if Cognitive
 			if isCognitive {
-				redisClient.Set(ctx, "system:last_cognitive_event", time.Now().Unix(), utils.DefaultTTL)
+				// Calculate and accumulate idle time before resetting the timer
+				now := time.Now().Unix()
+				oldLastEventTS, err := redisClient.Get(ctx, "system:last_cognitive_event").Int64()
+				if err == nil && oldLastEventTS > 0 {
+					idleDuration := now - oldLastEventTS
+					if idleDuration > 0 {
+						redisClient.IncrBy(ctx, "system:metrics:total_idle_seconds", idleDuration)
+					}
+				}
+				redisClient.Set(ctx, "system:last_cognitive_event", now, utils.DefaultTTL)
 			}
 
 			// Always update the raw last event timestamp for low-level debugging

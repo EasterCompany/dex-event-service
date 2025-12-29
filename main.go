@@ -380,6 +380,11 @@ func performStartupCleanup(ctx context.Context, rdb *redis.Client) {
 		log.Printf("Error scanning process keys: %v", err)
 	}
 
+	// Reset State Machine
+	rdb.Set(ctx, "system:busy_ref_count", 0, 0)
+	rdb.Set(ctx, "system:state", "idle", 0)
+	rdb.Set(ctx, "system:last_transition_ts", time.Now().Unix(), 0)
+
 	iterMetrics := rdb.Scan(ctx, 0, "system:metrics:*", 0).Iterator()
 	for iterMetrics.Next(ctx) {
 		if err := rdb.Del(ctx, iterMetrics.Val()).Err(); err != nil {
