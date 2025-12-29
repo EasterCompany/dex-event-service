@@ -133,7 +133,13 @@ func (h *GuardianHandler) checkAndAnalyze() {
 		return
 	}
 
-	// 3. Busy Count Cleanup (Self-healing)
+	// 3. Already running check
+	activeTier, _ := h.RedisClient.Get(ctx, "guardian:active_tier").Result()
+	if activeTier != "" {
+		return
+	}
+
+	// 4. Busy Count Cleanup (Self-healing)
 	h.cleanupBusyCount(ctx)
 
 	// 4. Both Tiers must be off cooldown for automated whole-agent run

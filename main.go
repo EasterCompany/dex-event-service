@@ -390,7 +390,15 @@ func performStartupCleanup(ctx context.Context, rdb *redis.Client) {
 		log.Printf("Error scanning metric keys: %v", err)
 	}
 
-	// 3. Clear Logs
+	// 3. Reset Cognitive Idle Timer (Reset the 5m clock on boot)
+	if err := rdb.Set(ctx, "system:last_cognitive_event", time.Now().Unix(), 0).Err(); err != nil {
+		log.Printf("Failed to reset cognitive timer: %v", err)
+	}
+
+	// 4. Clear Guardian State
+	rdb.Del(ctx, "guardian:active_tier")
+
+	// 5. Clear Logs
 	home, err := os.UserHomeDir()
 	if err != nil {
 		log.Printf("Failed to get user home dir for log cleanup: %v", err)
