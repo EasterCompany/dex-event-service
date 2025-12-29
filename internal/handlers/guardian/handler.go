@@ -209,7 +209,6 @@ func (h *GuardianHandler) gatherContext(ctx context.Context, tier string, previo
 	status, _ := h.fetchSystemStatus(ctx)
 	logs, _ := h.fetchRecentLogs(ctx)
 	tests, _ := h.fetchTestResults(ctx)
-	history, _ := h.fetchRecentNotifications(ctx, 20)
 	cliHelp, _ := h.fetchCLICapabilities(ctx)
 
 	var extra string
@@ -222,8 +221,8 @@ func (h *GuardianHandler) gatherContext(ctx context.Context, tier string, previo
 		extra = "\n\n### RECENT TIER 1 REPORTS:\n" + string(t1JSON)
 	}
 
-	return fmt.Sprintf("### SYSTEM STATUS\n%s\n\n### CLI CAPABILITIES\n%s\n\n### RECENT LOGS\n%s\n\n### TEST RESULTS\n%s\n\n### REPORTED ISSUES HISTORY\n%s%s",
-		status, cliHelp, logs, tests, history, extra)
+	return fmt.Sprintf("### SYSTEM STATUS\n%s\n\n### CLI CAPABILITIES\n%s\n\n### RECENT LOGS\n%s\n\n### TEST RESULTS\n%s%s",
+		status, cliHelp, logs, tests, extra)
 }
 
 // ... Context fetching methods remain largely similar but return strings for cleaner injection ...
@@ -333,23 +332,6 @@ func (h *GuardianHandler) fetchTestResults(ctx context.Context) (string, error) 
 		}
 	}
 	return strings.Join(tests, "\n"), nil
-}
-
-func (h *GuardianHandler) fetchRecentNotifications(ctx context.Context, limit int) (string, error) {
-	ids, _ := h.RedisClient.ZRevRange(ctx, "events:service:"+HandlerName, 0, int64(limit-1)).Result()
-	var history []string
-	for _, id := range ids {
-		data, _ := h.RedisClient.Get(ctx, "event:"+id).Result()
-		var e types.Event
-		if err := json.Unmarshal([]byte(data), &e); err == nil {
-			var ed map[string]interface{}
-			_ = json.Unmarshal(e.Event, &ed)
-			if title, ok := ed["title"].(string); ok {
-				history = append(history, "- "+title)
-			}
-		}
-	}
-	return strings.Join(history, "\n"), nil
 }
 
 func (h *GuardianHandler) fetchCLICapabilities(ctx context.Context) (string, error) {
