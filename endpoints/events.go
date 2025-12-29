@@ -111,6 +111,12 @@ func EventsHandler(redisClient *redis.Client) http.HandlerFunc {
 			} else {
 				GetEventByIDHandler(redisClient, path)(w, r)
 			}
+		case http.MethodPatch:
+			if path != "" {
+				PatchEventHandler(redisClient, path)(w, r)
+			} else {
+				http.Error(w, "Event ID required for PATCH", http.StatusBadRequest)
+			}
 		case http.MethodDelete:
 			if path != "" {
 				DeleteEventHandler(redisClient, path)(w, r)
@@ -930,4 +936,74 @@ func removeChildFromParent(redisClient *redis.Client, ctx context.Context, paren
 	}
 
 	return nil
+}
+
+// PatchEventHandler updates specific fields in an event's JSON data
+func PatchEventHandler(redisClient *redis.Client, eventID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+
+		// Get event from Redis
+		eventKey := eventKeyPrefix + eventID
+		eventJSON, err := redisClient.Get(ctx, eventKey).Result()
+		if err == redis.Nil {
+			http.Error(w, "Event not found", http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to retrieve event: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Parse event
+		var event types.Event
+		if err := json.Unmarshal([]byte(eventJSON), &event); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to parse event: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Parse patch data from request body
+		var patchData map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&patchData); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid patch data: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Parse existing event data
+		var eventData map[string]interface{}
+		if err := json.Unmarshal(event.Event, &eventData); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to parse event data: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Apply patch
+		for k, v := range patchData {
+			eventData[k] = v
+		}
+
+		// Marshal back to JSON
+		updatedEventData, err := json.Marshal(eventData)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to marshal updated event data: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		event.Event = updatedEventData
+
+		// Marshal full event
+		updatedEventJSON, err := json.Marshal(event)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to marshal updated event: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Save back to Redis
+		if err := redisClient.Set(ctx, eventKey, updatedEventJSON, utils.DefaultTTL).Err(); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to save updated event: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(event)
+	}
 }
