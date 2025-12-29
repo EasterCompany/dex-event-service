@@ -270,9 +270,9 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 			ignoredTypes := []string{
 				"system.cli.status",
 				"system.monitor.hardware",
-				"system.notification.generated", // Analyst generating notifications isn't a new cognitive input
-				"system.analysis.audit",         // Analyst audit logs
-				"system.attention.expired",      // Analyst forgetting context isn't a cognitive input
+				"system.notification.generated", // Guardian generating notifications isn't a new cognitive input
+				"system.analysis.audit",         // Guardian audit logs
+				"system.attention.expired",      // Guardian forgetting context isn't a cognitive input
 			}
 			for _, t := range ignoredTypes {
 				if eventType == t {

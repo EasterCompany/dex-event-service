@@ -212,9 +212,15 @@ func main() {
 	router.HandleFunc("/processes", endpoints.HandleProcessRegistration).Methods("POST")
 	router.HandleFunc("/processes/{id}", endpoints.HandleProcessUnregistration).Methods("DELETE")
 	router.HandleFunc("/logs", endpoints.LogsHandler).Methods("GET", "DELETE")
-	router.HandleFunc("/analyst/status", endpoints.GetAnalystStatusHandler(redisClient)).Methods("GET")
-	router.HandleFunc("/analyst/status", endpoints.HandleUpdateAnalystStatus(redisClient)).Methods("PATCH")
-	router.HandleFunc("/analyst/reset", endpoints.ResetAnalystHandler(redisClient)).Methods("POST", "GET") // Allow GET for simple triggers
+	router.HandleFunc("/guardian/status", endpoints.GetGuardianStatusHandler(redisClient)).Methods("GET")
+	router.HandleFunc("/guardian/status", endpoints.HandleUpdateGuardianStatus(redisClient)).Methods("PATCH")
+	router.HandleFunc("/guardian/reset", endpoints.ResetGuardianHandler(redisClient)).Methods("POST", "GET")
+	router.HandleFunc("/guardian/run", endpoints.RunGuardianHandler(redisClient, func(tier int) ([]interface{}, error) {
+		if handlers.GuardianTrigger == nil {
+			return nil, fmt.Errorf("guardian handler not initialized")
+		}
+		return handlers.GuardianTrigger(tier)
+	})).Methods("POST")
 	router.HandleFunc("/cli/execute", endpoints.HandleCLIExecute).Methods("POST")
 	router.HandleFunc("/system/status", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }).Methods("GET", "HEAD")
 	router.HandleFunc("/roadmap", endpoints.RoadmapHandler(redisClient)).Methods("GET", "POST", "PATCH", "DELETE")

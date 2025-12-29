@@ -15,8 +15,8 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	internalHandlers "github.com/EasterCompany/dex-event-service/internal/handlers"
-	"github.com/EasterCompany/dex-event-service/internal/handlers/analyst"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/greeting"
+	"github.com/EasterCompany/dex-event-service/internal/handlers/guardian"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/privatemessage"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/publicmessage"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/transcription"
@@ -36,7 +36,6 @@ var (
 		"greeting-handler":        greeting.Handle,
 		"transcription-handler":   transcription.Handle,
 		"webhook-handler":         webhook.Handle,
-		// "test": test.Handle, // If we implemented test
 	}
 	dependencies    *internalHandlers.Dependencies
 	jobQueue        chan *job
@@ -46,6 +45,9 @@ var (
 	// runningBackgroundHandlers stores references to initialized background workers
 	runningBackgroundHandlers = make(map[string]internalHandlers.BackgroundHandler)
 	muBackgroundHandlers      sync.Mutex // Protects runningBackgroundHandlers
+
+	// GuardianTrigger is a global hook for the API to call the background worker logic
+	GuardianTrigger func(int) ([]interface{}, error)
 )
 
 type job struct {
@@ -79,13 +81,28 @@ func initBackgroundHandlers() {
 	for _, handlerConfig := range handlerConfigs {
 		if handlerConfig.IsBackgroundWorker {
 			switch handlerConfig.Name {
-			case analyst.HandlerName:
-				analystHandler := analyst.NewAnalystHandler(dependencies.Redis, dependencies.Ollama, dependencies.Discord, dependencies.Web, dependencies.Options)
-				if err := analystHandler.Init(context.Background()); err != nil {
-					log.Printf("ERROR: Failed to initialize analyst handler: %v", err)
+			case guardian.HandlerName:
+				guardianHandler := guardian.NewGuardianHandler(dependencies.Redis, dependencies.Ollama, dependencies.Discord, dependencies.Web, dependencies.Options)
+				if err := guardianHandler.Init(context.Background()); err != nil {
+					log.Printf("ERROR: Failed to initialize guardian handler: %v", err)
 					continue
 				}
-				runningBackgroundHandlers[handlerConfig.Name] = analystHandler
+				runningBackgroundHandlers[handlerConfig.Name] = guardianHandler
+
+				// Wire up the trigger
+				GuardianTrigger = func(tier int) ([]interface{}, error) {
+					results, err := guardianHandler.PerformAnalysis(context.Background(), tier)
+					if err != nil {
+						return nil, err
+					}
+					// Convert results to generic interface slice for the API
+					genericResults := make([]interface{}, len(results))
+					for i, res := range results {
+						genericResults[i] = res
+					}
+					return genericResults, nil
+				}
+
 				log.Printf("Background handler '%s' started.", handlerConfig.Name)
 			default:
 				log.Printf("WARNING: Unknown background handler '%s'. Not started.", handlerConfig.Name)
@@ -107,7 +124,7 @@ func CloseExecutor() {
 			log.Printf("Background handler '%s' closed.", name)
 		}
 	}
-	runningBackgroundHandlers = make(map[string]internalHandlers.BackgroundHandler) // Clear the map
+	runningBackgroundHandlers = make(map[string]internalHandlers.BackgroundHandler)
 }
 
 func startWorker() {
@@ -116,7 +133,6 @@ func startWorker() {
 			defer func() {
 				if r := recover(); r != nil {
 					log.Printf("CRITICAL: Worker panicked while processing event %s: %v", j.Event.ID, r)
-					// Optionally create an error event here if possible
 					if j.ResultChan != nil {
 						j.ResultChan <- jobResult{Error: fmt.Errorf("worker panic: %v", r)}
 					}
@@ -130,262 +146,136 @@ func startWorker() {
 	}
 }
 
-// ExecuteHandler queues a handler for execution (sync or async)
-func ExecuteHandler(
-	redisClient *redis.Client,
-	event *types.Event,
-	handlerConfig *types.HandlerConfig,
-	isSync bool,
-) ([]string, error) {
+func ExecuteHandler(redisClient *redis.Client, event *types.Event, handlerConfig *types.HandlerConfig, isSync bool) ([]string, error) {
 	if dependencies == nil {
 		return nil, fmt.Errorf("executor not initialized")
 	}
-
-	// Update interruption map if channel_id is present
-	// We parse lightly to avoid heavy overhead, or just unmarshal as map
 	var evtData map[string]interface{}
 	if err := json.Unmarshal(event.Event, &evtData); err == nil {
 		if cid, ok := evtData["channel_id"].(string); ok && cid != "" {
 			interruptionMap.Store(cid, event.Timestamp)
 		}
 	}
-
-	// If sync, create a channel to wait for result
 	if isSync {
 		resChan := make(chan jobResult)
-		jobQueue <- &job{
-			Event:      event,
-			Config:     handlerConfig,
-			ResultChan: resChan,
-		}
+		jobQueue <- &job{Event: event, Config: handlerConfig, ResultChan: resChan}
 		res := <-resChan
 		return res.ChildIDs, res.Error
 	}
-
-	// Async: Fire and forget
 	select {
-	case jobQueue <- &job{
-		Event:  event,
-		Config: handlerConfig,
-	}:
-		// Queued successfully
+	case jobQueue <- &job{Event: event, Config: handlerConfig}:
 	default:
-		log.Printf("Warning: Job queue full, dropping event %s for handler %s", event.ID, handlerConfig.Name)
 		return nil, fmt.Errorf("job queue full")
 	}
-
 	return []string{}, nil
 }
 
-// executeHandlerInternal is the actual logic running in the worker
-func executeHandlerInternal(
-	event *types.Event,
-	handlerConfig *types.HandlerConfig,
-) ([]string, error) {
+func executeHandlerInternal(event *types.Event, handlerConfig *types.HandlerConfig) ([]string, error) {
 	ctx := context.Background()
-	// Redis client from dependencies
 	redisClient := dependencies.Redis
-
-	// Parse event data to get event type
 	var eventData map[string]interface{}
 	if err := json.Unmarshal(event.Event, &eventData); err != nil {
 		return nil, fmt.Errorf("failed to parse event data: %v", err)
 	}
-
 	eventType, _ := eventData["type"].(string)
 	channelID, _ := eventData["channel_id"].(string)
-
-	// Build handler input
 	input := types.HandlerInput{
-		EventID:   event.ID,
-		Service:   event.Service,
-		EventType: eventType,
-		EventData: eventData,
-		Timestamp: event.Timestamp,
+		EventID: event.ID, Service: event.Service, EventType: eventType, EventData: eventData, Timestamp: event.Timestamp,
 	}
-
-	// Set timeout
 	timeout := handlerConfig.Timeout
 	if timeout == 0 {
 		timeout = defaultTimeout
 	}
-
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
-
-	// log.Printf("Executing handler '%s' for event %s", handlerConfig.Name, event.ID)
-
 	var output types.HandlerOutput
 	var handlerErr error
-
-	// Create local dependencies with Interruption Checker
 	localDeps := *dependencies
 	localDeps.CheckInterruption = func() bool {
 		if channelID == "" {
 			return false
 		}
 		if val, ok := interruptionMap.Load(channelID); ok {
-			latestTime := val.(int64)
-			// If a newer event exists (latestTime > event.Timestamp), we are interrupted.
-			if latestTime > event.Timestamp {
-				log.Printf("Handler INTERRUPTED: Channel %s has newer event (Time %d > %d)", channelID, latestTime, event.Timestamp)
+			if val.(int64) > event.Timestamp {
 				return true
 			}
 		}
 		return false
 	}
-
-	// Check if internal handler exists
 	if handlerFunc, ok := internalRegistry[handlerConfig.Name]; ok {
 		output, handlerErr = handlerFunc(execCtx, input, &localDeps)
 	} else {
-		// Fallback or Error?
-		// For now, let's treat "test" handler specially or return error
 		if handlerConfig.Name == "test" {
-			// Simple test echo
 			output = types.HandlerOutput{Success: true}
 		} else {
 			handlerErr = fmt.Errorf("handler '%s' not implemented internally", handlerConfig.Name)
 		}
 	}
-
 	if execCtx.Err() == context.DeadlineExceeded {
-		log.Printf("Handler '%s' timed out after %d seconds", handlerConfig.Name, timeout)
 		return createErrorEvent(redisClient, event, handlerConfig.Name, fmt.Sprintf("Handler '%s' timed out after %d seconds", handlerConfig.Name, timeout))
 	}
-
 	if handlerErr != nil {
-		log.Printf("Handler '%s' failed: %v", handlerConfig.Name, handlerErr)
 		return createErrorEvent(redisClient, event, handlerConfig.Name, handlerErr.Error())
 	}
-
 	if !output.Success {
-		errMsg := output.Error
-		if errMsg == "" {
-			errMsg = "Handler reported failure with no error message"
-		}
-		log.Printf("Handler '%s' reported failure: %s", handlerConfig.Name, errMsg)
-		return createErrorEvent(redisClient, event, handlerConfig.Name, errMsg)
+		return createErrorEvent(redisClient, event, handlerConfig.Name, output.Error)
 	}
-
-	// Create child events
 	var childIDs []string
 	for i, childEvent := range output.Events {
 		childID, err := createChildEvent(redisClient, event, childEvent)
 		if err != nil {
 			log.Printf("Failed to create child event %d from handler '%s': %v", i, handlerConfig.Name, err)
-			errorIDs, _ := createErrorEvent(redisClient, event, handlerConfig.Name, fmt.Sprintf("Failed to create child event: %v", err))
-			childIDs = append(childIDs, errorIDs...)
 			continue
 		}
 		childIDs = append(childIDs, childID)
 	}
-
-	// Update parent event with child IDs
 	if len(childIDs) > 0 {
 		event.ChildIDs = childIDs
-		if err := updateEvent(redisClient, event); err != nil {
-			log.Printf("Failed to update parent event with child IDs: %v", err)
-		}
+		_ = updateEvent(redisClient, event)
 	}
-
-	// log.Printf("Handler '%s' completed in %v, created %d child events", handlerConfig.Name, duration, len(childIDs))
 	return childIDs, nil
 }
 
-// createChildEvent creates a child event in Redis
 func createChildEvent(redisClient *redis.Client, parent *types.Event, childEventData types.HandlerOutputEvent) (string, error) {
 	ctx := context.Background()
-
-	validationErrors := templates.Validate(childEventData.Type, childEventData.Data)
-	if len(validationErrors) > 0 {
-		errMsg := "Child event validation failed:\n"
-		for _, verr := range validationErrors {
-			errMsg += fmt.Sprintf("  - %s\n", verr.Error())
-		}
-		return "", fmt.Errorf("%s", errMsg)
+	if errs := templates.Validate(childEventData.Type, childEventData.Data); len(errs) > 0 {
+		return "", fmt.Errorf("validation failed")
 	}
-
 	childID := uuid.New().String()
 	timestamp := time.Now().Unix()
-
 	childEventData.Data["type"] = childEventData.Type
-
-	eventJSON, err := json.Marshal(childEventData.Data)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal child event data: %v", err)
-	}
-
+	eventJSON, _ := json.Marshal(childEventData.Data)
 	childEvent := types.Event{
-		ID:        childID,
-		Service:   parent.Service,
-		Event:     eventJSON,
-		Timestamp: timestamp,
-		ParentID:  parent.ID,
-		ChildIDs:  []string{},
+		ID: childID, Service: parent.Service, Event: eventJSON, Timestamp: timestamp, ParentID: parent.ID, ChildIDs: []string{},
 	}
-
-	childEventJSON, err := json.Marshal(childEvent)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal child event: %v", err)
-	}
-
+	childEventJSON, _ := json.Marshal(childEvent)
 	pipe := redisClient.Pipeline()
-	eventKey := eventKeyPrefix + childID
-	pipe.Set(ctx, eventKey, childEventJSON, utils.DefaultTTL)
+	pipe.Set(ctx, eventKeyPrefix+childID, childEventJSON, utils.DefaultTTL)
 	pipe.ZAdd(ctx, timelineKey, redis.Z{Score: float64(timestamp), Member: childID})
-	serviceTimelineKey := fmt.Sprintf("events:service:%s", parent.Service)
-	pipe.ZAdd(ctx, serviceTimelineKey, redis.Z{Score: float64(timestamp), Member: childID})
-
-	if _, err := pipe.Exec(ctx); err != nil {
-		return "", fmt.Errorf("failed to store child event in Redis: %v", err)
-	}
-
-	return childID, nil
+	pipe.ZAdd(ctx, "events:service:"+parent.Service, redis.Z{Score: float64(timestamp), Member: childID})
+	_, err := pipe.Exec(ctx)
+	return childID, err
 }
 
-// createErrorEvent creates an error_occurred event as a child
 func createErrorEvent(redisClient *redis.Client, parent *types.Event, handlerName, errorMsg string) ([]string, error) {
 	errorEventData := types.HandlerOutputEvent{
 		Type: "error_occurred",
 		Data: map[string]interface{}{
-			"error":      errorMsg,
-			"error_type": "HandlerError",
-			"severity":   "high",
-			"context": map[string]interface{}{
-				"handler":        handlerName,
-				"parent_event":   parent.ID,
-				"parent_service": parent.Service,
-			},
+			"error": errorMsg, "error_type": "HandlerError", "severity": "high",
+			"context": map[string]interface{}{"handler": handlerName, "parent_event": parent.ID, "parent_service": parent.Service},
 		},
 	}
-
 	childID, err := createChildEvent(redisClient, parent, errorEventData)
 	if err != nil {
 		return nil, err
 	}
-
 	parent.ChildIDs = []string{childID}
-	if err := updateEvent(redisClient, parent); err != nil {
-		log.Printf("Failed to update parent event with error child ID: %v", err)
-	}
-
+	_ = updateEvent(redisClient, parent)
 	return []string{childID}, nil
 }
 
-// updateEvent updates an existing event in Redis
 func updateEvent(redisClient *redis.Client, event *types.Event) error {
 	ctx := context.Background()
-
-	eventJSON, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("failed to marshal event: %v", err)
-	}
-
-	eventKey := eventKeyPrefix + event.ID
-	if err := redisClient.Set(ctx, eventKey, eventJSON, utils.DefaultTTL).Err(); err != nil {
-		return fmt.Errorf("failed to update event in Redis: %v", err)
-	}
-
-	return nil
+	eventJSON, _ := json.Marshal(event)
+	return redisClient.Set(ctx, eventKeyPrefix+event.ID, eventJSON, utils.DefaultTTL).Err()
 }

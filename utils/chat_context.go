@@ -11,7 +11,7 @@ import (
 
 const (
 	// ChatHistoryKeyPrefix is the prefix for chat history keys in Redis
-	ChatHistoryKeyPrefix = "analyst:memory:"
+	ChatHistoryKeyPrefix = "guardian:memory:"
 
 	// DefaultAttentionSpan is the default TTL for chat history (1 hour)
 	DefaultAttentionSpan = 1 * time.Hour

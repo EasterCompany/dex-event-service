@@ -49,12 +49,10 @@ var handlerConfigs = map[string]types.HandlerConfig{
 		EventTypes:  []string{"messaging.user.sent_message"},
 		Filters:     map[string]string{"server_id": "empty"}, // DMs usually have empty server_id
 	},
-	"analyst-handler": {
-		Name:               "analyst-handler",
-		Description:        "Generates proactive notifications based on timeline analysis",
-		Timeout:            0,          // Background worker, no direct timeout for HandleEvent
-		EventTypes:         []string{}, // Emits, doesn't react to incoming events directly
-		IsBackgroundWorker: true,       // Indicates this handler runs its own goroutine
+	"guardian-handler": {
+		Name:               "guardian-handler",
+		IsBackgroundWorker: true,
+		Timeout:            0, // Managed by its own internal loop
 	},
 }
 

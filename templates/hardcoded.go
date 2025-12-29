@@ -670,14 +670,20 @@ func GetTemplates() map[string]EventTemplate {
 		},
 
 		string(types.EventTypeSystemAnalysisAudit): {
-			Description: "Raw audit log of an AI analysis run",
-			Format:      "Analysis Audit: {tier} tier processed",
+
+			Description: "Emitted when a Guardian Tier completes an audit of system state.",
+
 			Fields: map[string]FieldSpec{
-				"tier":       {Type: "string", Required: true, Description: "guardian, architect, or strategist"},
-				"model":      {Type: "string", Required: true, Description: "Ollama model ID used"},
-				"raw_input":  {Type: "string", Required: true, Description: "Full prompt sent to the model"},
-				"raw_output": {Type: "string", Required: true, Description: "Raw response received from the model"},
-				"timestamp":  {Type: "number", Required: true},
+
+				"tier": {Type: "string", Required: true, Description: "t1 or t2"},
+
+				"model": {Type: "string", Required: true, Description: "Name of the model used"},
+
+				"raw_input": {Type: "string", Required: true, Description: "The raw context provided to the model"},
+
+				"raw_output": {Type: "string", Required: true, Description: "The raw response from the model"},
+
+				"duration": {Type: "number", Required: true, Description: "Time taken in seconds"},
 			},
 		},
 
