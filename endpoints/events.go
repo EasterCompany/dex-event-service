@@ -434,6 +434,13 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 			Member: eventID,
 		})
 
+		// Add event ID to a type-specific sorted set for fast filtering
+		typeTimelineKey := fmt.Sprintf("events:type:%s", eventType)
+		pipe.ZAdd(ctx, typeTimelineKey, redis.Z{
+			Score:  float64(timestamp),
+			Member: eventID,
+		})
+
 		// Add event ID to channel-specific sorted set if channel_id or target_channel is present
 		var channelID string
 		if cid, ok := eventData["channel_id"].(string); ok {
@@ -619,6 +626,46 @@ func GetTimelineHandler(redisClient *redis.Client) http.HandlerFunc {
 			typeFilter = query.Get("event.type")
 		}
 
+		// Parse optional category filter
+		category := query.Get("category")
+		if category != "" {
+			// Define categories matching frontend and BulkDeleteEventHandler
+			categories := map[string][]string{
+				"messaging": {
+					"message_received", "messaging.user.sent_message", "messaging.bot.sent_message",
+					"messaging.user.transcribed", "voice_transcribed", "bot_response",
+					"messaging.user.joined_voice", "messaging.user.left_voice",
+					"messaging.bot.joined_voice", "messaging.bot.voice_response",
+					"messaging.user.speaking.started", "messaging.user.speaking.stopped",
+					"messaging.webhook.message",
+				},
+				"system": {
+					"system.cli.command", "system.cli.status", "system.status.change",
+					"metric_recorded", "log_entry", "error_occurred", "webhook.processed",
+					"messaging.bot.status_update", "messaging.user.joined_server",
+					"system.test.completed", "system.build.completed",
+					"system.roadmap.created", "system.roadmap.updated",
+					"system.process.registered", "system.process.unregistered",
+				},
+				"cognitive": {
+					"engagement.decision", "system.analysis.audit", "system.blueprint.generated",
+					"analysis.link.completed", "analysis.visual.completed",
+				},
+				"moderation": {
+					"moderation.explicit_content.deleted",
+				},
+			}
+
+			if typesList, ok := categories[category]; ok {
+				// Convert to comma-separated string for multi-type support
+				if typeFilter == "" {
+					typeFilter = strings.Join(typesList, ",")
+				} else {
+					typeFilter += "," + strings.Join(typesList, ",")
+				}
+			}
+		}
+
 		// Parse event field filters (any query param starting with "event.")
 		eventFilters := make(map[string]string)
 		for key, values := range query {
@@ -680,6 +727,14 @@ func GetTimelineHandler(redisClient *redis.Client) http.HandlerFunc {
 			return
 		}
 
+		// Prepare type filter map for fast lookup in loop
+		targetTypesMap := make(map[string]bool)
+		if typeFilter != "" && strings.Contains(typeFilter, ",") {
+			for _, t := range strings.Split(typeFilter, ",") {
+				targetTypesMap[strings.TrimSpace(t)] = true
+			}
+		}
+
 		// Retrieve all events from Redis and apply event field filters
 		events := make([]types.Event, 0, len(eventIDs))
 		for _, eventID := range eventIDs {
@@ -699,13 +754,24 @@ func GetTimelineHandler(redisClient *redis.Client) http.HandlerFunc {
 				continue
 			}
 
+			var eventData map[string]interface{}
+			if err := json.Unmarshal(event.Event, &eventData); err != nil {
+				continue
+			}
+
+			eventType, _ := eventData["type"].(string)
+
+			// Apply type filter if we have multiple target types
+			if len(targetTypesMap) > 0 {
+				if !targetTypesMap[eventType] {
+					continue
+				}
+			}
+
 			// Check for excluded types
 			if len(excludedTypesMap) > 0 {
-				var eventData map[string]interface{}
-				if err := json.Unmarshal(event.Event, &eventData); err == nil {
-					if t, ok := eventData["type"].(string); ok && excludedTypesMap[t] {
-						continue
-					}
+				if excludedTypesMap[eventType] {
+					continue
 				}
 			}
 
