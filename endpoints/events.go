@@ -614,11 +614,21 @@ func GetTimelineHandler(redisClient *redis.Client) http.HandlerFunc {
 			channelFilter = query.Get("channel_id")
 		}
 
+		// Parse optional type filter
+		typeFilter := query.Get("type")
+		if typeFilter == "" {
+			typeFilter = query.Get("event.type")
+		}
+
 		// Parse event field filters (any query param starting with "event.")
 		eventFilters := make(map[string]string)
 		for key, values := range query {
 			if strings.HasPrefix(key, "event.") && len(values) > 0 {
 				fieldName := strings.TrimPrefix(key, "event.")
+				// We already handled event.type via typeFilter if it was a single simple type
+				if fieldName == "type" && !strings.Contains(values[0], ",") {
+					continue
+				}
 				eventFilters[fieldName] = values[0]
 			}
 		}
@@ -634,7 +644,10 @@ func GetTimelineHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		// Determine which timeline key to use
 		var queryKey string
-		if channelFilter != "" {
+		if typeFilter != "" && !strings.Contains(typeFilter, ",") {
+			// Optimized path: query specific type directly
+			queryKey = fmt.Sprintf("events:type:%s", typeFilter)
+		} else if channelFilter != "" {
 			// Use channel-specific timeline
 			queryKey = fmt.Sprintf("events:channel:%s", channelFilter)
 		} else if serviceFilter != "" {
@@ -898,9 +911,15 @@ func deleteEventByID(redisClient *redis.Client, ctx context.Context, eventID str
 	serviceTimelineKey := fmt.Sprintf("events:service:%s", event.Service)
 	pipe.ZRem(ctx, serviceTimelineKey, eventID)
 
-	// Remove from channel timeline if applicable
+	// Remove from type timeline
 	var eventData map[string]interface{}
 	if err := json.Unmarshal(event.Event, &eventData); err == nil {
+		if eventType, ok := eventData["type"].(string); ok {
+			typeTimelineKey := fmt.Sprintf("events:type:%s", eventType)
+			pipe.ZRem(ctx, typeTimelineKey, eventID)
+		}
+
+		// Remove from channel timeline if applicable
 		var channelID string
 		if cid, ok := eventData["channel_id"].(string); ok {
 			channelID = cid
