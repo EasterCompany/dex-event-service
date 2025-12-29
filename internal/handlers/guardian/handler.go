@@ -128,13 +128,15 @@ func (h *GuardianHandler) checkAndAnalyze() {
 		return
 	}
 
-	// 2. No ongoing processes
-	busyCount, _ := h.RedisClient.Get(ctx, "system:busy_ref_count").Int64()
-	if busyCount > 0 {
+	// 2. No ongoing processes (True Busy Check)
+	if h.isActuallyBusy(ctx) {
 		return
 	}
 
-	// 3. Both Tiers must be off cooldown for automated whole-agent run
+	// 3. Busy Count Cleanup (Self-healing)
+	h.cleanupBusyCount(ctx)
+
+	// 4. Both Tiers must be off cooldown for automated whole-agent run
 	lastT1, _ := h.RedisClient.Get(ctx, LastRunKeyT1).Int64()
 	lastT2, _ := h.RedisClient.Get(ctx, LastRunKeyT2).Int64()
 
@@ -151,6 +153,49 @@ func (h *GuardianHandler) checkAndAnalyze() {
 
 	for _, res := range results {
 		_, _ = h.emitResult(ctx, res)
+	}
+}
+
+// isActuallyBusy scans for active process keys and ignores persistent/meta processes.
+func (h *GuardianHandler) isActuallyBusy(ctx context.Context) bool {
+	keys, err := h.RedisClient.Keys(ctx, "process:info:*").Result()
+	if err != nil {
+		return false
+	}
+
+	for _, k := range keys {
+		// Ignore persistent background heartbeats and ourselves
+		if strings.HasSuffix(k, ":system-discord") || strings.HasSuffix(k, ":"+ProcessID) {
+			continue
+		}
+		// If ANY other process exists, we are busy
+		return true
+	}
+
+	return false
+}
+
+// cleanupBusyCount resyncs the busy_ref_count metric if it drifts from the actual number of process keys.
+func (h *GuardianHandler) cleanupBusyCount(ctx context.Context) {
+	keys, _ := h.RedisClient.Keys(ctx, "process:info:*").Result()
+	actualCount := 0
+	for _, k := range keys {
+		if strings.HasSuffix(k, ":system-discord") {
+			continue
+		}
+		actualCount++
+	}
+
+	currentCount, _ := h.RedisClient.Get(ctx, "system:busy_ref_count").Int()
+	if actualCount != currentCount {
+		log.Printf("[%s] Resyncing busy_ref_count: %d -> %d", HandlerName, currentCount, actualCount)
+		h.RedisClient.Set(ctx, "system:busy_ref_count", actualCount, 0)
+		if actualCount == 0 {
+			h.RedisClient.Set(ctx, "system:state", "idle", 0)
+			h.RedisClient.Set(ctx, "system:last_transition_ts", time.Now().Unix(), 0)
+		} else {
+			h.RedisClient.Set(ctx, "system:state", "busy", 0)
+		}
 	}
 }
 
