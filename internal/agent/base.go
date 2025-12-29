@@ -235,7 +235,18 @@ func (b *BaseAgent) ParseSingleMarkdownReport(input string) AnalysisResult {
 			contentLines = append(contentLines, trimmed)
 		case "path":
 			if strings.HasPrefix(trimmed, "-") || strings.HasPrefix(trimmed, "*") || (len(trimmed) > 2 && trimmed[1] == '.') {
-				pathLines = append(pathLines, trimmed)
+				// Clean the markdown bullet point from the start of the string
+				cleaned := trimmed
+				if strings.HasPrefix(trimmed, "-") || strings.HasPrefix(trimmed, "*") {
+					cleaned = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(trimmed, "-"), "*"))
+				} else {
+					// Handle numbered lists like "1. ..."
+					dotIdx := strings.Index(trimmed, ".")
+					if dotIdx > 0 && dotIdx < 5 {
+						cleaned = strings.TrimSpace(trimmed[dotIdx+1:])
+					}
+				}
+				pathLines = append(pathLines, cleaned)
 			}
 		}
 	}
