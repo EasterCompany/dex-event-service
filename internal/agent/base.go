@@ -188,34 +188,39 @@ func (b *BaseAgent) ValidateMarkdown(input string) []string {
 	codeBlockCount := strings.Count(input, "```")
 	if codeBlockCount%2 != 0 {
 		issues = append(issues, "Unclosed markdown code block (missing closing ```).")
+		return issues // Stop here as further parsing depends on closed blocks
 	}
 
-	// 2. Check for empty code blocks
+	// 2. Identify and validate code blocks, then extract non-code text for further linting
 	reCodeBlock := regexp.MustCompile("(?s)```(?:[a-zA-Z0-9]*\\n)?(.*?)\\n?```")
-	matches := reCodeBlock.FindAllStringSubmatch(input, -1)
-	for _, match := range matches {
-		if len(match) > 1 {
-			content := strings.TrimSpace(match[1])
+
+	// Create a copy of input where code blocks are replaced with placeholders
+	// to avoid false positives in headers/bold checks (e.g. comments in code)
+	lintableText := reCodeBlock.ReplaceAllStringFunc(input, func(block string) string {
+		matches := reCodeBlock.FindStringSubmatch(block)
+		if len(matches) > 1 {
+			content := strings.TrimSpace(matches[1])
 			if content == "" {
 				issues = append(issues, "Empty markdown code block found (must contain real content).")
-				break // Only need one report for this
 			}
 		}
-	}
+		return "\n[CODE_BLOCK_PLACEHOLDER]\n"
+	})
 
 	// 3. Check for mismatched headers (e.g. # Header with no space)
+	// Only checked in lintableText (outside code blocks)
 	reHeader := regexp.MustCompile(`(?m)^#+[^\s#]`)
-	if reHeader.MatchString(input) {
+	if reHeader.MatchString(lintableText) {
 		issues = append(issues, "Invalid header format (missing space after # symbols).")
 	}
 
-	// 3. Check for empty links/images
-	if strings.Contains(input, "[]()") || strings.Contains(input, "![]()") {
+	// 4. Check for empty links/images
+	if strings.Contains(lintableText, "[]()") || strings.Contains(lintableText, "![]()") {
 		issues = append(issues, "Empty markdown link or image reference found.")
 	}
 
-	// 4. Check for unclosed bold/italic
-	boldCount := strings.Count(input, "**")
+	// 5. Check for unclosed bold/italic
+	boldCount := strings.Count(lintableText, "**")
 	if boldCount%2 != 0 {
 		issues = append(issues, "Mismatched bold markers (missing closing **).")
 	}
