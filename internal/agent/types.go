@@ -25,6 +25,7 @@ type AgentConfig struct {
 	Name            string
 	ProcessID       string
 	Models          map[string]string // e.g. "t1": "dex-guardian-t1"
+	ProtocolAliases map[string]string // e.g. "t1": "Sentry", "t2": "Architect"
 	Cooldowns       map[string]int    // e.g. "t1": 1800
 	IdleRequirement int
 }

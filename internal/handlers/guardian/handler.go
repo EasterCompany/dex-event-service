@@ -52,6 +52,10 @@ func NewGuardianHandler(redis *redis.Client, ollama *ollama.Client, discord *dis
 				"t1": "dex-guardian-t1",
 				"t2": "dex-guardian-t2",
 			},
+			ProtocolAliases: map[string]string{
+				"t1": "Sentry",
+				"t2": "Architect",
+			},
 			Cooldowns: map[string]int{
 				"t1": 1800,
 				"t2": 1800,

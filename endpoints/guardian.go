@@ -66,6 +66,12 @@ func GetAgentStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 			"attempts": t2Attempts, "failures": t2Failures, "absolute_failures": t2Absolute,
 		}
 
+		// Protocol Aliases
+		guardian["protocol_aliases"] = map[string]string{
+			"t1": "Sentry",
+			"t2": "Architect",
+		}
+
 		status.Agents["guardian"] = guardian
 
 		// 2. System State & Metrics
