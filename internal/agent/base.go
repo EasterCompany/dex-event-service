@@ -58,8 +58,15 @@ func (b *BaseAgent) CleanupBusyCount(ctx context.Context) {
 
 // RunCognitiveLoop executes the 3-attempt chat process with retry logic.
 // It ALWAYS produces a system.analysis.audit event regardless of outcome.
-func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, model, sessionID, systemPrompt, inputContext string, limit int) ([]AnalysisResult, error) {
+func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, model, sessionID, systemPrompt, inputContext string, limit int, dateTimeAware bool) ([]AnalysisResult, error) {
 	startTime := time.Now()
+
+	// Inject current date/time if aware
+	if dateTimeAware {
+		now := time.Now().Format("Monday, 02 Jan 2006 15:04:05 MST")
+		inputContext = fmt.Sprintf("### CURRENT DATE/TIME\n%s\n\n%s", now, inputContext)
+	}
+
 	var results []AnalysisResult
 	var lastError error
 	var rawOutput string

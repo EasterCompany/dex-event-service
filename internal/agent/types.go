@@ -29,6 +29,7 @@ type AgentConfig struct {
 	ProtocolAliases map[string]string // e.g. "t1": "Sentry", "t2": "Architect"
 	Cooldowns       map[string]int    // e.g. "t1": 1800
 	IdleRequirement int
+	DateTimeAware   bool
 }
 
 // Agent is the interface all automated workflows must implement.
