@@ -103,17 +103,16 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				modPrompt := fmt.Sprintf(`Analyze this link metadata for content moderation.
 Objective: Identify hardcore pornography and explicit sexual content.
 Rules:
-- Output 'TRUE' ONLY if the metadata describes clear pornography, adult websites, or explicit sexual acts.
-- Output 'FALSE' if the content is a meme, a GIF, a car (e.g. Lamborghini), or general internet humor.
-- Be very conservative: If you are not 100%% sure it is prohibited pornography, output 'FALSE'.
+- Output '<EXPLICIT_CONTENT_DETECTED/>' ONLY if the metadata describes clear pornography, adult websites, or explicit sexual acts.
+- Output '<SAFE_CONTENT/>' if the content is a meme, a GIF, a car (e.g. Lamborghini), or general internet humor.
+- Be very conservative: If you are not 100%% sure it is prohibited pornography, output '<SAFE_CONTENT/>'.
 - Common GIF sites like Tenor and Giphy are almost always safe memes.
 
 Metadata to analyze:
 %s`, textToCheck)
 
 				isExplicitRaw, err := deps.Ollama.Generate("dex-router-model", modPrompt, nil)
-				cleanExpl := strings.TrimSpace(strings.ToUpper(isExplicitRaw))
-				if err == nil && (cleanExpl == "TRUE" || strings.HasPrefix(cleanExpl, "TRUE")) {
+				if err == nil && strings.Contains(isExplicitRaw, "<EXPLICIT_CONTENT_DETECTED/>") {
 					log.Printf("EXPLICIT LINK TEXT DETECTED: %s. Deleting message...", foundURL)
 
 					messageID, _ := input.EventData["message_id"].(string)
