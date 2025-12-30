@@ -129,10 +129,13 @@ func HandleUpdateGuardianStatus(redisClient *redis.Client) http.HandlerFunc {
 	}
 }
 
-// RunGuardianHandler triggers immediate execution of guardian tiers.
+// RunGuardianHandler triggers immediate execution of guardian protocols.
 func RunGuardianHandler(redisClient *redis.Client, triggerFunc func(int) ([]interface{}, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tierStr := r.URL.Query().Get("tier")
+		if tierStr == "" {
+			tierStr = r.URL.Query().Get("protocol")
+		}
 		tier, _ := strconv.Atoi(tierStr)
 
 		results, err := triggerFunc(tier)
@@ -146,7 +149,7 @@ func RunGuardianHandler(redisClient *redis.Client, triggerFunc func(int) ([]inte
 	}
 }
 
-// ResetGuardianHandler resets the timers for guardian tiers.
+// ResetGuardianHandler resets the timers for guardian protocols.
 func ResetGuardianHandler(redisClient *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if redisClient == nil {
@@ -155,16 +158,20 @@ func ResetGuardianHandler(redisClient *redis.Client) http.HandlerFunc {
 		}
 
 		ctx := context.Background()
-		tier := r.URL.Query().Get("tier")
+		query := r.URL.Query()
+		tier := query.Get("tier")
+		if tier == "" {
+			tier = query.Get("protocol")
+		}
 
-		if tier == "all" || tier == "t2" {
+		if tier == "" || tier == "all" || tier == "t2" {
 			redisClient.Set(ctx, "guardian:last_run:t2", 0, utils.DefaultTTL)
 		}
-		if tier == "all" || tier == "t1" {
+		if tier == "" || tier == "all" || tier == "t1" {
 			redisClient.Set(ctx, "guardian:last_run:t1", 0, utils.DefaultTTL)
 		}
 
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("Guardian timers reset successfully"))
+		_, _ = w.Write([]byte("Guardian protocols reset successfully"))
 	}
 }
