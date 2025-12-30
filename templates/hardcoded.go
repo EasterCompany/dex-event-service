@@ -617,6 +617,24 @@ func GetTemplates() map[string]EventTemplate {
 			},
 		},
 
+		string(types.EventTypeAnalysisRouterDecision): {
+			Description: "The router model made a decision on how to process a link",
+			Format:      "Router decision for {url}: {decision}",
+			Fields: map[string]FieldSpec{
+				"type":            {Type: "string", Required: true},
+				"parent_event_id": {Type: "string", Required: true},
+				"handler":         {Type: "string", Required: true},
+				"url":             {Type: "string", Required: true},
+				"decision":        {Type: "string", Required: true},
+				"raw_output":      {Type: "string", Required: true},
+				"raw_input":       {Type: "string", Required: true},
+				"model":           {Type: "string", Required: true},
+				"timestamp":       {Type: "number", Required: true},
+				"channel_id":      {Type: "string", Required: true},
+				"user_id":         {Type: "string", Required: true},
+			},
+		},
+
 		string(types.EventTypeCLICommand): {
 			Description: "A CLI command was executed",
 			Format:      "CLI Command: {command} {args} ({status})",
