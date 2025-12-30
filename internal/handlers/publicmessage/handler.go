@@ -169,10 +169,20 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			// Check for explicit text in link metadata
 			if currentTitle != "" || currentDescription != "" {
 				textToCheck := fmt.Sprintf("Title: %s\nDescription: %s\nURL: %s", currentTitle, currentDescription, foundURL)
-				modPrompt := fmt.Sprintf("Analyze this link metadata for explicit pornographic content. Output TRUE if it describes a porn site, explicit video, or sexual content designed for arousal. Output FALSE if safe or artistic.\n\n%s", textToCheck)
+				modPrompt := fmt.Sprintf(`Analyze this link metadata for content moderation.
+Objective: Identify hardcore pornography and explicit sexual content.
+Rules:
+- Output 'TRUE' ONLY if the metadata describes clear pornography, adult websites, or explicit sexual acts.
+- Output 'FALSE' if the content is a meme, a GIF, a car (e.g. Lamborghini), or general internet humor.
+- Be very conservative: If you are not 100%% sure it is prohibited pornography, output 'FALSE'.
+- Common GIF sites like Tenor and Giphy are almost always safe memes.
+
+Metadata to analyze:
+%s`, textToCheck)
 
 				isExplicitRaw, err := deps.Ollama.Generate("dex-router-model", modPrompt, nil)
-				if err == nil && strings.Contains(strings.ToUpper(isExplicitRaw), "TRUE") {
+				cleanExpl := strings.TrimSpace(strings.ToUpper(isExplicitRaw))
+				if err == nil && (cleanExpl == "TRUE" || strings.HasPrefix(cleanExpl, "TRUE")) {
 					log.Printf("EXPLICIT LINK TEXT DETECTED: %s. Deleting message...", foundURL)
 
 					messageID, _ := input.EventData["message_id"].(string)
@@ -326,8 +336,9 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					prompt := `Analyze this image for content moderation.
 Rules:
 1. If the image depicts hard-core pornography, realistic sexual acts, exposed genitalia designed for arousal, or "filth", output ONLY the tag <EXPLICIT_CONTENT_DETECTED/>.
-2. If the image contains non-sexual nudity (classical art, statues, medical context) or is safe, provide a concise visual description.
-3. Treat screenshots of pornographic websites or links to explicit galleries as Rule 1.`
+2. If the image contains non-sexual nudity (classical art, statues, medical context), memes, cartoons, or is otherwise safe, provide a concise visual description.
+3. DO NOT flag memes or common internet GIFs as explicit unless they depict actual sexual acts.
+4. Treat screenshots of pornographic websites or links to explicit galleries as Rule 1.`
 					var err error
 					description, err = deps.Ollama.Generate("dex-vision-model", prompt, []string{base64Img})
 					if err != nil {
