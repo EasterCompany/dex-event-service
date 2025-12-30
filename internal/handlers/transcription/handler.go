@@ -63,17 +63,16 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	}
 
 	// 1. Check Engagement
-	prompt := fmt.Sprintf("Context:\n%s\n\nCurrent Transcription:\n%s", contextHistory, transcription)
+	prompt := fmt.Sprintf("Analyze if Dexter should respond to this voice transcription. Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nCurrent Transcription:\n%s", contextHistory, transcription)
 	engagementRaw, err := deps.Ollama.Generate("dex-fast-engagement-model", prompt, nil)
 	if err != nil {
 		log.Printf("Engagement check failed: %v", err)
 		return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
 	}
 
-	engagementDecision := strings.ToUpper(strings.TrimSpace(engagementRaw))
-	shouldEngage := strings.Contains(engagementDecision, "TRUE")
+	shouldEngage := strings.Contains(engagementRaw, "<ENGAGE/>")
 
-	engagementReason := "Evaluated by dex-engagement-model"
+	engagementReason := "Evaluated by dex-fast-engagement-model"
 
 	userCount, err := deps.Discord.GetVoiceChannelUserCount(channelID)
 	if err != nil {
@@ -89,11 +88,11 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		}
 	}
 
-	log.Printf("Engagement decision: %s (%v)", engagementDecision, shouldEngage)
+	log.Printf("Engagement decision for transcription: %s (%v)", engagementRaw, shouldEngage)
 
-	decisionStr := "FALSE"
+	decisionStr := "IGNORE"
 	if shouldEngage {
-		decisionStr = "TRUE"
+		decisionStr = "ENGAGE"
 	}
 
 	engagementEventData := map[string]interface{}{

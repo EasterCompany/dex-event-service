@@ -525,9 +525,9 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 		// --- OTHER CHANNELS: Fast Binary Engagement ---
 		evalHistory, _ := deps.Discord.FetchContext(channelID, 10)
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Vibe Check")
-		prompt := fmt.Sprintf("Analyze if Dexter should respond to this message. Output TRUE or FALSE.\n\nContext:\n%s\n\nMessage: %s", evalHistory, content)
+		prompt := fmt.Sprintf("Analyze if Dexter should respond to this message. Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", evalHistory, content)
 		engagementRaw, err := deps.Ollama.Generate("dex-fast-engagement-model", prompt, nil)
-		if err == nil && strings.Contains(strings.ToUpper(engagementRaw), "TRUE") {
+		if err == nil && strings.Contains(engagementRaw, "<ENGAGE/>") {
 			shouldEngage = true
 			decisionStr = "ENGAGE_FAST"
 			responseModel = "dex-fast-public-message-model"
