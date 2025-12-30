@@ -58,16 +58,18 @@ func (b *BaseAgent) CleanupBusyCount(ctx context.Context) {
 
 // RunCognitiveLoop executes the 3-attempt chat process with retry logic.
 // It ALWAYS produces a system.analysis.audit event regardless of outcome.
-func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, model, sessionID, systemPrompt, inputContext string, limit int, dateTimeAware bool, enforceMarkdown bool) ([]AnalysisResult, error) {
+func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName, model, sessionID, systemPrompt, inputContext string, limit int) ([]AnalysisResult, error) {
 	startTime := time.Now()
+	agentConfig := agent.GetConfig()
 
 	// Inject current date/time if aware
-	if dateTimeAware {
+	if agentConfig.DateTimeAware {
 		now := time.Now().Format("Monday, 02 Jan 2006 15:04:05 MST")
 		inputContext = fmt.Sprintf("### CURRENT DATE/TIME\n%s\n\n%s", now, inputContext)
 	}
 
 	var results []AnalysisResult
+	var allCorrections []Correction
 	var lastError error
 	var rawOutput string
 	attempts := 0
@@ -82,12 +84,13 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, m
 
 		audit := AuditPayload{
 			Type:          "system.analysis.audit",
-			AgentName:     agentName,
+			AgentName:     agentConfig.Name,
 			Tier:          tierName,
 			Model:         model,
 			InputContext:  inputContext,
 			RawOutput:     rawOutput,
 			ParsedResults: results,
+			Corrections:   allCorrections,
 			Error:         errStr,
 			Duration:      duration,
 			Timestamp:     time.Now().Unix(),
@@ -132,46 +135,67 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, m
 		}
 
 		rawOutput = respMsg.Content
-		results = b.ParseAnalysisResults(respMsg.Content, limit)
+		var currentAttemptCorrections []Correction
 
-		// 1. Markdown Enforcement
-		if enforceMarkdown {
+		// --- Tier 1: Syntax Validation ---
+		if agentConfig.EnforceMarkdown {
 			mdIssues := b.ValidateMarkdown(respMsg.Content)
 			if len(mdIssues) > 0 {
-				b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":failures")
-				currentTurnHistory = append(currentTurnHistory, respMsg)
-				issueStr := strings.Join(mdIssues, "\n- ")
-				currentTurnHistory = append(currentTurnHistory, ollama.Message{
-					Role:    "user",
-					Content: fmt.Sprintf("SYSTEM ERROR: Your markdown is invalid. Please fix the following issues and resubmit your full report:\n- %s", issueStr),
+				currentAttemptCorrections = append(currentAttemptCorrections, mdIssues...)
+			}
+		}
+
+		// --- Tier 2: Schema Validation (Only if syntax passes) ---
+		if len(currentAttemptCorrections) == 0 {
+			results = b.ParseAnalysisResults(respMsg.Content, limit)
+
+			// Check for required sections if it's not a stop token
+			isStopped := false
+			for _, token := range b.StopTokens {
+				if strings.Contains(respMsg.Content, token) {
+					isStopped = true
+					break
+				}
+			}
+
+			if !isStopped && len(results) > 0 {
+				for _, res := range results {
+					schemaIssues := b.ValidateSchema(res, agentConfig.RequiredSections)
+					currentAttemptCorrections = append(currentAttemptCorrections, schemaIssues...)
+
+					// --- Tier 3: Logic Validation (Protocol Specific) ---
+					if len(schemaIssues) == 0 {
+						logicIssues := agent.ValidateLogic(res)
+						currentAttemptCorrections = append(currentAttemptCorrections, logicIssues...)
+					}
+				}
+			} else if !isStopped && !strings.Contains(respMsg.Content, "No significant insights found") {
+				// No results parsed but no stop token found either
+				currentAttemptCorrections = append(currentAttemptCorrections, Correction{
+					Type: "SCHEMA", Guidance: "Your response did not contain any valid Dexter Reports (# Title). Ensure you follow the strict report format.", Mandatory: true,
 				})
-				continue
 			}
 		}
 
-		// 2. Check for valid results or explicit stop tokens (flexible "no issues" signals)
-		isStopped := false
-		for _, token := range b.StopTokens {
-			if strings.Contains(respMsg.Content, token) {
-				isStopped = true
-				break
-			}
+		// Handle Rejection or Success
+		if len(currentAttemptCorrections) > 0 {
+			allCorrections = append(allCorrections, currentAttemptCorrections...)
+			b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":failures")
+
+			feedback := b.BuildFeedbackPrompt(currentAttemptCorrections)
+			currentTurnHistory = append(currentTurnHistory, respMsg)
+			currentTurnHistory = append(currentTurnHistory, ollama.Message{
+				Role:    "user",
+				Content: feedback,
+			})
+			continue
 		}
 
-		if len(results) > 0 || isStopped || strings.Contains(respMsg.Content, "No significant insights found") {
-			_ = b.ChatManager.AppendMessage(ctx, sessionID, newUserMsg)
-			_ = b.ChatManager.AppendMessage(ctx, sessionID, respMsg)
-			success = true
-			return results, nil
-		}
-
-		// Malformed response handling
-		b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":failures")
-		currentTurnHistory = append(currentTurnHistory, respMsg)
-		currentTurnHistory = append(currentTurnHistory, ollama.Message{
-			Role:    "user",
-			Content: "SYSTEM ERROR: Your response did not follow the strict 'Dexter Report' format. Fix it immediately.",
-		})
+		// If we reached here, validation passed or it was an explicit stop
+		_ = b.ChatManager.AppendMessage(ctx, sessionID, newUserMsg)
+		_ = b.ChatManager.AppendMessage(ctx, sessionID, respMsg)
+		success = true
+		return results, nil
 	}
 
 	b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":absolute_failures")
@@ -179,53 +203,122 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, m
 	return nil, lastError
 }
 
-// ValidateMarkdown performs a basic structural check on the markdown response.
-// It returns a list of issues found.
-func (b *BaseAgent) ValidateMarkdown(input string) []string {
-	var issues []string
+// BuildFeedbackPrompt constructs a high-fidelity rejection report for the model.
+func (b *BaseAgent) BuildFeedbackPrompt(corrections []Correction) string {
+	var sb strings.Builder
+	sb.WriteString("### 🚨 REPORT REJECTED: VALIDATION FAILED\n")
+	sb.WriteString("Your previous response contained structural or logical errors. You MUST fix these issues in your next attempt:\n\n")
 
-	// 1. Check for unclosed code blocks
+	for _, c := range corrections {
+		sb.WriteString(fmt.Sprintf("#### [%s ERROR]", c.Type))
+		if c.Line > 0 {
+			sb.WriteString(fmt.Sprintf(" (Line %d)", c.Line))
+		}
+		sb.WriteString("\n")
+
+		if c.Snippet != "" {
+			sb.WriteString(fmt.Sprintf("> **Violation:** `%s`\n", c.Snippet))
+		}
+		sb.WriteString(fmt.Sprintf("> **Guidance:** %s\n\n", c.Guidance))
+	}
+
+	sb.WriteString("Please resubmit your complete, corrected report now.")
+	return sb.String()
+}
+
+// ValidateMarkdown performs a basic structural check on the markdown response.
+func (b *BaseAgent) ValidateMarkdown(input string) []Correction {
+	var corrections []Correction
+	lines := strings.Split(input, "\n")
+
+	// 1. Check for unclosed code blocks (Fatal Syntax)
 	codeBlockCount := strings.Count(input, "```")
 	if codeBlockCount%2 != 0 {
-		issues = append(issues, "Unclosed markdown code block (missing closing ```).")
-		return issues // Stop here as further parsing depends on closed blocks
+		corrections = append(corrections, Correction{
+			Type: "SYNTAX", Guidance: "Unclosed markdown code block. You opened a block with ``` but never closed it.", Mandatory: true,
+		})
+		return corrections
 	}
 
-	// 2. Identify and validate code blocks, then extract non-code text for further linting
-	reCodeBlock := regexp.MustCompile("(?s)```(?:[a-zA-Z0-9]*\\n)?(.*?)\\n?```")
+	// 2. Line-by-line validation (Spatial Awareness)
+	inCodeBlock := false
+	codeBlockHasContent := false
+	codeBlockStartLine := 0
 
-	// Create a copy of input where code blocks are replaced with placeholders
-	// to avoid false positives in headers/bold checks (e.g. comments in code)
-	lintableText := reCodeBlock.ReplaceAllStringFunc(input, func(block string) string {
-		matches := reCodeBlock.FindStringSubmatch(block)
-		if len(matches) > 1 {
-			content := strings.TrimSpace(matches[1])
-			if content == "" {
-				issues = append(issues, "Empty markdown code block found (must contain real content).")
+	for i, line := range lines {
+		lineNum := i + 1
+		trimmed := strings.TrimSpace(line)
+
+		// Code block tracking
+		if strings.HasPrefix(trimmed, "```") {
+			if !inCodeBlock {
+				inCodeBlock = true
+				codeBlockHasContent = false
+				codeBlockStartLine = lineNum
+			} else {
+				// Closing a block
+				if !codeBlockHasContent {
+					corrections = append(corrections, Correction{
+						Type: "SYNTAX", Line: codeBlockStartLine, Snippet: "```\n\n```",
+						Guidance: "Empty code block found. Technical segments must contain real code, logs, or steps.", Mandatory: true,
+					})
+				}
+				inCodeBlock = false
+			}
+			continue
+		}
+
+		if inCodeBlock {
+			if trimmed != "" {
+				codeBlockHasContent = true
+			}
+			continue
+		}
+
+		// Header validation (Only outside code blocks)
+		if strings.HasPrefix(trimmed, "#") {
+			reHeader := regexp.MustCompile(`^#+[^\s#]`)
+			if reHeader.MatchString(trimmed) {
+				corrections = append(corrections, Correction{
+					Type: "SYNTAX", Line: lineNum, Snippet: trimmed,
+					Guidance: "Invalid header format. There must be a space between the '#' symbols and the header text.", Mandatory: true,
+				})
 			}
 		}
-		return "\n[CODE_BLOCK_PLACEHOLDER]\n"
-	})
 
-	// 3. Check for mismatched headers (e.g. # Header with no space)
-	// Only checked in lintableText (outside code blocks)
-	reHeader := regexp.MustCompile(`(?m)^#+[^\s#]`)
-	if reHeader.MatchString(lintableText) {
-		issues = append(issues, "Invalid header format (missing space after # symbols).")
+		// Empty references
+		if strings.Contains(line, "[]()") || strings.Contains(line, "![]()") {
+			corrections = append(corrections, Correction{
+				Type: "SYNTAX", Line: lineNum, Snippet: "[]()",
+				Guidance: "Empty markdown link or image reference found.", Mandatory: true,
+			})
+		}
 	}
 
-	// 4. Check for empty links/images
-	if strings.Contains(lintableText, "[]()") || strings.Contains(lintableText, "![]()") {
-		issues = append(issues, "Empty markdown link or image reference found.")
+	return corrections
+}
+
+// ValidateSchema ensures all required sections are present in the result.
+func (b *BaseAgent) ValidateSchema(res AnalysisResult, required []string) []Correction {
+	var corrections []Correction
+	contentLower := strings.ToLower(res.Summary + " " + res.Content)
+
+	for _, section := range required {
+		if !strings.Contains(contentLower, strings.ToLower(section)) {
+			corrections = append(corrections, Correction{
+				Type: "SCHEMA", Guidance: fmt.Sprintf("Missing mandatory section: '%s'. You must include this section in your report.", section), Mandatory: true,
+			})
+		}
 	}
 
-	// 5. Check for unclosed bold/italic
-	boldCount := strings.Count(lintableText, "**")
-	if boldCount%2 != 0 {
-		issues = append(issues, "Mismatched bold markers (missing closing **).")
+	// Basic quality check on sections
+	if res.Title == "" || len(res.Title) < 5 {
+		corrections = append(corrections, Correction{
+			Type: "SCHEMA", Guidance: "Report title is missing or too short. Provide a descriptive title starting with #.", Mandatory: true,
+		})
 	}
 
-	return issues
+	return corrections
 }
 
 // ParseAnalysisResults handles multi-report responses with an optional limit.

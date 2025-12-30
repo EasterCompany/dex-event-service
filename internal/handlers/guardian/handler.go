@@ -63,6 +63,9 @@ func NewGuardianHandler(redis *redis.Client, ollama *ollama.Client, discord *dis
 			IdleRequirement: 300,
 			DateTimeAware:   true,
 			EnforceMarkdown: true,
+			RequiredSections: []string{
+				"Summary", "Content", "Priority", "Category", "Affected",
+			},
 		},
 		DiscordClient: discord,
 		WebClient:     web,
@@ -91,6 +94,10 @@ func (h *GuardianHandler) Close() error {
 
 func (h *GuardianHandler) GetConfig() agent.AgentConfig {
 	return h.Config
+}
+
+func (h *GuardianHandler) Run(ctx context.Context) ([]agent.AnalysisResult, error) {
+	return h.PerformAnalysis(ctx, 0)
 }
 
 func (h *GuardianHandler) runWorker() {
@@ -165,7 +172,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Sentry Protocol (T1)")
 
 		input := h.gatherContext(ctx, "t1", nil)
-		results, err := h.RunCognitiveLoop(ctx, h.Config.Name, "t1", h.Config.Models["t1"], "t1", "", input, 1, h.Config.DateTimeAware, h.Config.EnforceMarkdown)
+		results, err := h.RunCognitiveLoop(ctx, h, "t1", h.Config.Models["t1"], "t1", "", input, 1)
 
 		if err == nil {
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
@@ -191,10 +198,9 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Architect Protocol (T2)")
 
 		input := h.gatherContext(ctx, "t2", t1Results)
-		t2Results, err := h.RunCognitiveLoop(ctx, h.Config.Name, "t2", h.Config.Models["t2"], "t2", "", input, 1, h.Config.DateTimeAware, h.Config.EnforceMarkdown)
+		t2Results, err := h.RunCognitiveLoop(ctx, h, "t2", h.Config.Models["t2"], "t2", "", input, 1)
 
 		if err == nil {
-
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
 			for i := range t2Results {
 				t2Results[i].Type = "blueprint"
@@ -210,7 +216,31 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 	return nil, nil // Results already emitted individually
 }
 
+// ValidateLogic implements protocol-specific logical checks.
+func (h *GuardianHandler) ValidateLogic(res agent.AnalysisResult) []agent.Correction {
+	var corrections []agent.Correction
+
+	// 1. Content Quality
+	if len(res.Summary) < 20 {
+		corrections = append(corrections, agent.Correction{
+			Type: "LOGIC", Guidance: "The summary is too brief. Provide a high-fidelity one-sentence description of the issue or proposal.", Mandatory: true,
+		})
+	}
+
+	// 2. Blueprint Specifics
+	if res.Type == "blueprint" {
+		if len(res.ImplementationPath) == 0 {
+			corrections = append(corrections, agent.Correction{
+				Type: "LOGIC", Guidance: "This is a [BLUEPRINT]. You MUST provide a 'Proposed Steps' section with at least one technical step to resolve the issue.", Mandatory: true,
+			})
+		}
+	}
+
+	return corrections
+}
+
 func (h *GuardianHandler) gatherContext(ctx context.Context, tier string, previousResults []agent.AnalysisResult) string {
+
 	status, _ := h.fetchSystemStatus(ctx)
 	logs, _ := h.fetchRecentLogs(ctx)
 	tests, _ := h.fetchTestResults(ctx)
