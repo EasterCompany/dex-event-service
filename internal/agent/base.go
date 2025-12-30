@@ -78,7 +78,6 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, m
 			AgentName:     agentName,
 			Tier:          tierName,
 			Model:         model,
-			SystemPrompt:  systemPrompt,
 			InputContext:  inputContext,
 			RawOutput:     rawOutput,
 			ParsedResults: results,

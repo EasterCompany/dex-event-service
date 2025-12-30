@@ -48,7 +48,6 @@ type AuditPayload struct {
 	AgentName     string           `json:"agent_name"`
 	Tier          string           `json:"tier"`
 	Model         string           `json:"model"`
-	SystemPrompt  string           `json:"system_prompt"`
 	InputContext  string           `json:"input_context"`
 	RawOutput     string           `json:"raw_output"`
 	ParsedResults []AnalysisResult `json:"parsed_results"`
