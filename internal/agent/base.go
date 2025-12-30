@@ -336,10 +336,37 @@ func (b *BaseAgent) ValidateMarkdown(input string) []Correction {
 // ValidateSchema ensures all required sections are present in the result.
 func (b *BaseAgent) ValidateSchema(res AnalysisResult, required []string) []Correction {
 	var corrections []Correction
-	contentLower := strings.ToLower(res.Summary + " " + res.Content)
 
 	for _, section := range required {
-		if !strings.Contains(contentLower, strings.ToLower(section)) {
+		missing := false
+		switch strings.ToLower(section) {
+		case "summary":
+			if res.Summary == "" {
+				missing = true
+			}
+		case "content", "body", "insight":
+			if res.Content == "" {
+				missing = true
+			}
+		case "priority":
+			if res.Priority == "" {
+				missing = true
+			}
+		case "category":
+			if res.Category == "" {
+				missing = true
+			}
+		case "affected", "affected services":
+			if len(res.AffectedServices) == 0 {
+				missing = true
+			}
+		case "implementation path", "proposed steps":
+			if len(res.ImplementationPath) == 0 {
+				missing = true
+			}
+		}
+
+		if missing {
 			corrections = append(corrections, Correction{
 				Type: "SCHEMA", Guidance: fmt.Sprintf("Missing mandatory section: '%s'. You must include this section in your report.", section), Mandatory: true,
 			})
