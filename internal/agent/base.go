@@ -72,6 +72,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 	var allCorrections []Correction
 	var lastError error
 	var rawOutput string
+	var currentTurnHistory []ollama.Message
 	attempts := 0
 	success := false
 
@@ -91,6 +92,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 			RawOutput:     rawOutput,
 			ParsedResults: results,
 			Corrections:   allCorrections,
+			ChatHistory:   currentTurnHistory,
 			Error:         errStr,
 			Duration:      duration,
 			Timestamp:     time.Now().Unix(),
@@ -116,7 +118,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 	}
 
 	newUserMsg := ollama.Message{Role: "user", Content: inputContext}
-	currentTurnHistory := append(chatHistory, newUserMsg)
+	currentTurnHistory = append(chatHistory, newUserMsg)
 
 	maxRetries := 3
 

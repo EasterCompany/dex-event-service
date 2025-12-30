@@ -66,7 +66,8 @@ type AuditPayload struct {
 	InputContext  string           `json:"input_context"`
 	RawOutput     string           `json:"raw_output"`
 	ParsedResults []AnalysisResult `json:"parsed_results"`
-	Corrections   []Correction     `json:"corrections,omitempty"` // History of corrections given
+	Corrections   []Correction     `json:"corrections,omitempty"`  // History of corrections given
+	ChatHistory   []ollama.Message `json:"chat_history,omitempty"` // Turn-by-turn history
 	Error         string           `json:"error,omitempty"`
 	Duration      string           `json:"duration"`
 	Timestamp     int64            `json:"timestamp"`
