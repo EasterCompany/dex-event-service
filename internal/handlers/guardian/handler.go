@@ -138,14 +138,10 @@ func (h *GuardianHandler) checkAndAnalyze() {
 	}
 
 	// Trigger full analysis
-	results, err := h.PerformAnalysis(ctx, 0)
+	_, err := h.PerformAnalysis(ctx, 0)
 	if err != nil {
 		log.Printf("[%s] Automated analysis failed: %v", HandlerName, err)
 		return
-	}
-
-	for _, res := range results {
-		_, _ = h.emitResult(ctx, res)
 	}
 }
 
@@ -159,13 +155,12 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 		h.runSystemTests(ctx)
 	}
 
-	var allResults []agent.AnalysisResult
-
 	// Tier 1: Technical Sentry
 	var t1Results []agent.AnalysisResult
+	var t1EventIDs []string
 	if tier == 0 || tier == 1 {
 		h.RedisClient.Set(ctx, "guardian:active_tier", "t1", utils.DefaultTTL)
-		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Tier 1: Technical Sentry")
+		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Sentry Protocol (T1)")
 
 		input := h.gatherContext(ctx, "t1", nil)
 		results, err := h.RunCognitiveLoop(ctx, h.Config.Name, "t1", h.Config.Models["t1"], "t1", "", input, 1)
@@ -174,9 +169,10 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
 			for i := range results {
 				results[i].Type = "alert"
+				id, _ := h.emitResult(ctx, results[i])
+				t1EventIDs = append(t1EventIDs, id)
 			}
 			t1Results = results
-			allResults = append(allResults, t1Results...)
 			h.RedisClient.Set(ctx, "guardian:last_run:t1", time.Now().Unix(), 0)
 		} else {
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
@@ -190,7 +186,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 	// Tier 2: Architect
 	if shouldRunT2 {
 		h.RedisClient.Set(ctx, "guardian:active_tier", "t2", utils.DefaultTTL)
-		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Tier 2: Architect Analysis")
+		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Architect Protocol (T2)")
 
 		input := h.gatherContext(ctx, "t2", t1Results)
 		t2Results, err := h.RunCognitiveLoop(ctx, h.Config.Name, "t2", h.Config.Models["t2"], "t2", "", input, 1)
@@ -200,14 +196,15 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 			for i := range t2Results {
 				t2Results[i].Type = "blueprint"
 				t2Results[i].Body = t2Results[i].Summary
+				t2Results[i].SourceEventIDs = t1EventIDs
+				_, _ = h.emitResult(ctx, t2Results[i])
 			}
-			allResults = append(allResults, t2Results...)
 			h.RedisClient.Set(ctx, "guardian:last_run:t2", time.Now().Unix(), 0)
 		} else {
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
 		}
 	}
-	return allResults, nil
+	return nil, nil // Results already emitted individually
 }
 
 func (h *GuardianHandler) gatherContext(ctx context.Context, tier string, previousResults []agent.AnalysisResult) string {
@@ -237,7 +234,8 @@ func (h *GuardianHandler) emitResult(ctx context.Context, res agent.AnalysisResu
 	timestamp := time.Now().Unix()
 	payload := map[string]interface{}{
 		"title": res.Title, "priority": res.Priority, "category": res.Category,
-		"body": res.Body, "related_event_ids": res.RelatedEventIDs, "read": false,
+		"body": res.Body, "related_event_ids": res.RelatedEventIDs,
+		"source_event_ids": res.SourceEventIDs, "read": false,
 	}
 
 	var eventType string

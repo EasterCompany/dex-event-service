@@ -16,7 +16,8 @@ type AnalysisResult struct {
 	Content            string   `json:"content"`
 	AffectedServices   []string `json:"affected_services"`
 	ImplementationPath []string `json:"implementation_path"`
-	RelatedEventIDs    []string `json:"related_event_ids"`
+	RelatedEventIDs    []string `json:"related_event_ids"` // Manual/User related IDs
+	SourceEventIDs     []string `json:"source_event_ids"`  // Internal chain IDs (e.g. Alert ID for a Blueprint)
 	AuditEventID       string   `json:"audit_event_id,omitempty"`
 }
 
