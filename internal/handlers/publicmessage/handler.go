@@ -168,19 +168,9 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 			// Check for explicit text in link metadata
 			if currentTitle != "" || currentDescription != "" {
-				textToCheck := fmt.Sprintf("Title: %s\nDescription: %s\nURL: %s", currentTitle, currentDescription, foundURL)
-				modPrompt := fmt.Sprintf(`Analyze this link metadata for content moderation.
-Objective: Identify hardcore pornography and explicit sexual content.
-Rules:
-- Output '<EXPLICIT_CONTENT_DETECTED/>' ONLY if the metadata describes clear pornography, adult websites, or explicit sexual acts.
-- Output '<SAFE_CONTENT/>' if the content is a meme, a GIF, a car (e.g. Lamborghini), or general internet humor.
-- Be very conservative: If you are not 100%% sure it is prohibited pornography, output '<SAFE_CONTENT/>'.
-- Common GIF sites like Tenor and Giphy are almost always safe memes.
+				modPrompt := fmt.Sprintf("Analyze this link metadata:\n\nTitle: %s\nDescription: %s\nURL: %s", currentTitle, currentDescription, foundURL)
 
-Metadata to analyze:
-%s`, textToCheck)
-
-				isExplicitRaw, err := deps.Ollama.Generate("dex-router-model", modPrompt, nil)
+				isExplicitRaw, err := deps.Ollama.Generate("dex-moderation-model", modPrompt, nil)
 				if err == nil && strings.Contains(isExplicitRaw, "<EXPLICIT_CONTENT_DETECTED/>") {
 					log.Printf("EXPLICIT LINK TEXT DETECTED: %s. Deleting message...", foundURL)
 
