@@ -58,7 +58,7 @@ func (b *BaseAgent) CleanupBusyCount(ctx context.Context) {
 
 // RunCognitiveLoop executes the 3-attempt chat process with retry logic.
 // It ALWAYS produces a system.analysis.audit event regardless of outcome.
-func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, model, sessionID, systemPrompt, inputContext string, limit int, dateTimeAware bool) ([]AnalysisResult, error) {
+func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, model, sessionID, systemPrompt, inputContext string, limit int, dateTimeAware bool, enforceMarkdown bool) ([]AnalysisResult, error) {
 	startTime := time.Now()
 
 	// Inject current date/time if aware
@@ -134,7 +134,22 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, m
 		rawOutput = respMsg.Content
 		results = b.ParseAnalysisResults(respMsg.Content, limit)
 
-		// Check for valid results or explicit stop tokens (flexible "no issues" signals)
+		// 1. Markdown Enforcement
+		if enforceMarkdown {
+			mdIssues := b.ValidateMarkdown(respMsg.Content)
+			if len(mdIssues) > 0 {
+				b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":failures")
+				currentTurnHistory = append(currentTurnHistory, respMsg)
+				issueStr := strings.Join(mdIssues, "\n- ")
+				currentTurnHistory = append(currentTurnHistory, ollama.Message{
+					Role:    "user",
+					Content: fmt.Sprintf("SYSTEM ERROR: Your markdown is invalid. Please fix the following issues and resubmit your full report:\n- %s", issueStr),
+				})
+				continue
+			}
+		}
+
+		// 2. Check for valid results or explicit stop tokens (flexible "no issues" signals)
 		isStopped := false
 		for _, token := range b.StopTokens {
 			if strings.Contains(respMsg.Content, token) {
@@ -162,6 +177,37 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agentName, tierName, m
 	b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":absolute_failures")
 	lastError = fmt.Errorf("max retries reached or cognitive failure: %v", lastError)
 	return nil, lastError
+}
+
+// ValidateMarkdown performs a basic structural check on the markdown response.
+// It returns a list of issues found.
+func (b *BaseAgent) ValidateMarkdown(input string) []string {
+	var issues []string
+
+	// 1. Check for unclosed code blocks
+	codeBlockCount := strings.Count(input, "```")
+	if codeBlockCount%2 != 0 {
+		issues = append(issues, "Unclosed markdown code block (missing closing ```).")
+	}
+
+	// 2. Check for mismatched headers (e.g. # Header with no space)
+	reHeader := regexp.MustCompile(`(?m)^#+[^\s#]`)
+	if reHeader.MatchString(input) {
+		issues = append(issues, "Invalid header format (missing space after # symbols).")
+	}
+
+	// 3. Check for empty links/images
+	if strings.Contains(input, "[]()") || strings.Contains(input, "![]()") {
+		issues = append(issues, "Empty markdown link or image reference found.")
+	}
+
+	// 4. Check for unclosed bold/italic
+	boldCount := strings.Count(input, "**")
+	if boldCount%2 != 0 {
+		issues = append(issues, "Mismatched bold markers (missing closing **).")
+	}
+
+	return issues
 }
 
 // ParseAnalysisResults handles multi-report responses with an optional limit.

@@ -62,6 +62,7 @@ func NewGuardianHandler(redis *redis.Client, ollama *ollama.Client, discord *dis
 			},
 			IdleRequirement: 300,
 			DateTimeAware:   true,
+			EnforceMarkdown: true,
 		},
 		DiscordClient: discord,
 		WebClient:     web,
@@ -164,7 +165,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Sentry Protocol (T1)")
 
 		input := h.gatherContext(ctx, "t1", nil)
-		results, err := h.RunCognitiveLoop(ctx, h.Config.Name, "t1", h.Config.Models["t1"], "t1", "", input, 1, h.Config.DateTimeAware)
+		results, err := h.RunCognitiveLoop(ctx, h.Config.Name, "t1", h.Config.Models["t1"], "t1", "", input, 1, h.Config.DateTimeAware, h.Config.EnforceMarkdown)
 
 		if err == nil {
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
@@ -190,7 +191,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Architect Protocol (T2)")
 
 		input := h.gatherContext(ctx, "t2", t1Results)
-		t2Results, err := h.RunCognitiveLoop(ctx, h.Config.Name, "t2", h.Config.Models["t2"], "t2", "", input, 1, h.Config.DateTimeAware)
+		t2Results, err := h.RunCognitiveLoop(ctx, h.Config.Name, "t2", h.Config.Models["t2"], "t2", "", input, 1, h.Config.DateTimeAware, h.Config.EnforceMarkdown)
 
 		if err == nil {
 

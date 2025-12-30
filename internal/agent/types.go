@@ -30,6 +30,7 @@ type AgentConfig struct {
 	Cooldowns       map[string]int    // e.g. "t1": 1800
 	IdleRequirement int
 	DateTimeAware   bool
+	EnforceMarkdown bool
 }
 
 // Agent is the interface all automated workflows must implement.
