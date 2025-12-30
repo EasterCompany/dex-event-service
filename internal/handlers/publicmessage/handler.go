@@ -85,8 +85,28 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			if err != nil {
 				log.Printf("dex-router-model failed: %v, defaulting to STATIC", err)
 			} else {
-				decision = strings.ToUpper(strings.TrimSpace(routerOutput))
-				log.Printf("dex-router-model decision for %s: %s", foundURL, decision)
+				if strings.Contains(routerOutput, "<VISUAL/>") {
+					decision = "VISUAL"
+				} else {
+					decision = "STATIC"
+				}
+
+				routerEvent := map[string]interface{}{
+					"type":            types.EventTypeAnalysisRouterDecision,
+					"handler":         "public-message-handler",
+					"parent_event_id": input.EventID,
+					"url":             foundURL,
+					"decision":        decision,
+					"raw_output":      routerOutput,
+					"raw_input":       routerInput,
+					"model":           "dex-router-model",
+					"timestamp":       time.Now().Unix(),
+					"channel_id":      channelID,
+					"user_id":         userID,
+				}
+				if err := emitEvent(deps.EventServiceURL, routerEvent); err != nil {
+					log.Printf("Warning: Failed to emit router decision event: %v", err)
+				}
 			}
 			// --- End Router Model Logic ---
 

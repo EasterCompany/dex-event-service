@@ -39,6 +39,7 @@ const (
 	// Analysis Events
 	EventTypeAnalysisVisualCompleted EventType = "analysis.visual.completed"
 	EventTypeAnalysisLinkCompleted   EventType = "analysis.link.completed"
+	EventTypeAnalysisRouterDecision  EventType = "analysis.router.decision"
 
 	// System Events
 	EventTypeSystemStatusChange   EventType = "system.status.change"
