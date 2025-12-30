@@ -145,6 +145,12 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 			if len(mdIssues) > 0 {
 				currentAttemptCorrections = append(currentAttemptCorrections, mdIssues...)
 			}
+
+			// Integrity Check (Mutually Exclusive Content)
+			integrityIssues := b.ValidateResponseIntegrity(respMsg.Content)
+			if len(integrityIssues) > 0 {
+				currentAttemptCorrections = append(currentAttemptCorrections, integrityIssues...)
+			}
 		}
 
 		// --- Tier 2: Schema Validation (Only if syntax passes) ---
@@ -226,6 +232,33 @@ func (b *BaseAgent) BuildFeedbackPrompt(corrections []Correction) string {
 
 	sb.WriteString("Please resubmit your complete, corrected report now.")
 	return sb.String()
+}
+
+// ValidateResponseIntegrity ensures the model doesn't mix "no action" tokens with actual content.
+func (b *BaseAgent) ValidateResponseIntegrity(input string) []Correction {
+	var corrections []Correction
+
+	hasHeader := false
+	lines := strings.Split(input, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "# ") {
+			hasHeader = true
+			break
+		}
+	}
+
+	for _, token := range b.StopTokens {
+		if strings.Contains(input, token) && hasHeader {
+			corrections = append(corrections, Correction{
+				Type:      "LOGIC",
+				Guidance:  fmt.Sprintf("Ambiguous response detected. You included both a Report Header (# Title) and a Stop Token ('%s'). You must choose ONE: either provide a full report OR output the stop token if no action is needed. Do not do both.", token),
+				Mandatory: true,
+			})
+		}
+	}
+
+	return corrections
 }
 
 // ValidateMarkdown performs a basic structural check on the markdown response.
