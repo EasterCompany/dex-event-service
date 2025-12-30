@@ -190,7 +190,20 @@ func (b *BaseAgent) ValidateMarkdown(input string) []string {
 		issues = append(issues, "Unclosed markdown code block (missing closing ```).")
 	}
 
-	// 2. Check for mismatched headers (e.g. # Header with no space)
+	// 2. Check for empty code blocks
+	reCodeBlock := regexp.MustCompile("(?s)```(?:[a-zA-Z0-9]*\\n)?(.*?)\\n?```")
+	matches := reCodeBlock.FindAllStringSubmatch(input, -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			content := strings.TrimSpace(match[1])
+			if content == "" {
+				issues = append(issues, "Empty markdown code block found (must contain real content).")
+				break // Only need one report for this
+			}
+		}
+	}
+
+	// 3. Check for mismatched headers (e.g. # Header with no space)
 	reHeader := regexp.MustCompile(`(?m)^#+[^\s#]`)
 	if reHeader.MatchString(input) {
 		issues = append(issues, "Invalid header format (missing space after # symbols).")
