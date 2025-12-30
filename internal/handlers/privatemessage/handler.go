@@ -110,6 +110,9 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 						_ = deps.Discord.DeleteMessage(channelID, messageID)
 					}
 
+					// Automated response for user clarity in DMs
+					_, _ = deps.Discord.PostMessage(channelID, "I've detected explicit content in that link and have ignored it for safety.")
+
 					modEvent := map[string]interface{}{
 						"type":         types.EventTypeModerationExplicitContentDeleted,
 						"source":       "dex-event-service",
@@ -249,6 +252,9 @@ Rules:
 							}
 						}
 
+						// Automated response for user clarity in DMs
+						_, _ = deps.Discord.PostMessage(channelID, "I've detected explicit content in that attachment and have ignored it for safety.")
+
 						modEvent := map[string]interface{}{
 							"type":         types.EventTypeModerationExplicitContentDeleted,
 							"source":       "dex-event-service",
@@ -261,7 +267,7 @@ Rules:
 							"timestamp":    time.Now().Format(time.RFC3339),
 							"message_id":   messageID,
 							"reason":       "Explicit content detected in attachment: " + filename,
-							"handler":      "public-message-handler",
+							"handler":      "private-message-handler",
 							"raw_output":   description,
 						}
 						if err := emitEvent(deps.EventServiceURL, modEvent); err != nil {

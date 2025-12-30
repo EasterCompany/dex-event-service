@@ -94,6 +94,31 @@ func (c *Client) CompleteStream(channelID, messageID, content string) (string, e
 	return messageID, nil
 }
 
+func (c *Client) PostMessage(channelID, content string) (string, error) {
+	reqBody := map[string]string{
+		"channel_id": channelID,
+		"content":    content,
+	}
+	jsonData, _ := json.Marshal(reqBody)
+
+	resp, err := c.httpClient.Post(c.BaseURL+"/post", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("post message failed: status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	return result["message_id"], nil
+}
+
 func (c *Client) DeleteMessage(channelID, messageID string) error {
 	reqBody := map[string]string{
 		"channel_id": channelID,
