@@ -175,7 +175,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
 			for i := range results {
 				results[i].Type = "alert"
-				id, _ := h.emitResult(ctx, results[i])
+				id, _ := h.emitResult(ctx, results[i], "sentry")
 				sentryEventIDs = append(sentryEventIDs, id)
 			}
 			sentryResults = results
@@ -204,7 +204,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 				architectResults[i].Type = "blueprint"
 				architectResults[i].Body = architectResults[i].Summary
 				architectResults[i].SourceEventIDs = sentryEventIDs
-				_, _ = h.emitResult(ctx, architectResults[i])
+				_, _ = h.emitResult(ctx, architectResults[i], "architect")
 			}
 			h.RedisClient.Set(ctx, "guardian:last_run:architect", time.Now().Unix(), 0)
 		} else {
@@ -271,11 +271,12 @@ func (h *GuardianHandler) formatContext(tier, status, logs, cliHelp, tests, even
 
 // ... Context fetching methods remain largely similar but return strings for cleaner injection ...
 
-func (h *GuardianHandler) emitResult(ctx context.Context, res agent.AnalysisResult) (string, error) {
+func (h *GuardianHandler) emitResult(ctx context.Context, res agent.AnalysisResult, tier string) (string, error) {
 	eventID := uuid.New().String()
 	timestamp := time.Now().Unix()
 	payload := map[string]interface{}{
 		"title": res.Title, "priority": res.Priority, "category": res.Category,
+		"protocol": tier, "summary": res.Summary, "content": res.Content,
 		"body": res.Body, "related_event_ids": res.RelatedEventIDs,
 		"source_event_ids": res.SourceEventIDs, "read": false,
 	}
