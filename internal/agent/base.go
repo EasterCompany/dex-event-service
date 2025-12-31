@@ -228,20 +228,32 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 // BuildFeedbackPrompt constructs a high-fidelity rejection report for the model.
 func (b *BaseAgent) BuildFeedbackPrompt(corrections []Correction) string {
 	var sb strings.Builder
-	sb.WriteString("### 🚨 REPORT REJECTED: VALIDATION FAILED\n")
-	sb.WriteString("Your previous response contained structural or logical errors. You MUST fix these issues in your next attempt:\n\n")
+	sb.WriteString("# REPORT REJECTED\n")
+	sb.WriteString("**Reason:** Your previous response contained structural or logical errors. You MUST fix these issues in your next attempt.\n\n")
 
+	// Group by type
+	byType := make(map[string][]Correction)
 	for _, c := range corrections {
-		sb.WriteString(fmt.Sprintf("#### [%s ERROR]", c.Type))
-		if c.Line > 0 {
-			sb.WriteString(fmt.Sprintf(" (Line %d)", c.Line))
-		}
-		sb.WriteString("\n")
+		byType[c.Type] = append(byType[c.Type], c)
+	}
 
-		if c.Snippet != "" {
-			sb.WriteString(fmt.Sprintf("> **Violation:** `%s`\n", c.Snippet))
+	types := []string{"SYNTAX", "SCHEMA", "LOGIC"}
+	for _, t := range types {
+		corrs := byType[t]
+		if len(corrs) == 0 {
+			continue
 		}
-		sb.WriteString(fmt.Sprintf("> **Guidance:** %s\n\n", c.Guidance))
+
+		sb.WriteString(fmt.Sprintf("## %s ERRORS\n", t))
+		for _, c := range corrs {
+			if c.Line > 0 {
+				sb.WriteString(fmt.Sprintf("(Line %d) ", c.Line))
+			}
+			if c.Snippet != "" {
+				sb.WriteString(fmt.Sprintf("> **Violation:** `%s`\n", c.Snippet))
+			}
+			sb.WriteString(fmt.Sprintf("> **Guidance:** %s\n\n", c.Guidance))
+		}
 	}
 
 	sb.WriteString("Please resubmit your complete, corrected report now.")
