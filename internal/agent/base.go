@@ -381,8 +381,14 @@ func (b *BaseAgent) ValidateSchema(res AnalysisResult, required []string) []Corr
 		}
 
 		if missing {
+			msg := fmt.Sprintf("Missing mandatory section: '%s'. You must include this section in your report.", section)
+			lowerSect := strings.ToLower(section)
+			if lowerSect == "priority" || lowerSect == "category" || lowerSect == "related" || lowerSect == "related services" {
+				msg = fmt.Sprintf("Missing mandatory metadata field: '**%s**:'. You must include this field at the top of your report.", section)
+			}
+
 			corrections = append(corrections, Correction{
-				Type: "SCHEMA", Guidance: fmt.Sprintf("Missing mandatory section: '%s'. You must include this section in your report.", section), Mandatory: true,
+				Type: "SCHEMA", Guidance: msg, Mandatory: true,
 			})
 		}
 	}
