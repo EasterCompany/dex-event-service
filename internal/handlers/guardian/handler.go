@@ -96,7 +96,7 @@ func (h *GuardianHandler) GetConfig() agent.AgentConfig {
 	return h.Config
 }
 
-func (h *GuardianHandler) Run(ctx context.Context) ([]agent.AnalysisResult, error) {
+func (h *GuardianHandler) Run(ctx context.Context) ([]agent.AnalysisResult, string, error) {
 	return h.PerformAnalysis(ctx, 0)
 }
 
@@ -147,18 +147,20 @@ func (h *GuardianHandler) checkAndAnalyze() {
 	}
 
 	// Trigger full analysis
-	_, err := h.PerformAnalysis(ctx, 0)
+	_, _, err := h.PerformAnalysis(ctx, 0)
 	if err != nil {
 		log.Printf("[%s] Automated analysis failed: %v", HandlerName, err)
 		return
 	}
 }
 
-func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agent.AnalysisResult, error) {
+func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agent.AnalysisResult, string, error) {
 	log.Printf("[%s] Starting Guardian Analysis (Tier: %d)", HandlerName, tier)
 
 	defer h.RedisClient.Del(ctx, "guardian:active_tier")
 	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
+
+	var lastAuditID string
 
 	// Tier 1: Technical Sentry
 	var sentryResults []agent.AnalysisResult
@@ -169,16 +171,18 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 
 		input := h.gatherContext(ctx, "sentry", nil)
 		sessionID := fmt.Sprintf("sentry-%d", time.Now().Unix())
-		results, auditEventID, err := h.RunCognitiveLoop(ctx, h, "sentry", h.Config.Models["sentry"], sessionID, "", input, 1)
+		var err error
+		var auditEventID string
+		sentryResults, auditEventID, err = h.RunCognitiveLoop(ctx, h, "sentry", h.Config.Models["sentry"], sessionID, "", input, 1)
+		lastAuditID = auditEventID
 
 		if err == nil {
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
-			for i := range results {
-				results[i].Type = "alert"
-				id, _ := h.emitResult(ctx, results[i], "sentry", auditEventID)
+			for i := range sentryResults {
+				sentryResults[i].Type = "alert"
+				id, _ := h.emitResult(ctx, sentryResults[i], "sentry", auditEventID)
 				sentryEventIDs = append(sentryEventIDs, id)
 			}
-			sentryResults = results
 			h.RedisClient.Set(ctx, "guardian:last_run:sentry", time.Now().Unix(), 0)
 		} else {
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
@@ -197,6 +201,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 		input := h.gatherContext(ctx, "architect", sentryResults)
 		sessionID := fmt.Sprintf("architect-%d", time.Now().Unix())
 		architectResults, auditEventID, err := h.RunCognitiveLoop(ctx, h, "architect", h.Config.Models["architect"], sessionID, "", input, 1)
+		lastAuditID = auditEventID
 
 		if err == nil {
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
@@ -211,7 +216,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
 		}
 	}
-	return nil, nil // Results already emitted individually
+	return nil, lastAuditID, nil // Results already emitted individually
 }
 
 // ValidateLogic implements protocol-specific logical checks.

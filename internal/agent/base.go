@@ -58,7 +58,7 @@ func (b *BaseAgent) CleanupBusyCount(ctx context.Context) {
 
 // RunCognitiveLoop executes the 3-attempt chat process with retry logic.
 // It ALWAYS produces a system.analysis.audit event regardless of outcome.
-func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName, model, sessionID, systemPrompt, inputContext string, limit int) ([]AnalysisResult, string, error) {
+func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName, model, sessionID, systemPrompt, inputContext string, limit int) (results []AnalysisResult, auditEventID string, lastError error) {
 	startTime := time.Now()
 	agentConfig := agent.GetConfig()
 
@@ -76,14 +76,11 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 	taskHeader := fmt.Sprintf("# TASK\n\nYour task is to generate a %s %s report from the following data.\n\n", agentConfig.Name, protocolAlias)
 	inputContext = taskHeader + inputContext
 
-	var results []AnalysisResult
 	var allCorrections []Correction
-	var lastError error
 	var rawOutput string
 	var currentTurnHistory []ollama.Message
 	attempts := 0
 	success := false
-	var auditEventID string
 
 	defer func() {
 		duration := time.Since(startTime).String()
@@ -219,12 +216,12 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 		_ = b.ChatManager.AppendMessage(ctx, sessionID, newUserMsg)
 		_ = b.ChatManager.AppendMessage(ctx, sessionID, respMsg)
 		success = true
-		return results, auditEventID, nil
+		return
 	}
 
 	b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":absolute_failures")
 	lastError = fmt.Errorf("max retries reached or cognitive failure: %v", lastError)
-	return nil, "", lastError
+	return
 }
 
 // BuildFeedbackPrompt constructs a high-fidelity rejection report for the model.

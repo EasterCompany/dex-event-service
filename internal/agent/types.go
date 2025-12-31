@@ -47,14 +47,14 @@ type AgentConfig struct {
 type Agent interface {
 	Init(ctx context.Context) error
 	Close() error
-	Run(ctx context.Context) ([]AnalysisResult, error)
+	Run(ctx context.Context) ([]AnalysisResult, string, error)
 	GetConfig() AgentConfig
 	ValidateLogic(res AnalysisResult) []Correction // Protocol-specific logic checks
 }
 
 // CognitiveModule defines the shared logic for chat loops and parsing.
 type CognitiveModule interface {
-	ChatWithRetry(ctx context.Context, model string, history []ollama.Message, prompt string) ([]AnalysisResult, error)
+	ChatWithRetry(ctx context.Context, model string, history []ollama.Message, prompt string) ([]AnalysisResult, string, error)
 }
 
 // AuditPayload represents the comprehensive data captured for every agent run.

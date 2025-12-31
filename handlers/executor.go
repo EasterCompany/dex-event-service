@@ -91,7 +91,7 @@ func initBackgroundHandlers() {
 
 				// Wire up the trigger
 				GuardianTrigger = func(tier int) ([]interface{}, error) {
-					results, err := guardianHandler.PerformAnalysis(context.Background(), tier)
+					results, _, err := guardianHandler.PerformAnalysis(context.Background(), tier)
 					if err != nil {
 						return nil, err
 					}
