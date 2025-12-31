@@ -383,41 +383,11 @@ func (h *GuardianHandler) fetchCLICapabilities(ctx context.Context) (string, err
 }
 
 func (h *GuardianHandler) createDexCommand(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, h.getDexBinaryPath(), args...)
 
-	home, _ := os.UserHomeDir()
-	extraPaths := []string{
-		filepath.Join(home, ".bun", "bin"),
-		filepath.Join(home, "go", "bin"),
-		filepath.Join(home, ".cargo", "bin"),
-		filepath.Join(home, ".local", "bin"),
-		"/usr/local/go/bin",
-		"/usr/local/cuda/bin",
-		"/usr/local/bin",
-		"/usr/bin",
-		"/bin",
-		"/usr/sbin",
-		"/sbin",
-	}
+	dexPath := h.getDexBinaryPath()
 
-	currentPath := os.Getenv("PATH")
-	newPath := strings.Join(extraPaths, string(os.PathListSeparator)) + string(os.PathListSeparator) + currentPath
+	fullCmd := fmt.Sprintf("%s %s", dexPath, strings.Join(args, " "))
 
-	env := os.Environ()
-	var finalEnv []string
-	pathSet := false
-	for _, e := range env {
-		if strings.HasPrefix(e, "PATH=") {
-			finalEnv = append(finalEnv, "PATH="+newPath)
-			pathSet = true
-		} else {
-			finalEnv = append(finalEnv, e)
-		}
-	}
-	if !pathSet {
-		finalEnv = append(finalEnv, "PATH="+newPath)
-	}
-	cmd.Env = finalEnv
+	return exec.CommandContext(ctx, "bash", "-l", "-c", fullCmd)
 
-	return cmd
 }
