@@ -62,6 +62,14 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 	startTime := time.Now()
 	agentConfig := agent.GetConfig()
 
+	// Prepend Task Description
+	protocolAlias := tierName
+	if alias, ok := agentConfig.ProtocolAliases[tierName]; ok {
+		protocolAlias = alias
+	}
+	taskHeader := fmt.Sprintf("# TASK\n\nYour task is to generate a %s %s report from the following data.\n\n", agentConfig.Name, protocolAlias)
+	inputContext = taskHeader + inputContext
+
 	// Inject current date/time if aware
 	if agentConfig.DateTimeAware {
 		now := time.Now().Format("Monday, 02 Jan 2006 15:04:05 MST")
