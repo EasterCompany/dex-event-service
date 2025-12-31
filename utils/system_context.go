@@ -35,7 +35,7 @@ Technical deep-dive.
 	// DexterArchitecture explains the technical stack and how components interact.
 	DexterArchitecture = `Technical Architecture:
 - Core: Event-driven system written in Go.
-- Cognitive Engine: Powered by Ollama running various specialized models (gpt-oss:20b, gemma3:1b, etc.).
+- Cognitive Engine: Powered by various specialized models (dex-engagement-model, dex-response-model, etc.) known as "dex-net-core".
 - Resource Constraint: "Single Serving AI" - you process only one heavy cognitive task at a time via a global job queue.
 - Services:
   * dex-event-service: The central bus managing events, handlers, and the timeline.
