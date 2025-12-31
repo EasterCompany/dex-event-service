@@ -21,23 +21,29 @@ func TestFormatContext_NoDoubleBlankLines(t *testing.T) {
 	// Test Tier 1 context
 	t1Context := h.formatContext("t1", status, logs, cliHelp, tests, events, systemInfo, nil)
 
-	// Check for double blank lines (triple newlines)
+	// Check for double blank lines (triple newlines) - FAIL if found
 	if strings.Contains(t1Context, "\n\n\n") {
 		t.Errorf("Tier 1 context contains double blank lines (triple newlines):\n%q", t1Context)
 	}
 
-	// Verify specific structure for T1
-	expectedParts := []string{
-		"### SYSTEM STATUS\n" + status,
-		"### CLI CAPABILITIES\n" + cliHelp,
-		"### RECENT LOGS\n" + logs,
-		"### TEST RESULTS\n" + tests,
-		"### HARDWARE & CONTEXT\n" + systemInfo,
-		"### RECENT EVENTS:\n" + events,
+	// Verify exactly one blank line separation (\n\n) between headers and content
+	// and content and headers.
+	expectedTransitions := []string{
+		"### SYSTEM STATUS\n\nStatus",
+		"Status: OK\n\n### CLI CAPABILITIES",
+		"### CLI CAPABILITIES\n\ndex help",
+		"dex help\n\n### RECENT LOGS",
+		"### RECENT LOGS\n\nLog entry",
+		"Log entry 2\n\n### TEST RESULTS",
+		"### TEST RESULTS\n\nTest passed",
+		"Test passed\n\n### HARDWARE & CONTEXT",
+		"### HARDWARE & CONTEXT\n\nCPU: 10%",
+		"CPU: 10%\n\n### RECENT EVENTS:",
+		"### RECENT EVENTS:\n\nEvent 1",
 	}
-	for _, part := range expectedParts {
-		if !strings.Contains(t1Context, part) {
-			t.Errorf("Tier 1 context missing expected part: %q", part)
+	for _, trans := range expectedTransitions {
+		if !strings.Contains(t1Context, trans) {
+			t.Errorf("Tier 1 context missing expected transition or incorrect spacing: %q", trans)
 		}
 	}
 
@@ -51,8 +57,7 @@ func TestFormatContext_NoDoubleBlankLines(t *testing.T) {
 		t.Errorf("Tier 2 context contains double blank lines (triple newlines):\n%q", t2Context)
 	}
 
-	// Verify T2 specific
-	if !strings.Contains(t2Context, "### RECENT TIER 1 REPORTS:\n") {
-		t.Error("Tier 2 context missing Tier 1 reports header")
+	if !strings.Contains(t2Context, "### RECENT TIER 1 REPORTS:\n\n[") {
+		t.Error("Tier 2 context missing Tier 1 reports header or incorrect spacing")
 	}
 }

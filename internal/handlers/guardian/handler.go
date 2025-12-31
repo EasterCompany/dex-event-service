@@ -252,15 +252,15 @@ func (h *GuardianHandler) gatherContext(ctx context.Context, tier string, previo
 
 func (h *GuardianHandler) formatContext(tier, status, logs, cliHelp, tests, events, systemInfo string, previousResults []agent.AnalysisResult) string {
 	// Base context with common CLI components (these all have trailing newlines)
-	context := fmt.Sprintf("### SYSTEM STATUS\n%s### CLI CAPABILITIES\n%s### RECENT LOGS\n%s",
+	context := fmt.Sprintf("### SYSTEM STATUS\n%s\n### CLI CAPABILITIES\n%s\n### RECENT LOGS\n%s",
 		status, cliHelp, logs)
 
 	if tier == "t1" {
-		context += fmt.Sprintf("### TEST RESULTS\n%s### HARDWARE & CONTEXT\n%s### RECENT EVENTS:\n%s",
+		context += fmt.Sprintf("\n### TEST RESULTS\n%s\n### HARDWARE & CONTEXT\n%s\n### RECENT EVENTS:\n%s",
 			tests, systemInfo, events)
 	} else if tier == "t2" && len(previousResults) > 0 {
 		t1JSON, _ := json.Marshal(previousResults)
-		context += "### RECENT TIER 1 REPORTS:\n" + string(t1JSON)
+		context += "\n### RECENT TIER 1 REPORTS:\n\n" + string(t1JSON)
 	}
 
 	return context

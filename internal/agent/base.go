@@ -65,7 +65,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 	// Inject current date/time if aware
 	if agentConfig.DateTimeAware {
 		now := time.Now().Format("Monday, 02 Jan 2006 15:04:05 MST")
-		inputContext = fmt.Sprintf("### CURRENT DATE/TIME\n%s\n\n%s", now, inputContext)
+		inputContext = fmt.Sprintf("### CURRENT DATE/TIME\n\n%s\n\n%s", now, inputContext)
 	}
 
 	var results []AnalysisResult
