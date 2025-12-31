@@ -164,7 +164,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 	var sentryResults []agent.AnalysisResult
 	var sentryEventIDs []string
 	if tier == 0 || tier == 1 {
-		h.RedisClient.Set(ctx, "guardian:active_tier", "sentry", utils.DefaultTTL)
+		h.RedisClient.Set(ctx, "guardian:active_tier", "Working (Sentry)", utils.DefaultTTL)
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Sentry Protocol")
 
 		input := h.gatherContext(ctx, "sentry", nil)
@@ -191,7 +191,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 
 	// Tier 2: Architect
 	if shouldRunArchitect {
-		h.RedisClient.Set(ctx, "guardian:active_tier", "architect", utils.DefaultTTL)
+		h.RedisClient.Set(ctx, "guardian:active_tier", "Working (Architect)", utils.DefaultTTL)
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Architect Protocol")
 
 		input := h.gatherContext(ctx, "architect", sentryResults)
@@ -364,8 +364,6 @@ func (h *GuardianHandler) fetchRecentLogs(ctx context.Context) (string, error) {
 }
 
 func (h *GuardianHandler) fetchTestResults(ctx context.Context) (string, error) {
-	h.RedisClient.Set(ctx, "guardian:active_tier", "tests", utils.DefaultTTL)
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Running System Tests")
 	cmd := h.createDexCommand(ctx, "test", "--no-event")
 	out, _ := cmd.CombinedOutput()
 	return utils.StripANSI(string(out)), nil

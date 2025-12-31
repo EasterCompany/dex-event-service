@@ -44,32 +44,32 @@ func GetAgentStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 		activeTier, _ := redisClient.Get(ctx, "guardian:active_tier").Result()
 		guardian["active_tier"] = activeTier
 
-		// T1
-		lastT1TS, _ := redisClient.Get(ctx, "guardian:last_run:t1").Int64()
-		t1Model := "dex-guardian-t1"
-		t1Attempts, _ := redisClient.Get(ctx, "system:metrics:model:"+t1Model+":attempts").Int64()
-		t1Failures, _ := redisClient.Get(ctx, "system:metrics:model:"+t1Model+":failures").Int64()
-		t1Absolute, _ := redisClient.Get(ctx, "system:metrics:model:"+t1Model+":absolute_failures").Int64()
-		guardian["t1"] = map[string]interface{}{
-			"last_run": lastT1TS, "next_run": lastT1TS + 1800, "model": t1Model,
-			"attempts": t1Attempts, "failures": t1Failures, "absolute_failures": t1Absolute,
+		// Sentry
+		lastSentryTS, _ := redisClient.Get(ctx, "guardian:last_run:sentry").Int64()
+		sentryModel := "dex-guardian-t1"
+		sentryAttempts, _ := redisClient.Get(ctx, "system:metrics:model:"+sentryModel+":attempts").Int64()
+		sentryFailures, _ := redisClient.Get(ctx, "system:metrics:model:"+sentryModel+":failures").Int64()
+		sentryAbsolute, _ := redisClient.Get(ctx, "system:metrics:model:"+sentryModel+":absolute_failures").Int64()
+		guardian["sentry"] = map[string]interface{}{
+			"last_run": lastSentryTS, "next_run": lastSentryTS + 1800, "model": sentryModel,
+			"attempts": sentryAttempts, "failures": sentryFailures, "absolute_failures": sentryAbsolute,
 		}
 
-		// T2
-		lastT2TS, _ := redisClient.Get(ctx, "guardian:last_run:t2").Int64()
-		t2Model := "dex-guardian-t2"
-		t2Attempts, _ := redisClient.Get(ctx, "system:metrics:model:"+t2Model+":attempts").Int64()
-		t2Failures, _ := redisClient.Get(ctx, "system:metrics:model:"+t2Model+":failures").Int64()
-		t2Absolute, _ := redisClient.Get(ctx, "system:metrics:model:"+t2Model+":absolute_failures").Int64()
-		guardian["t2"] = map[string]interface{}{
-			"last_run": lastT2TS, "next_run": lastT2TS + 1800, "model": t2Model,
-			"attempts": t2Attempts, "failures": t2Failures, "absolute_failures": t2Absolute,
+		// Architect
+		lastArchitectTS, _ := redisClient.Get(ctx, "guardian:last_run:architect").Int64()
+		architectModel := "dex-guardian-t2"
+		architectAttempts, _ := redisClient.Get(ctx, "system:metrics:model:"+architectModel+":attempts").Int64()
+		architectFailures, _ := redisClient.Get(ctx, "system:metrics:model:"+architectModel+":failures").Int64()
+		architectAbsolute, _ := redisClient.Get(ctx, "system:metrics:model:"+architectModel+":absolute_failures").Int64()
+		guardian["architect"] = map[string]interface{}{
+			"last_run": lastArchitectTS, "next_run": lastArchitectTS + 1800, "model": architectModel,
+			"attempts": architectAttempts, "failures": architectFailures, "absolute_failures": architectAbsolute,
 		}
 
 		// Protocol Aliases
 		guardian["protocol_aliases"] = map[string]string{
-			"t1": "Sentry",
-			"t2": "Architect",
+			"sentry":    "Sentry",
+			"architect": "Architect",
 		}
 
 		status.Agents["guardian"] = guardian
@@ -92,8 +92,8 @@ func GetAgentStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 		// The frontend expects the fields at the root of the object
 		response := make(map[string]interface{})
 		response["active_tier"] = guardian["active_tier"]
-		response["t1"] = guardian["t1"]
-		response["t2"] = guardian["t2"]
+		response["sentry"] = guardian["sentry"]
+		response["architect"] = guardian["architect"]
 		response["system_state"] = status.System.State
 		response["system_state_time"] = status.System.StateTime
 		response["total_active_time"] = status.System.Metrics.Active
@@ -170,11 +170,11 @@ func ResetGuardianHandler(redisClient *redis.Client) http.HandlerFunc {
 			tier = query.Get("protocol")
 		}
 
-		if tier == "" || tier == "all" || tier == "t2" {
-			redisClient.Set(ctx, "guardian:last_run:t2", 0, utils.DefaultTTL)
+		if tier == "" || tier == "all" || tier == "architect" {
+			redisClient.Set(ctx, "guardian:last_run:architect", 0, utils.DefaultTTL)
 		}
-		if tier == "" || tier == "all" || tier == "t1" {
-			redisClient.Set(ctx, "guardian:last_run:t1", 0, utils.DefaultTTL)
+		if tier == "" || tier == "all" || tier == "sentry" {
+			redisClient.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
 		}
 
 		w.WriteHeader(http.StatusOK)
