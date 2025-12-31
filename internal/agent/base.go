@@ -99,7 +99,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 		audit := AuditPayload{
 			Type:          "system.analysis.audit",
 			AgentName:     agentConfig.Name,
-			Tier:          tierName,
+			Tier:          protocolAlias,
 			Model:         model,
 			InputContext:  inputContext,
 			RawOutput:     rawOutput,
