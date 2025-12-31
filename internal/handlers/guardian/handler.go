@@ -64,7 +64,7 @@ func NewGuardianHandler(redis *redis.Client, ollama *ollama.Client, discord *dis
 			DateTimeAware:   true,
 			EnforceMarkdown: true,
 			RequiredSections: []string{
-				"Summary", "Content", "Priority", "Category", "Affected",
+				"Summary", "Content", "Priority", "Category", "Related",
 			},
 		},
 		DiscordClient: discord,
@@ -284,7 +284,7 @@ func (h *GuardianHandler) emitResult(ctx context.Context, res agent.AnalysisResu
 		payload["blueprint"] = true
 		payload["summary"] = res.Summary
 		payload["content"] = res.Content
-		payload["affected_services"] = res.AffectedServices
+		payload["related_services"] = res.RelatedServices
 		payload["implementation_path"] = res.ImplementationPath
 	} else {
 		eventType = string(types.EventTypeSystemNotificationGenerated)

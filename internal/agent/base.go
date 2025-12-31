@@ -370,8 +370,8 @@ func (b *BaseAgent) ValidateSchema(res AnalysisResult, required []string) []Corr
 			if res.Category == "" {
 				missing = true
 			}
-		case "affected", "affected services":
-			if len(res.AffectedServices) == 0 {
+		case "related", "related services":
+			if len(res.RelatedServices) == 0 {
 				missing = true
 			}
 		case "implementation path", "proposed steps":
@@ -466,8 +466,8 @@ func (b *BaseAgent) ParseSingleMarkdownReport(input string) AnalysisResult {
 			res.Category = strings.TrimSpace(trimmed[strings.Index(trimmed, ":")+1:])
 			continue
 		}
-		if strings.HasPrefix(lower, "**affected**:") || strings.HasPrefix(lower, "**affected services**:") {
-			res.AffectedServices = strings.Split(strings.TrimSpace(trimmed[strings.Index(trimmed, ":")+1:]), ",")
+		if strings.HasPrefix(lower, "**related**:") || strings.HasPrefix(lower, "**related services**:") {
+			res.RelatedServices = strings.Split(strings.TrimSpace(trimmed[strings.Index(trimmed, ":")+1:]), ",")
 			continue
 		}
 
