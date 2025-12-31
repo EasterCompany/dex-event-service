@@ -691,17 +691,21 @@ func GetTemplates() map[string]EventTemplate {
 
 			Description: "Emitted when a Guardian Tier completes an audit of system state.",
 
+			Format: "Guardian Audit: {tier} ({model}) - {duration} [Success: {success}]",
+
 			Fields: map[string]FieldSpec{
+
+				"agent_name": {Type: "string", Required: true},
 
 				"tier": {Type: "string", Required: true, Description: "t1 or t2"},
 
 				"model": {Type: "string", Required: true, Description: "Name of the model used"},
 
-				"raw_input": {Type: "string", Required: true, Description: "The raw context provided to the model"},
+				"duration": {Type: "string", Required: true},
 
-				"raw_output": {Type: "string", Required: true, Description: "The raw response from the model"},
+				"success": {Type: "boolean", Required: true},
 
-				"duration": {Type: "number", Required: true, Description: "Time taken in seconds"},
+				"attempts": {Type: "number", Required: true},
 			},
 		},
 
