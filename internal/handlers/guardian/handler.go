@@ -343,19 +343,19 @@ func (h *GuardianHandler) fetchEventsForAnalysis(ctx context.Context) (string, e
 }
 
 func (h *GuardianHandler) fetchSystemStatus(ctx context.Context) (string, error) {
-	cmd := h.createDexCommand(ctx, "status")
+	cmd := h.createDexCommand(ctx, "status", "--no-event")
 	out, _ := cmd.CombinedOutput()
 	return utils.StripANSI(string(out)), nil
 }
 
 func (h *GuardianHandler) fetchSystemHardware(ctx context.Context) (string, error) {
-	cmd := h.createDexCommand(ctx, "system")
+	cmd := h.createDexCommand(ctx, "system", "--no-event")
 	out, _ := cmd.CombinedOutput()
 	return utils.StripANSI(string(out)), nil
 }
 
 func (h *GuardianHandler) fetchRecentLogs(ctx context.Context) (string, error) {
-	cmd := h.createDexCommand(ctx, "logs")
+	cmd := h.createDexCommand(ctx, "logs", "--no-event")
 	out, _ := cmd.CombinedOutput()
 	return utils.StripANSI(string(out)), nil
 }
@@ -363,13 +363,13 @@ func (h *GuardianHandler) fetchRecentLogs(ctx context.Context) (string, error) {
 func (h *GuardianHandler) fetchTestResults(ctx context.Context) (string, error) {
 	h.RedisClient.Set(ctx, "guardian:active_tier", "tests", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Running System Tests")
-	cmd := h.createDexCommand(ctx, "test")
+	cmd := h.createDexCommand(ctx, "test", "--no-event")
 	out, _ := cmd.CombinedOutput()
 	return utils.StripANSI(string(out)), nil
 }
 
 func (h *GuardianHandler) fetchCLICapabilities(ctx context.Context) (string, error) {
-	cmd := h.createDexCommand(ctx, "help")
+	cmd := h.createDexCommand(ctx, "help", "--no-event")
 	out, _ := cmd.CombinedOutput()
 	return utils.StripANSI(string(out)), nil
 }
