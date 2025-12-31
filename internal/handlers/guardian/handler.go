@@ -277,8 +277,9 @@ func (h *GuardianHandler) emitResult(ctx context.Context, res agent.AnalysisResu
 	payload := map[string]interface{}{
 		"title": res.Title, "priority": res.Priority, "category": res.Category,
 		"protocol": tier, "summary": res.Summary, "content": res.Content,
-		"body": res.Body, "related_event_ids": res.RelatedEventIDs,
-		"source_event_ids": res.SourceEventIDs, "read": false,
+		"body": res.Body, "related_services": res.RelatedServices,
+		"related_event_ids": res.RelatedEventIDs,
+		"source_event_ids":  res.SourceEventIDs, "read": false,
 		"audit_event_id": auditEventID,
 	}
 
