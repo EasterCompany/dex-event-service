@@ -252,11 +252,11 @@ func (h *GuardianHandler) gatherContext(ctx context.Context, tier string, previo
 
 func (h *GuardianHandler) formatContext(tier, status, logs, cliHelp, tests, events, systemInfo string, previousResults []agent.AnalysisResult) string {
 	// Base context with common CLI components (these all have trailing newlines)
-	context := fmt.Sprintf("### SYSTEM STATUS\n%s\n### CLI CAPABILITIES\n%s\n### RECENT LOGS\n%s",
+	context := fmt.Sprintf("## SYSTEM STATUS\n%s## CLI (help)\n%s## LOGS\n%s",
 		status, cliHelp, logs)
 
 	if tier == "t1" {
-		context += fmt.Sprintf("\n### TEST RESULTS\n%s\n### HARDWARE & CONTEXT\n%s\n### RECENT EVENTS:\n%s",
+		context += fmt.Sprintf("\n## TEST\n%s## SYSTEM\n%s## EVENTS\n%s",
 			tests, systemInfo, events)
 	} else if tier == "t2" && len(previousResults) > 0 {
 		t1JSON, _ := json.Marshal(previousResults)
@@ -340,19 +340,19 @@ func (h *GuardianHandler) fetchEventsForAnalysis(ctx context.Context) (string, e
 }
 
 func (h *GuardianHandler) fetchSystemStatus(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, h.getDexBinaryPath(), "status")
+	cmd := h.createDexCommand(ctx, "status")
 	out, _ := cmd.CombinedOutput()
 	return utils.StripANSI(string(out)), nil
 }
 
 func (h *GuardianHandler) fetchSystemHardware(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, h.getDexBinaryPath(), "system")
+	cmd := h.createDexCommand(ctx, "system")
 	out, _ := cmd.CombinedOutput()
 	return utils.StripANSI(string(out)), nil
 }
 
 func (h *GuardianHandler) fetchRecentLogs(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, h.getDexBinaryPath(), "logs")
+	cmd := h.createDexCommand(ctx, "logs")
 	out, _ := cmd.CombinedOutput()
 	return utils.StripANSI(string(out)), nil
 }
@@ -360,13 +360,53 @@ func (h *GuardianHandler) fetchRecentLogs(ctx context.Context) (string, error) {
 func (h *GuardianHandler) fetchTestResults(ctx context.Context) (string, error) {
 	h.RedisClient.Set(ctx, "guardian:active_tier", "tests", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Running System Tests")
-	cmd := exec.CommandContext(ctx, h.getDexBinaryPath(), "test")
+	cmd := h.createDexCommand(ctx, "test")
 	out, _ := cmd.CombinedOutput()
 	return utils.StripANSI(string(out)), nil
 }
 
 func (h *GuardianHandler) fetchCLICapabilities(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, h.getDexBinaryPath(), "help")
+	cmd := h.createDexCommand(ctx, "help")
 	out, _ := cmd.CombinedOutput()
 	return utils.StripANSI(string(out)), nil
+}
+
+func (h *GuardianHandler) createDexCommand(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, h.getDexBinaryPath(), args...)
+
+	home, _ := os.UserHomeDir()
+	extraPaths := []string{
+		filepath.Join(home, ".bun", "bin"),
+		filepath.Join(home, "go", "bin"),
+		filepath.Join(home, ".cargo", "bin"),
+		filepath.Join(home, ".local", "bin"),
+		"/usr/local/go/bin",
+		"/usr/local/cuda/bin",
+		"/usr/local/bin",
+		"/usr/bin",
+		"/bin",
+		"/usr/sbin",
+		"/sbin",
+	}
+
+	currentPath := os.Getenv("PATH")
+	newPath := strings.Join(extraPaths, string(os.PathListSeparator)) + string(os.PathListSeparator) + currentPath
+
+	env := os.Environ()
+	var finalEnv []string
+	pathSet := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "PATH=") {
+			finalEnv = append(finalEnv, "PATH="+newPath)
+			pathSet = true
+		} else {
+			finalEnv = append(finalEnv, e)
+		}
+	}
+	if !pathSet {
+		finalEnv = append(finalEnv, "PATH="+newPath)
+	}
+	cmd.Env = finalEnv
+
+	return cmd
 }
