@@ -49,16 +49,16 @@ func NewGuardianHandler(redis *redis.Client, ollama *ollama.Client, discord *dis
 			Name:      "Guardian",
 			ProcessID: "system-guardian",
 			Models: map[string]string{
-				"t1": "dex-guardian-t1",
-				"t2": "dex-guardian-t2",
+				"sentry":    "dex-guardian-t1",
+				"architect": "dex-guardian-t2",
 			},
 			ProtocolAliases: map[string]string{
-				"t1": "Sentry",
-				"t2": "Architect",
+				"sentry":    "Sentry",
+				"architect": "Architect",
 			},
 			Cooldowns: map[string]int{
-				"t1": 1800,
-				"t2": 1800,
+				"sentry":    1800,
+				"architect": 1800,
 			},
 			IdleRequirement: 300,
 			DateTimeAware:   true,
@@ -139,10 +139,10 @@ func (h *GuardianHandler) checkAndAnalyze() {
 	h.CleanupBusyCount(ctx)
 
 	// 5. Cooldown checks
-	lastT1, _ := h.RedisClient.Get(ctx, "guardian:last_run:t1").Int64()
-	lastT2, _ := h.RedisClient.Get(ctx, "guardian:last_run:t2").Int64()
+	lastSentry, _ := h.RedisClient.Get(ctx, "guardian:last_run:sentry").Int64()
+	lastArchitect, _ := h.RedisClient.Get(ctx, "guardian:last_run:architect").Int64()
 
-	if (now-lastT1 < int64(h.Config.Cooldowns["t1"])) || (now-lastT2 < int64(h.Config.Cooldowns["t2"])) {
+	if (now-lastSentry < int64(h.Config.Cooldowns["sentry"])) || (now-lastArchitect < int64(h.Config.Cooldowns["architect"])) {
 		return
 	}
 
@@ -161,50 +161,52 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
 
 	// Tier 1: Technical Sentry
-	var t1Results []agent.AnalysisResult
-	var t1EventIDs []string
+	var sentryResults []agent.AnalysisResult
+	var sentryEventIDs []string
 	if tier == 0 || tier == 1 {
-		h.RedisClient.Set(ctx, "guardian:active_tier", "t1", utils.DefaultTTL)
-		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Sentry Protocol (T1)")
+		h.RedisClient.Set(ctx, "guardian:active_tier", "sentry", utils.DefaultTTL)
+		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Sentry Protocol")
 
-		input := h.gatherContext(ctx, "t1", nil)
-		results, err := h.RunCognitiveLoop(ctx, h, "t1", h.Config.Models["t1"], "t1", "", input, 1)
+		input := h.gatherContext(ctx, "sentry", nil)
+		sessionID := fmt.Sprintf("sentry-%d", time.Now().Unix())
+		results, err := h.RunCognitiveLoop(ctx, h, "sentry", h.Config.Models["sentry"], sessionID, "", input, 1)
 
 		if err == nil {
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
 			for i := range results {
 				results[i].Type = "alert"
 				id, _ := h.emitResult(ctx, results[i])
-				t1EventIDs = append(t1EventIDs, id)
+				sentryEventIDs = append(sentryEventIDs, id)
 			}
-			t1Results = results
-			h.RedisClient.Set(ctx, "guardian:last_run:t1", time.Now().Unix(), 0)
+			sentryResults = results
+			h.RedisClient.Set(ctx, "guardian:last_run:sentry", time.Now().Unix(), 0)
 		} else {
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
 		}
 	}
 
-	// Determine if Tier 2 should run
-	// Run if explicitly requested (tier 2) OR if full cycle (tier 0) AND Tier 1 found issues
-	shouldRunT2 := (tier == 2) || (tier == 0 && len(t1Results) > 0)
+	// Determine if Architect should run
+	// Run if explicitly requested (tier 2) OR if full cycle (tier 0) AND Sentry found issues
+	shouldRunArchitect := (tier == 2) || (tier == 0 && len(sentryResults) > 0)
 
 	// Tier 2: Architect
-	if shouldRunT2 {
-		h.RedisClient.Set(ctx, "guardian:active_tier", "t2", utils.DefaultTTL)
-		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Architect Protocol (T2)")
+	if shouldRunArchitect {
+		h.RedisClient.Set(ctx, "guardian:active_tier", "architect", utils.DefaultTTL)
+		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Architect Protocol")
 
-		input := h.gatherContext(ctx, "t2", t1Results)
-		t2Results, err := h.RunCognitiveLoop(ctx, h, "t2", h.Config.Models["t2"], "t2", "", input, 1)
+		input := h.gatherContext(ctx, "architect", sentryResults)
+		sessionID := fmt.Sprintf("architect-%d", time.Now().Unix())
+		architectResults, err := h.RunCognitiveLoop(ctx, h, "architect", h.Config.Models["architect"], sessionID, "", input, 1)
 
 		if err == nil {
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
-			for i := range t2Results {
-				t2Results[i].Type = "blueprint"
-				t2Results[i].Body = t2Results[i].Summary
-				t2Results[i].SourceEventIDs = t1EventIDs
-				_, _ = h.emitResult(ctx, t2Results[i])
+			for i := range architectResults {
+				architectResults[i].Type = "blueprint"
+				architectResults[i].Body = architectResults[i].Summary
+				architectResults[i].SourceEventIDs = sentryEventIDs
+				_, _ = h.emitResult(ctx, architectResults[i])
 			}
-			h.RedisClient.Set(ctx, "guardian:last_run:t2", time.Now().Unix(), 0)
+			h.RedisClient.Set(ctx, "guardian:last_run:architect", time.Now().Unix(), 0)
 		} else {
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
 		}
@@ -241,7 +243,7 @@ func (h *GuardianHandler) gatherContext(ctx context.Context, tier string, previo
 	cliHelp, _ := h.fetchCLICapabilities(ctx)
 
 	var tests, events, systemInfo string
-	if tier == "t1" {
+	if tier == "sentry" {
 		tests, _ = h.fetchTestResults(ctx)
 		events, _ = h.fetchEventsForAnalysis(ctx)
 		systemInfo, _ = h.fetchSystemHardware(ctx)
@@ -256,12 +258,12 @@ func (h *GuardianHandler) formatContext(tier, status, logs, cliHelp, tests, even
 	context := fmt.Sprintf("## SYSTEM STATUS\n%s\n## CLI (help)\n%s\n## LOGS\n%s",
 		status, cliHelp, logs)
 
-	if tier == "t1" {
+	if tier == "sentry" {
 		context += fmt.Sprintf("\n## TEST\n%s\n## SYSTEM\n%s\n## EVENTS\n%s",
 			tests, systemInfo, events)
-	} else if tier == "t2" && len(previousResults) > 0 {
-		t1JSON, _ := json.Marshal(previousResults)
-		context += "\n## RECENT TIER 1 REPORTS:\n\n" + string(t1JSON)
+	} else if tier == "architect" && len(previousResults) > 0 {
+		sentryJSON, _ := json.Marshal(previousResults)
+		context += "\n## RECENT SENTRY REPORTS:\n\n" + string(sentryJSON)
 	}
 
 	return context

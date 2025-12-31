@@ -174,8 +174,10 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		// ALWAYS exclude actual structural records from general clearing
 		// They must be deleted via their specific windows or explicit type filtering
-		excludedTypesMap[string(types.EventTypeSystemBlueprintGenerated)] = true
-		excludedTypesMap[string(types.EventTypeSystemNotificationGenerated)] = true
+		if targetType == "" {
+			excludedTypesMap[string(types.EventTypeSystemBlueprintGenerated)] = true
+			excludedTypesMap[string(types.EventTypeSystemNotificationGenerated)] = true
+		}
 
 		targetTypes := make(map[string]bool)
 		if targetType != "" {

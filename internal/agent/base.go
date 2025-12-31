@@ -151,6 +151,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 		}
 
 		rawOutput = respMsg.Content
+		currentTurnHistory = append(currentTurnHistory, respMsg)
 		var currentAttemptCorrections []Correction
 
 		// --- Tier 1: Syntax Validation ---
@@ -205,11 +206,11 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 			b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":failures")
 
 			feedback := b.BuildFeedbackPrompt(currentAttemptCorrections)
-			currentTurnHistory = append(currentTurnHistory, respMsg)
-			currentTurnHistory = append(currentTurnHistory, ollama.Message{
+			feedbackMsg := ollama.Message{
 				Role:    "user",
 				Content: feedback,
-			})
+			}
+			currentTurnHistory = append(currentTurnHistory, feedbackMsg)
 			continue
 		}
 
