@@ -83,6 +83,11 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 			errStr = lastError.Error()
 		}
 
+		status := "SUCCESS"
+		if !success {
+			status = "FAIL"
+		}
+
 		audit := AuditPayload{
 			Type:          "system.analysis.audit",
 			AgentName:     agentConfig.Name,
@@ -98,6 +103,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 			Timestamp:     time.Now().Unix(),
 			Attempts:      attempts,
 			Success:       success,
+			Status:        status,
 		}
 
 		// Convert to map for SendEvent

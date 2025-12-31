@@ -73,4 +73,5 @@ type AuditPayload struct {
 	Timestamp     int64            `json:"timestamp"`
 	Attempts      int              `json:"attempts"`
 	Success       bool             `json:"success"`
+	Status        string           `json:"status"`
 }

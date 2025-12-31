@@ -691,7 +691,7 @@ func GetTemplates() map[string]EventTemplate {
 
 			Description: "Emitted when a Guardian Tier completes an audit of system state.",
 
-			Format: "Guardian Audit: {tier} ({model}) - {duration} [Success: {success}]",
+			Format: "Guardian Audit: {tier} ({model}) - {duration} [{status}]",
 
 			Fields: map[string]FieldSpec{
 
@@ -704,6 +704,8 @@ func GetTemplates() map[string]EventTemplate {
 				"duration": {Type: "string", Required: true},
 
 				"success": {Type: "boolean", Required: true},
+
+				"status": {Type: "string", Required: true},
 
 				"attempts": {Type: "number", Required: true},
 			},

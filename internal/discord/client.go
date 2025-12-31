@@ -214,7 +214,7 @@ func (c *Client) FetchContext(channelID string, maxLength int) (string, error) {
 		maxLength = 25 // Default
 	}
 	// Use EventSvcURL here
-	url := fmt.Sprintf("%s/events?channel=%s&max_length=%d&order=desc&format=text&exclude_types=engagement.decision", c.EventSvcURL, channelID, maxLength)
+	url := fmt.Sprintf("%s/events?channel=%s&max_length=%d&order=asc&format=text&exclude_types=engagement.decision", c.EventSvcURL, channelID, maxLength)
 
 	resp, err := c.httpClient.Get(url)
 	if err != nil {

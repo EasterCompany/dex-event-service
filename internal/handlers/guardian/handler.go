@@ -325,7 +325,9 @@ func (h *GuardianHandler) getDexBinaryPath() string {
 func (h *GuardianHandler) fetchEventsForAnalysis(ctx context.Context) (string, error) {
 	eventIDs, _ := h.RedisClient.ZRevRange(ctx, "events:timeline", 0, 50).Result()
 	var lines []string
-	for _, id := range eventIDs {
+	// Iterate backwards to get oldest first
+	for i := len(eventIDs) - 1; i >= 0; i-- {
+		id := eventIDs[i]
 		val, _ := h.RedisClient.Get(ctx, "event:"+id).Result()
 		var e types.Event
 		if err := json.Unmarshal([]byte(val), &e); err == nil {
