@@ -160,10 +160,6 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 	defer h.RedisClient.Del(ctx, "guardian:active_tier")
 	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
 
-	if tier == 0 || tier == 1 {
-		h.runSystemTests(ctx)
-	}
-
 	// Tier 1: Technical Sentry
 	var t1Results []agent.AnalysisResult
 	var t1EventIDs []string
@@ -240,24 +236,34 @@ func (h *GuardianHandler) ValidateLogic(res agent.AnalysisResult) []agent.Correc
 }
 
 func (h *GuardianHandler) gatherContext(ctx context.Context, tier string, previousResults []agent.AnalysisResult) string {
-
 	status, _ := h.fetchSystemStatus(ctx)
 	logs, _ := h.fetchRecentLogs(ctx)
-	tests, _ := h.fetchTestResults(ctx)
 	cliHelp, _ := h.fetchCLICapabilities(ctx)
 
-	var extra string
+	var tests, events, systemInfo string
 	if tier == "t1" {
-		events, _ := h.fetchEventsForAnalysis(ctx)
-		systemInfo, _ := h.fetchSystemHardware(ctx)
-		extra = fmt.Sprintf("\n\n### HARDWARE & CONTEXT\n%s\n\n### RECENT EVENTS:\n%s", systemInfo, events)
-	} else if tier == "t2" && len(previousResults) > 0 {
-		t1JSON, _ := json.Marshal(previousResults)
-		extra = "\n\n### RECENT TIER 1 REPORTS:\n" + string(t1JSON)
+		tests, _ = h.fetchTestResults(ctx)
+		events, _ = h.fetchEventsForAnalysis(ctx)
+		systemInfo, _ = h.fetchSystemHardware(ctx)
 	}
 
-	return fmt.Sprintf("### SYSTEM STATUS\n%s\n\n### CLI CAPABILITIES\n%s\n\n### RECENT LOGS\n%s\n\n### TEST RESULTS\n%s%s",
-		status, cliHelp, logs, tests, extra)
+	return h.formatContext(tier, status, logs, cliHelp, tests, events, systemInfo, previousResults)
+}
+
+func (h *GuardianHandler) formatContext(tier, status, logs, cliHelp, tests, events, systemInfo string, previousResults []agent.AnalysisResult) string {
+	// Base context with common CLI components (these all have trailing newlines)
+	context := fmt.Sprintf("### SYSTEM STATUS\n%s### CLI CAPABILITIES\n%s### RECENT LOGS\n%s",
+		status, cliHelp, logs)
+
+	if tier == "t1" {
+		context += fmt.Sprintf("### TEST RESULTS\n%s### HARDWARE & CONTEXT\n%s### RECENT EVENTS:\n%s",
+			tests, systemInfo, events)
+	} else if tier == "t2" && len(previousResults) > 0 {
+		t1JSON, _ := json.Marshal(previousResults)
+		context += "### RECENT TIER 1 REPORTS:\n" + string(t1JSON)
+	}
+
+	return context
 }
 
 // ... Context fetching methods remain largely similar but return strings for cleaner injection ...
@@ -307,14 +313,6 @@ func (h *GuardianHandler) emitResult(ctx context.Context, res agent.AnalysisResu
 	return eventID, err
 }
 
-func (h *GuardianHandler) runSystemTests(ctx context.Context) {
-	h.RedisClient.Set(ctx, "guardian:active_tier", "tests", utils.DefaultTTL)
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Running System Tests")
-	dexPath := h.getDexBinaryPath()
-	cmd := exec.CommandContext(ctx, dexPath, "test")
-	_ = cmd.Run()
-}
-
 func (h *GuardianHandler) getDexBinaryPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -360,25 +358,11 @@ func (h *GuardianHandler) fetchRecentLogs(ctx context.Context) (string, error) {
 }
 
 func (h *GuardianHandler) fetchTestResults(ctx context.Context) (string, error) {
-	eventIDs, _ := h.RedisClient.ZRevRange(ctx, "events:timeline", 0, 250).Result()
-	var tests []string
-	seen := make(map[string]bool)
-	for _, id := range eventIDs {
-		data, _ := h.RedisClient.Get(ctx, "event:"+id).Result()
-		var e types.Event
-		if err := json.Unmarshal([]byte(data), &e); err == nil {
-			var ed map[string]interface{}
-			_ = json.Unmarshal(e.Event, &ed)
-			if ed["type"] == string(types.EventTypeSystemTestCompleted) {
-				svc, _ := ed["service_name"].(string)
-				if svc != "" && !seen[svc] {
-					tests = append(tests, fmt.Sprintf("[%s] %s", svc, ed["duration"]))
-					seen[svc] = true
-				}
-			}
-		}
-	}
-	return strings.Join(tests, "\n"), nil
+	h.RedisClient.Set(ctx, "guardian:active_tier", "tests", utils.DefaultTTL)
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Running System Tests")
+	cmd := exec.CommandContext(ctx, h.getDexBinaryPath(), "test")
+	out, _ := cmd.CombinedOutput()
+	return utils.StripANSI(string(out)), nil
 }
 
 func (h *GuardianHandler) fetchCLICapabilities(ctx context.Context) (string, error) {
