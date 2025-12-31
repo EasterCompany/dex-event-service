@@ -3,14 +3,19 @@ package utils
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
-// SendEvent is an internal helper to store an event in Redis and update all relevant timelines.
-func SendEvent(ctx context.Context, redisClient *redis.Client, service string, eventType string, eventData map[string]interface{}) {
+// SendEvent sends an event to the event service and stores it in Redis.
+func SendEvent(ctx context.Context, redisClient *redis.Client, service string, eventType string, eventData map[string]interface{}) (string, error) {
+	if redisClient == nil {
+		return "", fmt.Errorf("redis client is nil")
+	}
+
 	eventID := uuid.New().String()
 	timestamp := time.Now().Unix()
 
@@ -57,5 +62,6 @@ func SendEvent(ctx context.Context, redisClient *redis.Client, service string, e
 		pipe.ZAdd(ctx, "events:channel:"+channelID, redis.Z{Score: float64(timestamp), Member: eventID})
 	}
 
-	_, _ = pipe.Exec(ctx)
+	_, err := pipe.Exec(ctx)
+	return eventID, err
 }

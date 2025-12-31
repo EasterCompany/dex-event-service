@@ -21,6 +21,7 @@ func HandleProcessRegistration(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID    string `json:"id"`
 		State string `json:"state"`
+		PID   int    `json:"pid"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -64,10 +65,12 @@ func HandleProcessRegistration(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 	_, _ = w.Write([]byte("Process registered successfully"))
 
-	// Emit Event
-	utils.SendEvent(ctx, redisClient, "process-manager", "system.process.registered", map[string]interface{}{
-		"id":    req.ID,
-		"state": req.State,
+	// Emit registration event
+	_, _ = utils.SendEvent(ctx, redisClient, "process-manager", "system.process.registered", map[string]interface{}{
+		"process_id": req.ID,
+		"pid":        req.PID,
+		"status":     "registered",
+		"timestamp":  time.Now().Unix(),
 	})
 }
 
@@ -119,8 +122,10 @@ func HandleProcessUnregistration(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("Process unregistered successfully"))
 
-	// Emit Event
-	utils.SendEvent(ctx, redisClient, "process-manager", "system.process.unregistered", map[string]interface{}{
-		"id": id,
+	// Emit unregistration event
+	_, _ = utils.SendEvent(ctx, redisClient, "process-manager", "system.process.unregistered", map[string]interface{}{
+		"process_id": id,
+		"status":     "unregistered",
+		"timestamp":  time.Now().Unix(),
 	})
 }
