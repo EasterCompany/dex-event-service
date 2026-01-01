@@ -25,10 +25,11 @@ func NewClient(url string) *Client {
 }
 
 type GenerateRequest struct {
-	Model  string   `json:"model"`
-	Prompt string   `json:"prompt"`
-	Images []string `json:"images,omitempty"`
-	Stream bool     `json:"stream"`
+	Model   string                 `json:"model"`
+	Prompt  string                 `json:"prompt"`
+	Images  []string               `json:"images,omitempty"`
+	Stream  bool                   `json:"stream"`
+	Options map[string]interface{} `json:"options,omitempty"`
 }
 
 type GenerateResponse struct {
@@ -98,15 +99,16 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message) (Me
 }
 
 func (c *Client) Generate(model, prompt string, images []string) (string, error) {
-	return c.GenerateWithContext(context.Background(), model, prompt, images)
+	return c.GenerateWithContext(context.Background(), model, prompt, images, nil)
 }
 
-func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, images []string) (string, error) {
+func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, images []string, options map[string]interface{}) (string, error) {
 	reqBody := GenerateRequest{
-		Model:  model,
-		Prompt: prompt,
-		Images: images,
-		Stream: false,
+		Model:   model,
+		Prompt:  prompt,
+		Images:  images,
+		Stream:  false,
+		Options: options,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -142,12 +144,13 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 	return response.Response, nil
 }
 
-func (c *Client) GenerateStream(model, prompt string, images []string, callback func(string)) error {
+func (c *Client) GenerateStream(model, prompt string, images []string, options map[string]interface{}, callback func(string)) error {
 	reqBody := GenerateRequest{
-		Model:  model,
-		Prompt: prompt,
-		Images: images,
-		Stream: true,
+		Model:   model,
+		Prompt:  prompt,
+		Images:  images,
+		Stream:  true,
+		Options: options,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {

@@ -401,7 +401,10 @@ Rules:
 		}
 
 		fullResponse := ""
-		err = deps.Ollama.GenerateStream(responseModel, prompt, nil, func(chunk string) {
+		options := map[string]interface{}{
+			"repeat_penalty": 1.3,
+		}
+		err = deps.Ollama.GenerateStream(responseModel, prompt, nil, options, func(chunk string) {
 			fullResponse += chunk
 
 			denormalizedResponse := fullResponse
