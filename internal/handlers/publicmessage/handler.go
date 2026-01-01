@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/config"
+	"github.com/EasterCompany/dex-event-service/internal/analysis"
 	"github.com/EasterCompany/dex-event-service/internal/handlers"
 	"github.com/EasterCompany/dex-event-service/internal/smartcontext"
 	"github.com/EasterCompany/dex-event-service/internal/web"
@@ -82,7 +83,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 			decision := "STATIC" // Default to static
 			routerInput := fmt.Sprintf("%s\nURL to analyze: %s", routerBasePrompt, foundURL)
-			routerOutput, err := deps.Ollama.Generate("dex-router-model", routerInput, nil)
+			routerOutput, _, err := deps.Ollama.Generate("dex-router-model", routerInput, nil)
 			if err != nil {
 				log.Printf("dex-router-model failed: %v, defaulting to STATIC", err)
 			} else {
@@ -150,7 +151,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					if len(contentToSummarize) > 12000 { // Max summary length
 						contentToSummarize = contentToSummarize[:12000]
 					}
-					currentSummary, _ = deps.Ollama.Generate("dex-scraper-model", contentToSummarize, nil)
+					currentSummary, _, _ = deps.Ollama.Generate("dex-scraper-model", contentToSummarize, nil)
 					currentSummary = strings.TrimSpace(currentSummary)
 				}
 
@@ -182,7 +183,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					if len(contentToSummarize) > 12000 {
 						contentToSummarize = contentToSummarize[:12000]
 					}
-					currentSummary, _ = deps.Ollama.Generate("dex-scraper-model", contentToSummarize, nil)
+					currentSummary, _, _ = deps.Ollama.Generate("dex-scraper-model", contentToSummarize, nil)
 					currentSummary = strings.TrimSpace(currentSummary)
 				}
 			}
@@ -191,7 +192,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			if currentTitle != "" || currentDescription != "" {
 				modPrompt := fmt.Sprintf("Analyze this link metadata:\n\nTitle: %s\nDescription: %s\nURL: %s", currentTitle, currentDescription, foundURL)
 
-				isExplicitRaw, err := deps.Ollama.Generate("dex-moderation-model", modPrompt, nil)
+				isExplicitRaw, _, err := deps.Ollama.Generate("dex-moderation-model", modPrompt, nil)
 				if err == nil && strings.Contains(isExplicitRaw, "<EXPLICIT_CONTENT_DETECTED/>") {
 					log.Printf("EXPLICIT LINK TEXT DETECTED: %s. Deleting message...", foundURL)
 
@@ -350,7 +351,7 @@ Rules:
 3. DO NOT flag memes or common internet GIFs as explicit unless they depict actual sexual acts.
 4. Treat screenshots of pornographic websites or links to explicit galleries as Rule 1.`
 					var err error
-					description, err = deps.Ollama.Generate("dex-vision-model", prompt, []string{base64Img})
+					description, _, err = deps.Ollama.Generate("dex-vision-model", prompt, []string{base64Img})
 					if err != nil {
 						log.Printf("Vision model failed for %s: %v", filename, err)
 						continue
@@ -501,7 +502,7 @@ User ID: %s (Master ID: %s)
 Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 
 		var err error
-		engagementRaw, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
+		engagementRaw, _, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
 		if err != nil {
 			log.Printf("Regular engagement check failed: %v, defaulting to IGNORE", err)
 			decisionStr = "NONE"
@@ -547,7 +548,7 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 		evalHistory, _ := deps.Discord.FetchContext(channelID, 10)
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Vibe Check")
 		prompt := fmt.Sprintf("Analyze if Dexter should respond to this message. Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", evalHistory, content)
-		engagementRaw, err := deps.Ollama.Generate("dex-fast-engagement-model", prompt, nil)
+		engagementRaw, _, err := deps.Ollama.Generate("dex-fast-engagement-model", prompt, nil)
 		if err == nil && strings.Contains(engagementRaw, "<ENGAGE/>") {
 			shouldEngage = true
 			decisionStr = "ENGAGE_FAST"
@@ -640,7 +641,7 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 		options := map[string]interface{}{
 			"repeat_penalty": 1.3,
 		}
-		err = deps.Ollama.GenerateStream(responseModel, prompt, nil, options, func(chunk string) {
+		stats, err := deps.Ollama.GenerateStream(responseModel, prompt, nil, options, func(chunk string) {
 			fullResponse += chunk
 
 			denormalizedResponse := fullResponse
@@ -672,25 +673,53 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 		}
 
 		botEventData := map[string]interface{}{
-			"type":           types.EventTypeMessagingBotSentMessage,
-			"source":         "dex-event-service",
-			"user_id":        "dexter",
-			"user_name":      "Dexter",
-			"channel_id":     channelID,
-			"channel_name":   input.EventData["channel_name"],
-			"server_id":      input.EventData["server_id"],
-			"server_name":    input.EventData["server_name"],
-			"message_id":     finalMessageID,
-			"content":        fullResponse,
-			"timestamp":      time.Now().Format(time.RFC3339),
-			"response_model": responseModel,
-			"response_raw":   fullResponse,
-			"raw_input":      prompt,
-			"chat_history":   chatHistory,
+			"type":               types.EventTypeMessagingBotSentMessage,
+			"source":             "dex-event-service",
+			"user_id":            "dexter",
+			"user_name":          "Dexter",
+			"channel_id":         channelID,
+			"channel_name":       input.EventData["channel_name"],
+			"server_id":          input.EventData["server_id"],
+			"server_name":        input.EventData["server_name"],
+			"message_id":         finalMessageID,
+			"content":            fullResponse,
+			"timestamp":          time.Now().Format(time.RFC3339),
+			"response_model":     responseModel,
+			"response_raw":       fullResponse,
+			"raw_input":          prompt,
+			"chat_history":       chatHistory,
+			"eval_count":         stats.EvalCount,
+			"prompt_count":       stats.PromptEvalCount,
+			"duration_ms":        stats.TotalDuration.Milliseconds(),
+			"load_duration_ms":   stats.LoadDuration.Milliseconds(),
+			"prompt_duration_ms": stats.PromptEvalDuration.Milliseconds(),
+			"eval_duration_ms":   stats.EvalDuration.Milliseconds(),
 		}
 		if err := emitEvent(deps.EventServiceURL, botEventData); err != nil {
 			log.Printf("Warning: Failed to emit event: %v", err)
 		}
+
+		// --- 3. Async Signal Extraction for User Profiling ---
+		go func() {
+			analysisModel := "dex-fast-summary-model"
+			signals, raw, err := analysis.Extract(context.Background(), deps.Ollama, analysisModel, content, contextHistory)
+			if err != nil {
+				log.Printf("Signal extraction failed: %v", err)
+				return
+			}
+
+			signalEvent := map[string]interface{}{
+				"type":            "analysis.user.message_signals",
+				"parent_event_id": input.EventID,
+				"user_id":         userID,
+				"channel_id":      channelID,
+				"signals":         signals,
+				"raw_output":      raw,
+				"model":           analysisModel,
+				"timestamp":       time.Now().Unix(),
+			}
+			_ = emitEvent(deps.EventServiceURL, signalEvent)
+		}()
 	}
 
 	return types.HandlerOutput{

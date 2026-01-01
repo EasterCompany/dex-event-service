@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"time"
 )
 
 const DefaultURL = "http://127.0.0.1:11434"
@@ -33,8 +34,14 @@ type GenerateRequest struct {
 }
 
 type GenerateResponse struct {
-	Response string `json:"response"`
-	Done     bool   `json:"done"`
+	Response           string `json:"response"`
+	Done               bool   `json:"done"`
+	EvalCount          int    `json:"eval_count,omitempty"`
+	PromptEvalCount    int    `json:"prompt_eval_count,omitempty"`
+	TotalDuration      int64  `json:"total_duration,omitempty"`
+	LoadDuration       int64  `json:"load_duration,omitempty"`
+	PromptEvalDuration int64  `json:"prompt_eval_duration,omitempty"`
+	EvalDuration       int64  `json:"eval_duration,omitempty"`
 }
 
 type Message struct {
@@ -52,9 +59,24 @@ type ChatRequest struct {
 }
 
 type ChatResponse struct {
-	Model   string  `json:"model"`
-	Message Message `json:"message"`
-	Done    bool    `json:"done"`
+	Model              string  `json:"model"`
+	Message            Message `json:"message"`
+	Done               bool    `json:"done"`
+	EvalCount          int     `json:"eval_count,omitempty"`
+	PromptEvalCount    int     `json:"prompt_eval_count,omitempty"`
+	TotalDuration      int64   `json:"total_duration,omitempty"`
+	LoadDuration       int64   `json:"load_duration,omitempty"`
+	PromptEvalDuration int64   `json:"prompt_eval_duration,omitempty"`
+	EvalDuration       int64   `json:"eval_duration,omitempty"`
+}
+
+type GenerationStats struct {
+	EvalCount          int
+	PromptEvalCount    int
+	TotalDuration      time.Duration
+	LoadDuration       time.Duration
+	PromptEvalDuration time.Duration
+	EvalDuration       time.Duration
 }
 
 func (c *Client) Chat(ctx context.Context, model string, messages []Message) (Message, error) {
@@ -98,11 +120,11 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message) (Me
 	return response.Message, nil
 }
 
-func (c *Client) Generate(model, prompt string, images []string) (string, error) {
+func (c *Client) Generate(model, prompt string, images []string) (string, GenerationStats, error) {
 	return c.GenerateWithContext(context.Background(), model, prompt, images, nil)
 }
 
-func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, images []string, options map[string]interface{}) (string, error) {
+func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, images []string, options map[string]interface{}) (string, GenerationStats, error) {
 	reqBody := GenerateRequest{
 		Model:   model,
 		Prompt:  prompt,
@@ -112,19 +134,19 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return "", GenerationStats{}, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/generate", bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", err
+		return "", GenerationStats{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", GenerationStats{}, err
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
@@ -133,18 +155,28 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ollama returned status: %d", resp.StatusCode)
+		return "", GenerationStats{}, fmt.Errorf("ollama returned status: %d", resp.StatusCode)
 	}
 
 	body, _ := io.ReadAll(resp.Body)
 	var response GenerateResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return "", err
+		return "", GenerationStats{}, err
 	}
-	return response.Response, nil
+
+	stats := GenerationStats{
+		EvalCount:          response.EvalCount,
+		PromptEvalCount:    response.PromptEvalCount,
+		TotalDuration:      time.Duration(response.TotalDuration),
+		LoadDuration:       time.Duration(response.LoadDuration),
+		PromptEvalDuration: time.Duration(response.PromptEvalDuration),
+		EvalDuration:       time.Duration(response.EvalDuration),
+	}
+
+	return response.Response, stats, nil
 }
 
-func (c *Client) GenerateStream(model, prompt string, images []string, options map[string]interface{}, callback func(string)) error {
+func (c *Client) GenerateStream(model, prompt string, images []string, options map[string]interface{}, callback func(string)) (GenerationStats, error) {
 	reqBody := GenerateRequest{
 		Model:   model,
 		Prompt:  prompt,
@@ -154,12 +186,12 @@ func (c *Client) GenerateStream(model, prompt string, images []string, options m
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return err
+		return GenerationStats{}, err
 	}
 
 	resp, err := http.Post(c.BaseURL+"/api/generate", "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
-		return err
+		return GenerationStats{}, err
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
@@ -168,9 +200,10 @@ func (c *Client) GenerateStream(model, prompt string, images []string, options m
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ollama returned status: %d", resp.StatusCode)
+		return GenerationStats{}, fmt.Errorf("ollama returned status: %d", resp.StatusCode)
 	}
 
+	stats := GenerationStats{}
 	reader := bufio.NewReader(resp.Body)
 	for {
 		line, err := reader.ReadBytes('\n')
@@ -178,7 +211,7 @@ func (c *Client) GenerateStream(model, prompt string, images []string, options m
 			if err == io.EOF {
 				break
 			}
-			return err
+			return stats, err
 		}
 
 		var chunk GenerateResponse
@@ -189,8 +222,14 @@ func (c *Client) GenerateStream(model, prompt string, images []string, options m
 			callback(chunk.Response)
 		}
 		if chunk.Done {
+			stats.EvalCount = chunk.EvalCount
+			stats.PromptEvalCount = chunk.PromptEvalCount
+			stats.TotalDuration = time.Duration(chunk.TotalDuration)
+			stats.LoadDuration = time.Duration(chunk.LoadDuration)
+			stats.PromptEvalDuration = time.Duration(chunk.PromptEvalDuration)
+			stats.EvalDuration = time.Duration(chunk.EvalDuration)
 			break
 		}
 	}
-	return nil
+	return stats, nil
 }

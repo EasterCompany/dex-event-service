@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EasterCompany/dex-event-service/internal/analysis"
 	"github.com/EasterCompany/dex-event-service/internal/handlers"
 	"github.com/EasterCompany/dex-event-service/internal/smartcontext"
 	"github.com/EasterCompany/dex-event-service/types"
@@ -94,15 +95,14 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				if len(contentToSummarize) > 12000 {
 					contentToSummarize = contentToSummarize[:12000]
 				}
-				summary, _ = deps.Ollama.Generate("dex-scraper-model", contentToSummarize, nil)
+				summary, _, _ = deps.Ollama.Generate("dex-scraper-model", contentToSummarize, nil)
 				summary = strings.TrimSpace(summary)
 			}
-
 			// Check for explicit text in link metadata
 			if meta.Title != "" || meta.Description != "" {
 				modPrompt := fmt.Sprintf("Analyze this link metadata:\n\nTitle: %s\nDescription: %s\nURL: %s", meta.Title, meta.Description, foundURL)
 
-				isExplicitRaw, err := deps.Ollama.Generate("dex-moderation-model", modPrompt, nil)
+				isExplicitRaw, _, err := deps.Ollama.Generate("dex-moderation-model", modPrompt, nil)
 				if err == nil && strings.Contains(isExplicitRaw, "<EXPLICIT_CONTENT_DETECTED/>") {
 					log.Printf("EXPLICIT LINK TEXT DETECTED: %s. Deleting message...", foundURL)
 
@@ -235,7 +235,7 @@ Rules:
 2. If the image contains non-sexual nudity (classical art, statues, medical context), memes, cartoons, or is otherwise safe, provide a concise visual description.
 3. DO NOT flag memes or common internet GIFs as explicit unless they depict actual sexual acts.
 4. Treat screenshots of pornographic websites or links to explicit galleries as Rule 1.`
-					description, err = deps.Ollama.Generate("dex-vision-model", prompt, []string{base64Img})
+					description, _, err = deps.Ollama.Generate("dex-vision-model", prompt, []string{base64Img})
 					if err != nil {
 						log.Printf("Vision model failed for %s: %v", filename, err)
 						continue
@@ -405,7 +405,7 @@ Rules:
 		options := map[string]interface{}{
 			"repeat_penalty": 1.3,
 		}
-		err = deps.Ollama.GenerateStream(responseModel, prompt, nil, options, func(chunk string) {
+		stats, err := deps.Ollama.GenerateStream(responseModel, prompt, nil, options, func(chunk string) {
 			fullResponse += chunk
 
 			denormalizedResponse := fullResponse
@@ -436,25 +436,53 @@ Rules:
 		}
 
 		botEventData := map[string]interface{}{
-			"type":           types.EventTypeMessagingBotSentMessage,
-			"source":         "dex-event-service",
-			"user_id":        "dexter",
-			"user_name":      "Dexter",
-			"channel_id":     channelID,
-			"channel_name":   "DM",
-			"server_id":      input.EventData["server_id"],
-			"server_name":    "DM",
-			"message_id":     finalMessageID,
-			"content":        fullResponse,
-			"timestamp":      time.Now().Format(time.RFC3339),
-			"response_model": responseModel,
-			"response_raw":   fullResponse,
-			"raw_input":      prompt,
-			"chat_history":   chatHistory,
+			"type":               types.EventTypeMessagingBotSentMessage,
+			"source":             "dex-event-service",
+			"user_id":            "dexter",
+			"user_name":          "Dexter",
+			"channel_id":         channelID,
+			"channel_name":       "DM",
+			"server_id":          input.EventData["server_id"],
+			"server_name":        "DM",
+			"message_id":         finalMessageID,
+			"content":            fullResponse,
+			"timestamp":          time.Now().Format(time.RFC3339),
+			"response_model":     responseModel,
+			"response_raw":       fullResponse,
+			"raw_input":          prompt,
+			"chat_history":       chatHistory,
+			"eval_count":         stats.EvalCount,
+			"prompt_count":       stats.PromptEvalCount,
+			"duration_ms":        stats.TotalDuration.Milliseconds(),
+			"load_duration_ms":   stats.LoadDuration.Milliseconds(),
+			"prompt_duration_ms": stats.PromptEvalDuration.Milliseconds(),
+			"eval_duration_ms":   stats.EvalDuration.Milliseconds(),
 		}
 		if err := emitEvent(deps.EventServiceURL, botEventData); err != nil {
 			log.Printf("Warning: Failed to emit event: %v", err)
 		}
+
+		// --- Async Signal Extraction ---
+		go func() {
+			analysisModel := "dex-fast-summary-model"
+			signals, raw, err := analysis.Extract(context.Background(), deps.Ollama, analysisModel, content, contextHistory)
+			if err != nil {
+				log.Printf("Signal extraction failed: %v", err)
+				return
+			}
+
+			signalEvent := map[string]interface{}{
+				"type":            "analysis.user.message_signals",
+				"parent_event_id": input.EventID,
+				"user_id":         userID,
+				"channel_id":      channelID,
+				"signals":         signals,
+				"raw_output":      raw,
+				"model":           analysisModel,
+				"timestamp":       time.Now().Unix(),
+			}
+			_ = emitEvent(deps.EventServiceURL, signalEvent)
+		}()
 	}
 
 	return types.HandlerOutput{

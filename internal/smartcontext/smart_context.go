@@ -65,12 +65,11 @@ func Get(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Cl
 
 	// We use Generate directly here.
 	// Note: We are not handling the 'images' param for summary, assuming text-only context for now.
-	summary, err := ollamaClient.Generate(summaryModel, summaryPrompt, nil)
+	summary, _, err := ollamaClient.Generate(summaryModel, summaryPrompt, nil)
 	if err != nil {
 		// Fallback: return full text if summary fails
 		return formatEventsBlock(events), nil
 	}
-
 	// 6. Combine
 	recentText := formatEventsBlock(recentEvents)
 

@@ -64,7 +64,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	// 1. Check Engagement
 	prompt := fmt.Sprintf("Analyze if Dexter should respond to this voice transcription. Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nCurrent Transcription:\n%s", contextHistory, transcription)
-	engagementRaw, err := deps.Ollama.Generate("dex-fast-engagement-model", prompt, nil)
+	engagementRaw, _, err := deps.Ollama.Generate("dex-fast-engagement-model", prompt, nil)
 	if err != nil {
 		log.Printf("Engagement check failed: %v", err)
 		return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
@@ -121,7 +121,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 		prompt := fmt.Sprintf("Context:\n%s\n\nUser (%s) Said: %s", contextHistory, userName, transcription)
 		responseModel := "dex-fast-transcription-model"
-		response, err := deps.Ollama.Generate(responseModel, prompt, nil)
+		response, _, err := deps.Ollama.Generate(responseModel, prompt, nil)
 
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
