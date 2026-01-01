@@ -18,6 +18,7 @@ import (
 	"github.com/EasterCompany/dex-event-service/internal/handlers/greeting"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/guardian"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/privatemessage"
+	"github.com/EasterCompany/dex-event-service/internal/handlers/profiler"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/publicmessage"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/transcription"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/webhook"
@@ -36,6 +37,7 @@ var (
 		"greeting-handler":        greeting.Handle,
 		"transcription-handler":   transcription.Handle,
 		"webhook-handler":         webhook.Handle,
+		"profiler-handler":        profiler.Handle,
 	}
 	dependencies    *internalHandlers.Dependencies
 	jobQueue        chan *job

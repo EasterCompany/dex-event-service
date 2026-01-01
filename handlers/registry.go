@@ -54,6 +54,12 @@ var handlerConfigs = map[string]types.HandlerConfig{
 		IsBackgroundWorker: true,
 		Timeout:            0, // Managed by its own internal loop
 	},
+	"profiler-handler": {
+		Name:        "profiler-handler",
+		Description: "Accumulates analytical signals into user profiles",
+		Timeout:     30,
+		EventTypes:  []string{"analysis.user.message_signals", "messaging.bot.sent_message"},
+	},
 }
 
 // Initialize performs any startup tasks for handlers (now mostly a no-op or just logging)
