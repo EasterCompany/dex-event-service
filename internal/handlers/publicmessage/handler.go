@@ -666,7 +666,7 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 		// Build structured history for observability
 		chatHistory := []map[string]string{
 			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": contextHistory + "\n\n" + content},
+			{"role": "user", "content": "Context:\n" + contextHistory + "\n\nUser: " + content},
 			{"role": "assistant", "content": fullResponse},
 		}
 

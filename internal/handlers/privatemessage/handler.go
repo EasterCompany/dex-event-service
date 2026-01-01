@@ -429,8 +429,8 @@ Rules:
 
 		// Build structured history for observability
 		chatHistory := []map[string]string{
-			{"role": "system", "content": utils.GetBaseSystemPrompt()},
-			{"role": "user", "content": contextHistory + "\n\n" + content},
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": "Context:\n" + contextHistory + "\n\nUser: " + content},
 			{"role": "assistant", "content": fullResponse},
 		}
 
