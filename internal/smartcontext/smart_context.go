@@ -48,7 +48,7 @@ func Get(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Cl
 	total := len(events)
 	if total <= 5 {
 		// Not enough history to summarize, just return raw text
-		return formatEventsBlock(events), nil
+		return FormatEventsBlock(events), nil
 	}
 
 	// Split: older (0 to total-5), recent (total-5 to end)
@@ -56,7 +56,7 @@ func Get(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Cl
 	recentEvents := events[total-5:]
 
 	// 5. Summarize older events
-	olderText := formatEventsBlock(olderEvents)
+	olderText := FormatEventsBlock(olderEvents)
 	if summaryModel == "" {
 		summaryModel = "dex-summary-model"
 	}
@@ -68,17 +68,17 @@ func Get(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Cl
 	summary, _, err := ollamaClient.Generate(summaryModel, summaryPrompt, nil)
 	if err != nil {
 		// Fallback: return full text if summary fails
-		return formatEventsBlock(events), nil
+		return FormatEventsBlock(events), nil
 	}
 	// 6. Combine
-	recentText := formatEventsBlock(recentEvents)
+	recentText := FormatEventsBlock(recentEvents)
 
 	finalContext := fmt.Sprintf("Summary of previous conversation:\n%s\n\nRecent messages:\n%s", strings.TrimSpace(summary), recentText)
 	return finalContext, nil
 }
 
-// formatEventsBlock formats a slice of events into the standard log format
-func formatEventsBlock(events []types.Event) string {
+// FormatEventsBlock formats a slice of events into the standard log format
+func FormatEventsBlock(events []types.Event) string {
 	var sb strings.Builder
 	for _, evt := range events {
 		var eventData map[string]interface{}

@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/internal/agent"
 	"github.com/EasterCompany/dex-event-service/internal/discord"
 	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/smartcontext"
+	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/redis/go-redis/v9"
 )
@@ -103,15 +106,32 @@ func (h *AnalyzerAgent) runWorker() {
 }
 
 func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
-	// 1. Target Selection (For prototype, we'll pick the Master User, but we could scan keys)
-	targetUserID := "313071000877137920"
+	// 1. Scan for all user profiles in Redis
+	iter := h.RedisClient.Scan(ctx, 0, "user:profile:*", 0).Iterator()
 
-	// Check cooldown
-	cooldownKey := fmt.Sprintf("agent:%s:cooldown:%s", h.Config.Name, targetUserID)
-	if h.RedisClient.Get(ctx, cooldownKey).Val() != "" {
+	for iter.Next(ctx) {
+		key := iter.Val()
+		targetUserID := strings.TrimPrefix(key, "user:profile:")
+
+		if targetUserID == "" {
+			continue
+		}
+
+		// Check cooldown
+		cooldownKey := fmt.Sprintf("agent:%s:cooldown:%s", h.Config.Name, targetUserID)
+		if h.RedisClient.Get(ctx, cooldownKey).Val() != "" {
+			continue
+		}
+
+		h.processUserSynthesis(ctx, targetUserID, cooldownKey)
+
+		// Respect sequential execution - only one user per synthesis pass
+		// The next user will be picked up in the next heartbeat (every 1 min)
 		return
 	}
+}
 
+func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID string, cooldownKey string) {
 	log.Printf("[%s] Starting synthesis for user %s", h.Config.Name, targetUserID)
 
 	// Enforce global sequential execution
@@ -184,8 +204,40 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 }
 
 func (h *AnalyzerAgent) gatherHistoryContext(ctx context.Context, userID string) string {
-	// TODO: Fetch last 50 analysis.user.message_signals for this user
-	return "[Analytical signals for this period are being loaded...]"
+	userTimelineKey := "events:user:" + userID
+
+	// 1. Fetch all event IDs for the last 24 hours
+	// Since Redis only holds 24 hours of data, we just get the whole sorted set
+	eventIDs, err := h.RedisClient.ZRange(ctx, userTimelineKey, 0, -1).Result()
+	if err != nil {
+		log.Printf("[%s] Failed to fetch user timeline: %v", h.Config.Name, err)
+		return ""
+	}
+
+	if len(eventIDs) == 0 {
+		return "No interaction history found for this period."
+	}
+
+	// 2. Fetch event data
+	var events []types.Event
+	for _, id := range eventIDs {
+		data, err := h.RedisClient.Get(ctx, "event:"+id).Result()
+		if err == nil {
+			var evt types.Event
+			if err := json.Unmarshal([]byte(data), &evt); err == nil {
+				// We filter out audits to avoid context loops, but keep signals and messages
+				var evtData map[string]interface{}
+				_ = json.Unmarshal(evt.Event, &evtData)
+				if evtData["type"] != string(types.EventTypeSystemAnalysisAudit) {
+					events = append(events, evt)
+				}
+			}
+		}
+	}
+
+	// 3. Format as a clinical log for synthesis
+	// We use the shared smartcontext formatter
+	return "### 24-HOUR INTERACTION HISTORY:\n" + smartcontext.FormatEventsBlock(events)
 }
 
 func (h *AnalyzerAgent) buildSynthesisPrompt(p *UserProfile) string {

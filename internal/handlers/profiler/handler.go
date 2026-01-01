@@ -105,6 +105,19 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		return types.HandlerOutput{Success: false, Error: "Redis unavailable"}, nil
 	}
 
+	// --- 1. Universal User Indexing ---
+	// Index every event that has a user_id into a user-specific timeline
+	userID, _ := input.EventData["user_id"].(string)
+	if userID != "" && userID != "dexter" {
+		userTimelineKey := "events:user:" + userID
+		deps.Redis.ZAdd(ctx, userTimelineKey, redis.Z{
+			Score:  float64(input.Timestamp),
+			Member: input.EventID,
+		})
+		// Ensure the timeline key itself has a TTL
+		deps.Redis.Expire(ctx, userTimelineKey, 24*time.Hour)
+	}
+
 	eventType, _ := input.EventData["type"].(string)
 
 	switch eventType {
