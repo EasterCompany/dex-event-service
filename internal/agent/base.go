@@ -185,7 +185,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 	newUserMsg := ollama.Message{Role: "user", Content: inputContext}
 	currentTurnHistory = append(chatHistory, newUserMsg)
 
-	maxRetries := 3
+	maxRetries := 5
 
 	for i := 0; i < maxRetries; i++ {
 		attempts++
