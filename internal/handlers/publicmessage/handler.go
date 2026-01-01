@@ -14,6 +14,7 @@ import (
 
 	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/internal/handlers"
+	"github.com/EasterCompany/dex-event-service/internal/smartcontext"
 	"github.com/EasterCompany/dex-event-service/internal/web"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
@@ -559,15 +560,15 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 
 	// --- 2. Build Response Context based on Model Choice ---
 	isFastModel := strings.Contains(responseModel, "-fast-")
-	contextLimit := 25
 	systemPrompt := utils.GetBaseSystemPrompt()
+	summaryModel := "dex-summary-model"
 
 	if isFastModel {
-		contextLimit = 5
 		systemPrompt = utils.GetFastSystemPrompt()
+		summaryModel = "dex-fast-summary-model"
 	}
 
-	contextHistory, err := deps.Discord.FetchContext(channelID, contextLimit)
+	contextHistory, err := smartcontext.Get(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch context: %v", err)
 	}

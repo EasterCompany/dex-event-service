@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/internal/handlers"
+	"github.com/EasterCompany/dex-event-service/internal/smartcontext"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
 )
@@ -320,7 +321,25 @@ Rules:
 		defer deps.Redis.Del(context.Background(), lockKey)
 	}
 
-	contextHistory, err := deps.Discord.FetchContext(channelID, 25)
+	masterUserID := ""
+	if deps.Options != nil {
+		masterUserID = deps.Options.Discord.MasterUser
+	}
+
+	responseModel := "dex-fast-private-message-model"
+	summaryModel := "dex-fast-summary-model"
+	decisionStr := "REPLY_FAST"
+	engagementReason := "Automatic engagement for Private Message"
+	shouldEngage := true
+
+	if userID == masterUserID {
+		responseModel = "dex-private-message-model"
+		summaryModel = "dex-summary-model"
+		decisionStr = "REPLY_REGULAR"
+		engagementReason = "Master user detected in DM, using regular model"
+	}
+
+	contextHistory, err := smartcontext.Get(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch context: %v", err)
 	}
@@ -339,24 +358,6 @@ Rules:
 		if mentions, ok := input.EventData["mentions"].([]interface{}); ok {
 			content = utils.NormalizeMentions(content, mentions)
 		}
-	}
-
-	var decisionStr string
-	shouldEngage := true // Always engage in DMs
-	engagementReason := "Automatic engagement for Private Message"
-
-	masterUserID := ""
-	if deps.Options != nil {
-		masterUserID = deps.Options.Discord.MasterUser
-	}
-
-	responseModel := "dex-fast-private-message-model"
-	decisionStr = "REPLY_FAST"
-
-	if userID == masterUserID {
-		responseModel = "dex-private-message-model"
-		decisionStr = "REPLY_REGULAR"
-		engagementReason = "Master user detected in DM, using regular model"
 	}
 
 	engagementEventData := map[string]interface{}{
