@@ -50,7 +50,7 @@ func NewAnalyzerAgent(redis *redis.Client, ollama *ollama.Client, discord *disco
 			Cooldowns: map[string]int{
 				"synthesis": 43200, // 12 hours
 			},
-			IdleRequirement: 600, // 10 minutes idle
+			IdleRequirement: 300, // 5 minutes idle (matched with Guardian)
 			DateTimeAware:   true,
 		},
 		DiscordClient: discord,
@@ -78,7 +78,7 @@ func (h *AnalyzerAgent) Close() error {
 }
 
 func (h *AnalyzerAgent) runWorker() {
-	ticker := time.NewTicker(15 * time.Minute)
+	ticker := time.NewTicker(1 * time.Minute) // Check every minute
 	defer ticker.Stop()
 
 	for {
@@ -89,7 +89,10 @@ func (h *AnalyzerAgent) runWorker() {
 			// 1. Check Idle
 			lastCognitiveEvent, _ := h.RedisClient.Get(h.ctx, "system:last_cognitive_event").Int64()
 			now := time.Now().Unix()
-			if now-lastCognitiveEvent < int64(h.Config.IdleRequirement) {
+			idleTime := now - lastCognitiveEvent
+
+			if idleTime < int64(h.Config.IdleRequirement) {
+				// System is too active
 				continue
 			}
 
