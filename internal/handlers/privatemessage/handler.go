@@ -427,6 +427,13 @@ Rules:
 		finalMessageID, _ := deps.Discord.CompleteStream(channelID, streamMessageID, finalResponse)
 		log.Printf("Generated response: %s", fullResponse)
 
+		// Build structured history for observability
+		chatHistory := []map[string]string{
+			{"role": "system", "content": utils.GetBaseSystemPrompt()},
+			{"role": "user", "content": contextHistory + "\n\n" + content},
+			{"role": "assistant", "content": fullResponse},
+		}
+
 		botEventData := map[string]interface{}{
 			"type":           types.EventTypeMessagingBotSentMessage,
 			"source":         "dex-event-service",
@@ -442,6 +449,7 @@ Rules:
 			"response_model": responseModel,
 			"response_raw":   fullResponse,
 			"raw_input":      prompt,
+			"chat_history":   chatHistory,
 		}
 		if err := emitEvent(deps.EventServiceURL, botEventData); err != nil {
 			log.Printf("Warning: Failed to emit event: %v", err)
