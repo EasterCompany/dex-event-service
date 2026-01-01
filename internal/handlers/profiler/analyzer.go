@@ -112,6 +112,11 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 	}
 
 	log.Printf("[%s] Starting synthesis for user %s", h.Config.Name, masterUserID)
+
+	// Enforce global sequential execution
+	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, fmt.Sprintf("Analyzing User: %s", masterUserID))
 	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
 

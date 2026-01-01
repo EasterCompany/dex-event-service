@@ -4,12 +4,59 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/internal/discord"
 	"github.com/redis/go-redis/v9"
 )
+
+const (
+	// CognitiveLockKey is the global key used to ensure only one heavy agent protocol runs at a time.
+	CognitiveLockKey = "system:cognitive_lock"
+	// CognitiveLockTTL is the maximum time an agent can hold the lock (safety timeout).
+	CognitiveLockTTL = 10 * time.Minute
+)
+
+// AcquireCognitiveLock attempts to take the global cognitive lock.
+// If the lock is held, it will wait (poll) until it becomes available.
+func AcquireCognitiveLock(ctx context.Context, redisClient *redis.Client, agentName string) {
+	if redisClient == nil {
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			// Attempt to set the lock with a TTL
+			ok, err := redisClient.SetNX(ctx, CognitiveLockKey, agentName, CognitiveLockTTL).Result()
+			if err == nil && ok {
+				log.Printf("[%s] Cognitive Lock ACQUIRED.", agentName)
+				return
+			}
+
+			// Lock is held, wait and retry
+			time.Sleep(5 * time.Second)
+		}
+	}
+}
+
+// ReleaseCognitiveLock releases the global cognitive lock.
+func ReleaseCognitiveLock(ctx context.Context, redisClient *redis.Client, agentName string) {
+	if redisClient == nil {
+		return
+	}
+
+	// Verify we are the holder before releasing (safety)
+	holder, err := redisClient.Get(ctx, CognitiveLockKey).Result()
+	if err == nil && holder == agentName {
+		redisClient.Del(ctx, CognitiveLockKey)
+		log.Printf("[%s] Cognitive Lock RELEASED.", agentName)
+	}
+}
 
 // DefaultTTL defines the global expiration for all Redis keys (24 hours).
 const DefaultTTL = 24 * time.Hour

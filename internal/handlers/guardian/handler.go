@@ -157,6 +157,10 @@ func (h *GuardianHandler) checkAndAnalyze() {
 func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agent.AnalysisResult, string, error) {
 	log.Printf("[%s] Starting Guardian Analysis (Tier: %d)", HandlerName, tier)
 
+	// Enforce global sequential execution
+	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+
 	defer h.RedisClient.Del(ctx, "guardian:active_tier")
 	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
 
