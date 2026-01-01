@@ -142,6 +142,8 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 
 	startTime := time.Now()
 
+	model := h.Config.Models["synthesis"]
+
 	var resp string
 
 	var stats ollama.GenerationStats
@@ -152,9 +154,25 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 
 	var failReason string
 
+	// Track attempts
+
+	h.RedisClient.Incr(ctx, "system:metrics:model:"+model+":attempts")
+
 	// Ensure Audit is ALWAYS emitted
 
 	defer func() {
+
+		if !success {
+
+			h.RedisClient.Incr(ctx, "system:metrics:model:"+model+":failures")
+
+			if strings.Contains(failReason, "JSON Parse Error") {
+
+				h.RedisClient.Incr(ctx, "system:metrics:model:"+model+":absolute_failures")
+
+			}
+
+		}
 
 		duration := time.Since(startTime)
 
@@ -202,6 +220,8 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 			"timestamp": time.Now().Unix(),
 
 			"error": failReason,
+
+			"attempts": h.RedisClient.Get(ctx, "system:metrics:model:"+model+":attempts").Val(),
 		}
 
 		_, _ = utils.SendEvent(ctx, h.RedisClient, "dex-event-service", string(types.EventTypeSystemAnalysisAudit), auditEvent)
