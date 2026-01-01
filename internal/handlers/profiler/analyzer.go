@@ -115,6 +115,10 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, fmt.Sprintf("Analyzing User: %s", masterUserID))
 	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
 
+	// Set active tier for frontend visibility
+	h.RedisClient.Set(ctx, "analyzer:active_tier", "synthesis", 0)
+	defer h.RedisClient.Set(ctx, "analyzer:active_tier", "", 0)
+
 	// 1. Fetch Signal History
 	// We'll search for 'analysis.user.message_signals' events for this user
 	// This is slightly complex with current Redis schema (need to scan timeline or type list)
@@ -157,6 +161,9 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 		log.Printf("[%s] Failed to save updated profile: %v", h.Config.Name, err)
 		return
 	}
+
+	// Update last run time
+	h.RedisClient.Set(ctx, "analyzer:last_run:synthesis", time.Now().Unix(), 0)
 
 	// 4. Emit Audit Event
 	auditEvent := map[string]interface{}{

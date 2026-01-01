@@ -74,6 +74,24 @@ func GetAgentStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		status.Agents["guardian"] = guardian
 
+		// 1.1 Analyzer Agent Specifics
+		analyzer := make(map[string]interface{})
+		activeSynthesis, _ := redisClient.Get(ctx, "analyzer:active_tier").Result()
+		analyzer["active_tier"] = activeSynthesis
+
+		// Synthesis
+		lastSynthesisTS, _ := redisClient.Get(ctx, "analyzer:last_run:synthesis").Int64()
+		synthesisModel := "dex-master-model"
+		synthesisAttempts, _ := redisClient.Get(ctx, "system:metrics:model:"+synthesisModel+":attempts").Int64()
+		synthesisFailures, _ := redisClient.Get(ctx, "system:metrics:model:"+synthesisModel+":failures").Int64()
+		synthesisAbsolute, _ := redisClient.Get(ctx, "system:metrics:model:"+synthesisModel+":absolute_failures").Int64()
+		analyzer["synthesis"] = map[string]interface{}{
+			"last_run": lastSynthesisTS, "next_run": lastSynthesisTS + 43200, "model": synthesisModel,
+			"attempts": synthesisAttempts, "failures": synthesisFailures, "absolute_failures": synthesisAbsolute,
+		}
+
+		status.Agents["analyzer"] = analyzer
+
 		// 2. System State & Metrics
 		lastTransition, _ := redisClient.Get(ctx, "system:last_transition_ts").Int64()
 		status.System.State, _ = redisClient.Get(ctx, "system:state").Result()
@@ -94,6 +112,11 @@ func GetAgentStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 		response["active_tier"] = guardian["active_tier"]
 		response["sentry"] = guardian["sentry"]
 		response["architect"] = guardian["architect"]
+
+		// Analyzer
+		response["active_synthesis"] = analyzer["active_tier"]
+		response["synthesis"] = analyzer["synthesis"]
+
 		response["system_state"] = status.System.State
 		response["system_state_time"] = status.System.StateTime
 		response["total_active_time"] = status.System.Metrics.Active
