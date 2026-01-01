@@ -106,6 +106,14 @@ func initBackgroundHandlers() {
 				}
 
 				log.Printf("Background handler '%s' started.", handlerConfig.Name)
+			case profiler.AnalyzerHandlerName:
+				analyzerAgent := profiler.NewAnalyzerAgent(dependencies.Redis, dependencies.Ollama, dependencies.Discord)
+				if err := analyzerAgent.Init(context.Background()); err != nil {
+					log.Printf("ERROR: Failed to initialize analyzer agent: %v", err)
+					continue
+				}
+				runningBackgroundHandlers[handlerConfig.Name] = analyzerAgent
+				log.Printf("Background handler '%s' started.", handlerConfig.Name)
 			default:
 				log.Printf("WARNING: Unknown background handler '%s'. Not started.", handlerConfig.Name)
 			}

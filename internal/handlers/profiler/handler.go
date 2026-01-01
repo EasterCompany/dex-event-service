@@ -124,7 +124,7 @@ func handleUserSignals(ctx context.Context, input types.HandlerInput, r *redis.C
 	}
 
 	// 1. Load existing profile
-	p, err := loadProfile(ctx, r, userID)
+	p, err := LoadProfile(ctx, r, userID)
 	if err != nil {
 		return types.HandlerOutput{Success: false, Error: err.Error()}, err
 	}
@@ -166,7 +166,7 @@ func handleBotResponse(ctx context.Context, input types.HandlerInput, r *redis.C
 	return types.HandlerOutput{Success: true}, nil
 }
 
-func loadProfile(ctx context.Context, r *redis.Client, userID string) (*UserProfile, error) {
+func LoadProfile(ctx context.Context, r *redis.Client, userID string) (*UserProfile, error) {
 	key := "user:profile:" + userID
 	data, err := r.Get(ctx, key).Result()
 
@@ -189,7 +189,6 @@ func loadProfile(ctx context.Context, r *redis.Client, userID string) (*UserProf
 	}
 	return &p, nil
 }
-
 func saveProfile(ctx context.Context, r *redis.Client, p *UserProfile) error {
 	key := "user:profile:" + p.UserID
 	data, err := json.Marshal(p)

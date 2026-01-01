@@ -15,6 +15,7 @@ import (
 	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/internal/analysis"
 	"github.com/EasterCompany/dex-event-service/internal/handlers"
+	"github.com/EasterCompany/dex-event-service/internal/handlers/profiler"
 	"github.com/EasterCompany/dex-event-service/internal/smartcontext"
 	"github.com/EasterCompany/dex-event-service/internal/web"
 	"github.com/EasterCompany/dex-event-service/types"
@@ -624,7 +625,28 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 			deps.Redis.Expire(context.Background(), lockKey, 60*time.Second)
 		}
 
-		prompt := fmt.Sprintf("%s\n\nContext:\n%s\n\nUser: %s", systemPrompt, contextHistory, content)
+		// --- 2. Load Profile for Personalization ---
+		userProfile, _ := profiler.LoadProfile(ctx, deps.Redis, userID)
+		dossierPrompt := ""
+		if userProfile != nil {
+			dossierPrompt = fmt.Sprintf("\n\n### USER DOSSIER (Clinical Analysis):\n- Technical Level: %.1f/10\n- Comm Style: %s\n- Current Vibe: %s\n- Key Facts: ",
+				userProfile.CognitiveModel.TechnicalLevel,
+				userProfile.CognitiveModel.CommunicationStyle,
+				userProfile.CognitiveModel.Vibe)
+
+			facts := []string{}
+			for _, attr := range userProfile.Attributes {
+				facts = append(facts, fmt.Sprintf("%s: %s", attr.Key, attr.Value))
+			}
+			if len(facts) > 0 {
+				dossierPrompt += strings.Join(facts, ", ")
+			} else {
+				dossierPrompt += "None observed yet."
+			}
+			dossierPrompt += "\nUse this dossier to personalize your tone, technical depth, and overall engagement strategy for this specific user."
+		}
+
+		prompt := fmt.Sprintf("%s%s\n\nContext:\n%s\n\nUser: %s", systemPrompt, dossierPrompt, contextHistory, content)
 
 		streamMessageID, err := deps.Discord.InitStream(channelID, "<a:typing:1449387367315275786>")
 

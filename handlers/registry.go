@@ -60,6 +60,11 @@ var handlerConfigs = map[string]types.HandlerConfig{
 		Timeout:     30,
 		EventTypes:  []string{"analysis.user.message_signals", "messaging.bot.sent_message"},
 	},
+	"analyzer-handler": {
+		Name:               "analyzer-handler",
+		IsBackgroundWorker: true,
+		Timeout:            0,
+	},
 }
 
 // Initialize performs any startup tasks for handlers (now mostly a no-op or just logging)
