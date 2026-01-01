@@ -171,18 +171,24 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 	h.RedisClient.Set(ctx, "analyzer:last_run:synthesis", time.Now().Unix(), 0)
 
 	// 4. Emit Audit Event
+	chatHistory := []map[string]string{
+		{"role": "user", "content": prompt},
+		{"role": "assistant", "content": resp},
+	}
+
 	auditEvent := map[string]interface{}{
-		"type":       types.EventTypeSystemAnalysisAudit,
-		"source":     "dex-event-service",
-		"tier":       "Synthesis",
-		"agent_name": h.Config.Name,
-		"success":    true,
-		"duration":   duration.String(),
-		"model":      h.Config.Models["synthesis"],
-		"raw_input":  prompt,
-		"raw_output": resp,
-		"eval_count": stats.EvalCount,
-		"timestamp":  time.Now().Unix(),
+		"type":         types.EventTypeSystemAnalysisAudit,
+		"source":       "dex-event-service",
+		"tier":         "Synthesis",
+		"agent_name":   h.Config.Name,
+		"success":      true,
+		"duration":     duration.String(),
+		"model":        h.Config.Models["synthesis"],
+		"raw_input":    prompt,
+		"raw_output":   resp,
+		"chat_history": chatHistory,
+		"eval_count":   stats.EvalCount,
+		"timestamp":    time.Now().Unix(),
 	}
 	_, _ = utils.SendEvent(ctx, h.RedisClient, "dex-event-service", string(types.EventTypeSystemAnalysisAudit), auditEvent)
 

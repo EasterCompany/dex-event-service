@@ -27,41 +27,35 @@
 
 1.  **Analyst Reasoning Evolution**
     *   [x] Implement **Sentry Protocol (Tier 1)** reasoning.
-    *   [ ] Implement **Architect Protocol (Tier 2)** reasoning logic.
-    *   [ ] Implement **Strategist Protocol (Tier 3)** reasoning logic.
-    *   [ ] Implement **Visionary Protocol (Tier 4)** deep work.
+    *   [x] Implement **Architect Protocol (Tier 2)** reasoning logic.
+    *   [x] Implement **Strategist Protocol (Tier 3)** reasoning logic.
+    *   [x] Implement **Analyzer Protocol (Tier 4)** profiling logic.
 
 2.  **Dashboard Actionability**
     *   [ ] **Actionable Notifications:** Clicking a notification jumps to the relevant event in the timeline or specific log section.
-    *   [ ] **Blueprint Persistence:** Ensure blueprints persist in the tab based on specific relevance rather than simple time-based expiry.
+    *   [x] **Turn-by-Turn History:** Bot messages now show the exact System/User/Assistant context slides in the dashboard.
 
 3.  **System Stability**
-    *   [x] Fix Analyst Worker idle detection reset loop.
-    *   [x] Resolve build process hangs and circular dependencies.
-    *   [ ] Resolve versioning discrepancy in `dex-tts-service` (ensure built version is reported).
+    *   [x] Implement **Global Cognitive Lock** (`system:cognitive_lock`) to prevent agent overlap.
+    *   [x] Implement **Smart Context** summarization to prevent context pollution in long chats.
 
 ## Gemini Added Memories
-- **Protocol Terminology:** Agent layers are now called **Protocols**.
-- **Guardian Specifics:**
-    - Tier 1: **Sentry Protocol**
-    - Tier 2: **Architect Protocol**
+- **Protocol Terminology:** Agent layers are strictly called **Protocols**.
+- **Guardian Protocols:** Sentry (T1), Architect (T2), Strategist (T3).
+- **Analyzer Protocol (T4):** Handles biographical user synthesis and persistent dossier updates.
 - **System Context Synchronization:**
-    - Implemented a centralized `dex-event-service/utils/system_context.go` for master system prompts.
-    - Integrated these master prompts into `publicmessage`, `privatemessage`, and `analyst` handlers, ensuring consistent system awareness across all cognitive tasks.
-- **Frontend "Blueprints" Integration:**
-    - Added a **Blueprints** tab to the dashboard (positioned second in tab order).
-    - Implemented `system.blueprint.generated` event type and frontend rendering logic in `blueprints.js`.
-- **Analyst Worker "Sentry Protocol" Evolution:**
-    - Implemented technical sentry logic focusing on service crashes, build errors, and technical anomalies.
-    - Added "Recent Reported Issues" history to the analyst's reasoning loop.
-    - Granted the analyst access to service status and the last 20 lines of service logs.
-- **Build Process Safety & Observability:**
-    - **Build Blocker:** `dex build` now checks for active processes in Redis and waits for them to finish (unless `--force` is used).
-    - **Fast Version Reporting:** Added `version` command handling to `dex-tts-service` to prevent expensive Python environment initialization during builds.
-    - **Git Progress:** Modified `dex-cli` to show real-time progress during Git pushes to `easter.company`, preventing "frozen" build appearances.
+    - Profiles loaded from Redis are injected into the Master System Prompt for every interaction.
+    - Analytical pass on every user message extracts "Signals" (Sentiment, Intent, Vibe).
+- **Cognitive Safety:**
+    - **Global Lock:** Enforces sequential execution of all heavy agent tasks.
+    - **Smart History:** Summarizes messages 6-25 while keeping 1-5 raw to maintain focus.
+    - **Repeat Penalty:** Hardcoded `1.3` penalty in all chat calls to stop repetitive behavior.
+- **Frontend Observability:**
+    - Bot response events now include high-fidelity performance metrics (token counts, load/eval durations).
+    - Detailed Carousel UI for chat history in every bot sent message event.
 - **Robust AI JSON Parsing:**
-    - Implemented multi-format JSON extraction logic in the Analyst Worker to handle raw arrays, wrapped objects, and markdown-wrapped AI responses.
-    - Added validation to filter out empty or repetitive log-dump notifications.
+    - Standardized `CleanJSON` utility across all agents to handle markdown-wrapped responses.
+
 
 ## Concerns Raised
 
