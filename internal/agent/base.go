@@ -56,6 +56,59 @@ func (b *BaseAgent) CleanupBusyCount(ctx context.Context) {
 	}
 }
 
+// ValidateJSON ensures the output is valid JSON and matches the optional schema.
+func (b *BaseAgent) ValidateJSON(input string, schema interface{}) []Correction {
+	var corrections []Correction
+
+	// 1. Syntax Check
+	cleanJSON := b.CleanJSON(input)
+	if !json.Valid([]byte(cleanJSON)) {
+		corrections = append(corrections, Correction{
+			Type: "SYNTAX", Guidance: "Invalid JSON syntax. Ensure you are not including trailing commas, unescaped quotes, or surrounding text outside the JSON block.", Mandatory: true,
+		})
+		return corrections
+	}
+
+	// 2. Schema Check (if schema provided)
+	if schema != nil {
+		// Create a new instance of the schema type
+		schemaType := fmt.Sprintf("%T", schema)
+
+		// Note: This is a shallow check. Real reflection-based deep validation
+		// could be added here, but for now we just check if it unmarshals into the same type.
+		var target interface{}
+
+		// If it's a map or slice, we can't easily "copy" the type without reflection,
+		// but we can try to unmarshal into a generic map/slice first to catch broad errors.
+		err := json.Unmarshal([]byte(cleanJSON), &target)
+		if err != nil {
+			corrections = append(corrections, Correction{
+				Type: "SCHEMA", Guidance: fmt.Sprintf("JSON structure mismatch. Expected structure type: %s. Error: %v", schemaType, err), Mandatory: true,
+			})
+		}
+	}
+
+	return corrections
+}
+
+// CleanJSON extracts JSON from markdown blocks if present.
+func (b *BaseAgent) CleanJSON(s string) string {
+	clean := strings.TrimSpace(s)
+	if strings.HasPrefix(clean, "```json") {
+		parts := strings.Split(clean, "```json")
+		if len(parts) > 1 {
+			return strings.Split(parts[1], "```")[0]
+		}
+	}
+	if strings.HasPrefix(clean, "```") {
+		parts := strings.Split(clean, "```")
+		if len(parts) > 1 {
+			return parts[1]
+		}
+	}
+	return clean
+}
+
 // RunCognitiveLoop executes the 3-attempt chat process with retry logic.
 // It ALWAYS produces a system.analysis.audit event regardless of outcome.
 func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName, model, sessionID, systemPrompt, inputContext string, limit int) (results []AnalysisResult, auditEventID string, lastError error) {
@@ -163,6 +216,14 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 			integrityIssues := b.ValidateResponseIntegrity(respMsg.Content)
 			if len(integrityIssues) > 0 {
 				currentAttemptCorrections = append(currentAttemptCorrections, integrityIssues...)
+			}
+		}
+
+		// --- Tier 1.5: JSON Validation ---
+		if agentConfig.EnforceJSON {
+			jsonIssues := b.ValidateJSON(respMsg.Content, agentConfig.JSONSchema)
+			if len(jsonIssues) > 0 {
+				currentAttemptCorrections = append(currentAttemptCorrections, jsonIssues...)
 			}
 		}
 

@@ -40,7 +40,9 @@ type AgentConfig struct {
 	IdleRequirement  int
 	DateTimeAware    bool
 	EnforceMarkdown  bool
-	RequiredSections []string // Mandatory sections for this agent's reports
+	EnforceJSON      bool
+	JSONSchema       interface{} // Optional: A struct or map representing the expected JSON structure
+	RequiredSections []string    // Mandatory sections for this agent's reports
 }
 
 // Agent is the interface all automated workflows must implement.
