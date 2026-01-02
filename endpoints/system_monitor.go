@@ -20,10 +20,16 @@ import (
 )
 
 var redisClient *redis.Client
+var cloudRedisClient *redis.Client
 
 // SetRedisClient sets the Redis client for endpoints
 func SetRedisClient(client *redis.Client) {
 	redisClient = client
+}
+
+// SetCloudRedisClient sets the Cloud Redis client for endpoints
+func SetCloudRedisClient(client *redis.Client) {
+	cloudRedisClient = client
 }
 
 // ProcessInfo represents the data stored by a handler in Redis for the processes tab

@@ -468,6 +468,40 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 			return
 		}
 
+		// --- CLOUD MIRRORING (Async) ---
+		if cloudRedisClient != nil {
+			go func(evt types.Event) {
+				safeEvent := sanitizeEventForCloud(evt)
+				if safeEvent != nil {
+					// Serialize safe event
+					safeJSON, _ := json.Marshal(safeEvent)
+
+					// Use a short TTL for cloud demo (e.g., 1 hour)
+					cloudTTL := 1 * time.Hour
+
+					// Push to Cloud Redis (Pipeline for efficiency)
+					cCtx := context.Background()
+					cPipe := cloudRedisClient.Pipeline()
+
+					// 1. Store Event
+					cPipe.Set(cCtx, "event:"+safeEvent.ID, safeJSON, cloudTTL)
+
+					// 2. Add to Timeline (Score is timestamp for simple sorting)
+					// Note: Cloud might need simpler structure, but we'll mirror the ZSET for now.
+					cPipe.ZAdd(cCtx, "events:timeline", redis.Z{
+						Score:  float64(safeEvent.Timestamp),
+						Member: safeEvent.ID,
+					})
+
+					// Execute
+					if _, err := cPipe.Exec(cCtx); err != nil {
+						// Fail silently - offline first, but log for debug
+						fmt.Printf("Cloud push failed: %v\n", err)
+					}
+				}
+			}(event)
+		}
+
 		// Find handlers to execute
 		var handlersToExecute []types.HandlerConfig
 
@@ -1114,5 +1148,78 @@ func PatchEventHandler(redisClient *redis.Client, eventID string) http.HandlerFu
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(event)
+	}
+}
+
+// sanitizeEventForCloud prepares an event for public consumption by filtering and redacting data.
+func sanitizeEventForCloud(event types.Event) *types.Event {
+	// Parse event data
+	var eventData map[string]interface{}
+	if err := json.Unmarshal(event.Event, &eventData); err != nil {
+		return nil
+	}
+
+	eventType, _ := eventData["type"].(string)
+
+	// 1. Allowed Types Whitelist
+	// We only allow specific high-level system events and safe messaging events
+	allowed := false
+
+	// Exact matches
+	allowedTypes := []string{
+		"system.status.change",
+		"system.build.completed",
+		"system.cli.status",
+		"analysis.visual.completed",
+		"messaging.bot.sent_message", // Bot output is the "show"
+		"messaging.bot.voice_response",
+		"messaging.user.sent_message", // Redacted below
+		"messaging.user.joined_voice",
+		"messaging.user.left_voice",
+	}
+
+	for _, t := range allowedTypes {
+		if eventType == t {
+			allowed = true
+			break
+		}
+	}
+
+	if !allowed {
+		return nil
+	}
+
+	// 2. Clone data map
+	cleanData := make(map[string]interface{})
+	for k, v := range eventData {
+		cleanData[k] = v
+	}
+
+	// 3. Redaction Rules
+
+	// Rule: Redact all User Content
+	if strings.HasPrefix(eventType, "messaging.user") {
+		cleanData["content"] = "********"      // Mask content
+		cleanData["user_id"] = "user_redacted" // Mask ID
+		cleanData["user_name"] = "User"        // Generic name
+		delete(cleanData, "message_id")
+		delete(cleanData, "avatar_url")
+	}
+
+	// Rule: Redact sensitive paths in any event that might have them
+	// (Simple heuristic: if a value looks like a path, mask it)
+	// For now, we assume system.build and system.status are generic enough.
+
+	// Rule: Ensure no internal IDs leak in bot messages if possible
+	// (Bot messages usually intended for public display, so likely safe)
+
+	// Re-serialize
+	cleanJSON, _ := json.Marshal(cleanData)
+
+	return &types.Event{
+		ID:        event.ID,
+		Service:   event.Service,
+		Event:     cleanJSON,
+		Timestamp: event.Timestamp,
 	}
 }
