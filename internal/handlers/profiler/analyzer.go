@@ -109,16 +109,19 @@ func (h *AnalyzerAgent) runWorker() {
 
 func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 	// 1. Scan for all user profiles in Redis
+	var usersToProcess []string
 	iter := h.RedisClient.Scan(ctx, 0, "user:profile:*", 0).Iterator()
-
 	for iter.Next(ctx) {
 		key := iter.Val()
 		targetUserID := strings.TrimPrefix(key, "user:profile:")
-
-		if targetUserID == "" {
-			continue
+		if targetUserID != "" {
+			usersToProcess = append(usersToProcess, targetUserID)
 		}
+	}
+	// Explicitly add Dexter for self-reflection
+	usersToProcess = append(usersToProcess, "dexter")
 
+	for _, targetUserID := range usersToProcess {
 		// Check cooldown
 		cooldownKey := fmt.Sprintf("agent:%s:cooldown:%s", h.Config.Name, targetUserID)
 		if h.RedisClient.Get(ctx, cooldownKey).Val() != "" {
@@ -211,6 +214,72 @@ func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID s
 }
 
 func (h *AnalyzerAgent) gatherHistoryContext(ctx context.Context, userID string) string {
+	// Special Case: Dexter Self-Profiling
+	if userID == "dexter" || userID == "self" {
+		log.Printf("[%s] Gathering system-wide context for Dexter self-synthesis", h.Config.Name)
+		// Fetch recent events from the global timeline
+		// We can't easily search content in Redis without a secondary index or scanning.
+		// For efficiency, we'll grab the last 1000 events globally and filter in memory.
+		// This is "good enough" for recent context.
+
+		eventIDs, err := h.RedisClient.ZRevRange(ctx, "events:timeline", 0, 999).Result()
+		if err != nil {
+			log.Printf("[%s] Failed to fetch global timeline: %v", h.Config.Name, err)
+			return ""
+		}
+
+		var events []types.Event
+		keywords := []string{"dexter", "dex-cli", "dex-event", "dex-discord", "dex-web", "dex-tts"}
+
+		for _, id := range eventIDs {
+			data, err := h.RedisClient.Get(ctx, "event:"+id).Result()
+			if err == nil {
+				var evt types.Event
+				if err := json.Unmarshal([]byte(data), &evt); err == nil {
+					// 1. Exclude high-frequency noise
+					var evtData map[string]interface{}
+					_ = json.Unmarshal(evt.Event, &evtData)
+					evtType := fmt.Sprintf("%v", evtData["type"])
+
+					if evtType == string(types.EventTypeSystemAnalysisAudit) {
+						continue
+					}
+
+					// 2. Check for Keywords in Content
+					content := ""
+					if c, ok := evtData["content"].(string); ok {
+						content = strings.ToLower(c)
+					}
+
+					relevant := false
+					for _, k := range keywords {
+						if strings.Contains(content, k) {
+							relevant = true
+							break
+						}
+					}
+
+					// 3. Also include explicit mentions or service logs
+					if !relevant {
+						// Service logs often have the service name in the 'service' field
+						if strings.Contains(strings.ToLower(evt.Service), "dex-") {
+							relevant = true
+						}
+					}
+
+					if relevant {
+						events = append(events, evt)
+					}
+				}
+			}
+		}
+
+		if len(events) == 0 {
+			return "No recent system events found concerning Dexter."
+		}
+		return "### SYSTEM SELF-REFLECTION HISTORY:\n" + smartcontext.FormatEventsBlock(events)
+	}
+
 	userTimelineKey := "events:user:" + userID
 
 	// 1. Fetch all event IDs for the last 24 hours
