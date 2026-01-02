@@ -265,6 +265,7 @@ type DashboardSnapshot struct {
 	CognitiveEvents  []types.Event          `json:"cognitive_events"`
 	ModerationEvents []types.Event          `json:"moderation_events"`
 	Alerts           []types.Event          `json:"alerts"`
+	Blueprints       []types.Event          `json:"blueprints"`
 	Contacts         *ContactsResponse      `json:"contacts"`
 	Profiles         map[string]interface{} `json:"profiles"`
 	AgentStatus      map[string]interface{} `json:"agent_status"`
@@ -308,6 +309,9 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 
 	// 4. Sanitized Alerts
 	alerts := getSanitizedEvents(ctx, "events:type:system.notification.generated", 50)
+
+	// 4b. Sanitized Blueprints (Limit to 4 for public)
+	blueprints := getSanitizedEvents(ctx, "events:type:system.blueprint.generated", 4)
 
 	// 5. Public Contacts & Profiles (Owen & Dexter only)
 	owenID := "313071000877137920"
@@ -364,6 +368,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 		CognitiveEvents:  cognitive,
 		ModerationEvents: moderation,
 		Alerts:           alerts,
+		Blueprints:       blueprints,
 		Contacts:         contacts,
 		Profiles:         profiles,
 		AgentStatus:      agentStatus,
