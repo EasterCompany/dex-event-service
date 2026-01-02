@@ -405,6 +405,7 @@ func getSanitizedEvents(ctx context.Context, key string, count int) []types.Even
 			delete(eventData, "response_raw")
 
 			// MASKING: Hide sensitive message content for public view
+			// PRESERVE: Titles for Blueprints/Notifications are now allowed
 			if _, ok := eventData["content"]; ok {
 				eventData["content"] = "[Encrypted Content]"
 			}
