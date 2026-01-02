@@ -229,33 +229,42 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 
 		// --- Tier 2: Schema Validation (Only if syntax passes) ---
 		if len(currentAttemptCorrections) == 0 {
-			results = b.ParseAnalysisResults(respMsg.Content, limit)
+			if agentConfig.EnforceJSON {
+				// Bypass markdown parsing for JSON agents
+				results = []AnalysisResult{{
+					Type:    "json_output",
+					Title:   "JSON Output",
+					Content: respMsg.Content,
+				}}
+			} else {
+				results = b.ParseAnalysisResults(respMsg.Content, limit)
 
-			// Check for required sections if it's not a stop token
-			isStopped := false
-			for _, token := range b.StopTokens {
-				if strings.Contains(respMsg.Content, token) {
-					isStopped = true
-					break
-				}
-			}
-
-			if !isStopped && len(results) > 0 {
-				for _, res := range results {
-					schemaIssues := b.ValidateSchema(res, agentConfig.RequiredSections)
-					currentAttemptCorrections = append(currentAttemptCorrections, schemaIssues...)
-
-					// --- Tier 3: Logic Validation (Protocol Specific) ---
-					if len(schemaIssues) == 0 {
-						logicIssues := agent.ValidateLogic(res)
-						currentAttemptCorrections = append(currentAttemptCorrections, logicIssues...)
+				// Check for required sections if it's not a stop token
+				isStopped := false
+				for _, token := range b.StopTokens {
+					if strings.Contains(respMsg.Content, token) {
+						isStopped = true
+						break
 					}
 				}
-			} else if !isStopped && !strings.Contains(respMsg.Content, "No significant insights found") {
-				// No results parsed but no stop token found either
-				currentAttemptCorrections = append(currentAttemptCorrections, Correction{
-					Type: "SCHEMA", Guidance: "Your response did not contain any valid Dexter Reports (# Title). Ensure you follow the strict report format.", Mandatory: true,
-				})
+
+				if !isStopped && len(results) > 0 {
+					for _, res := range results {
+						schemaIssues := b.ValidateSchema(res, agentConfig.RequiredSections)
+						currentAttemptCorrections = append(currentAttemptCorrections, schemaIssues...)
+
+						// --- Tier 3: Logic Validation (Protocol Specific) ---
+						if len(schemaIssues) == 0 {
+							logicIssues := agent.ValidateLogic(res)
+							currentAttemptCorrections = append(currentAttemptCorrections, logicIssues...)
+						}
+					}
+				} else if !isStopped && !strings.Contains(respMsg.Content, "No significant insights found") {
+					// No results parsed but no stop token found either
+					currentAttemptCorrections = append(currentAttemptCorrections, Correction{
+						Type: "SCHEMA", Guidance: "Your response did not contain any valid Dexter Reports (# Title). Ensure you follow the strict report format.", Mandatory: true,
+					})
+				}
 			}
 		}
 
