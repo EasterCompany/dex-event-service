@@ -514,31 +514,52 @@ func checkService(service config.ServiceEntry, serviceType string, isPublic bool
 		Port:      service.Port,
 	}
 
-	if isPublic {
-		baseReport.Domain = "easter.company"
-		baseReport.Port = ""
-	}
+	var report types.ServiceReport
 
 	switch serviceType {
 	case "cli":
-		return checkCLIStatus(baseReport)
+		report = checkCLIStatus(baseReport)
 	case "os":
 		// Check for Ollama services
 		if strings.Contains(strings.ToLower(service.ID), "ollama") {
-			return checkOllamaStatus(baseReport)
+			report = checkOllamaStatus(baseReport)
+		} else if strings.Contains(strings.ToLower(service.ID), "cache") || strings.Contains(strings.ToLower(service.ID), "upstash") {
+			// Check for Redis cache services
+			report = checkRedisStatus(baseReport, service.Credentials, isPublic)
+		} else if service.Port != "" {
+			// For other OS services, attempt HTTP check if port is defined
+			report = checkHTTPStatus(baseReport)
+		} else {
+			report = newUnknownServiceReport(baseReport, "OS service status cannot be checked directly without specific handler.")
 		}
-		// Check for Redis cache services
-		if strings.Contains(strings.ToLower(service.ID), "cache") || strings.Contains(strings.ToLower(service.ID), "upstash") {
-			return checkRedisStatus(baseReport, service.Credentials, isPublic)
-		}
-		// For other OS services, attempt HTTP check if port is defined
-		if service.Port != "" {
-			return checkHTTPStatus(baseReport)
-		}
-		return newUnknownServiceReport(baseReport, "OS service status cannot be checked directly without specific handler.")
 	default: // All other service types are assumed to be HTTP-based (fe, be, cs, th)
-		return checkHTTPStatus(baseReport)
+		report = checkHTTPStatus(baseReport)
 	}
+
+	// Post-check processing for Public Dashboard
+	if isPublic {
+		// 1. Obfuscate Address
+		report.Domain = "easter.company"
+		report.Port = ""
+
+		// 2. Specialized Naming & Mocking for Cloud Services
+		lowerID := strings.ToLower(report.ID)
+		if lowerID == "upstash-redis-ro" {
+			report.ShortName = "public-cache-1"
+		} else if lowerID == "upstash-redis-rw" {
+			report.ShortName = "public-cache-2"
+		} else if strings.Contains(lowerID, "cloud-cache") {
+			// Hardcode cloud-cache to always be online/Cloud in public view
+			report.Status = "online"
+			report.HealthMessage = "System is operational"
+			report.Version.Str = "Cloud"
+			report.Uptime = "Healthy"
+			report.CPU = "-"
+			report.Memory = "Healthy"
+		}
+	}
+
+	return report
 }
 
 // newUnknownServiceReport creates a default report for services we can't fully check
