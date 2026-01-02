@@ -301,11 +301,39 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	}
 
 	// 3. Sanitized Events (Global + Categorized)
-	events := getSanitizedEvents(ctx, "events:timeline", 50)
-	messaging := getSanitizedEvents(ctx, "events:category:messaging", 50)
-	system := getSanitizedEvents(ctx, "events:category:system", 50)
-	cognitive := getSanitizedEvents(ctx, "events:category:cognitive", 50)
-	moderation := getSanitizedEvents(ctx, "events:category:moderation", 50)
+	allEvents := getSanitizedEvents(ctx, "events:timeline", 250)
+
+	messaging := []types.Event{}
+	system := []types.Event{}
+	cognitive := []types.Event{}
+	moderation := []types.Event{}
+
+	for _, e := range allEvents {
+		var ed map[string]interface{}
+		if err := json.Unmarshal(e.Event, &ed); err == nil {
+			eventType, _ := ed["type"].(string)
+			category := getCategoryFromType(eventType)
+
+			switch category {
+			case "messaging":
+				if len(messaging) < 50 {
+					messaging = append(messaging, e)
+				}
+			case "system":
+				if len(system) < 50 {
+					system = append(system, e)
+				}
+			case "cognitive":
+				if len(cognitive) < 50 {
+					cognitive = append(cognitive, e)
+				}
+			case "moderation":
+				if len(moderation) < 50 {
+					moderation = append(moderation, e)
+				}
+			}
+		}
+	}
 
 	// 4. Sanitized Alerts
 	alerts := getSanitizedEvents(ctx, "events:type:system.notification.generated", 50)
@@ -402,7 +430,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	return &DashboardSnapshot{
 		Monitor:          monitor,
 		Processes:        processes,
-		Events:           events,
+		Events:           allEvents,
 		MessagingEvents:  messaging,
 		SystemEvents:     system,
 		CognitiveEvents:  cognitive,
@@ -1178,4 +1206,40 @@ func formatSecondsToUptime(seconds int64) string {
 		return fmt.Sprintf("%dm%ds", minutes, secs)
 	}
 	return fmt.Sprintf("%ds", secs)
+}
+
+func getCategoryFromType(eventType string) string {
+	categories := map[string][]string{
+		"messaging": {
+			"message_received", "message_sent", "messaging.user.sent_message",
+			"messaging.bot.sent_message", "messaging.user.transcribed",
+			"voice_transcribed", "messaging.user.joined_voice", "messaging.user.left_voice",
+			"messaging.webhook.message",
+		},
+		"system": {
+			"system.cli.command", "system.cli.status", "system.status.change",
+			"metric_recorded", "log_entry", "error_occurred", "webhook.processed",
+			"messaging.bot.status_update", "messaging.user.joined_server",
+			"system.test.completed", "system.build.completed",
+			"system.roadmap.created", "system.roadmap.updated",
+			"system.process.registered", "system.process.unregistered",
+		},
+		"cognitive": {
+			"engagement.decision", "system.analysis.audit", "system.blueprint.generated",
+			"analysis.link.completed", "analysis.visual.completed", "analysis.router.decision",
+			"analysis.user.message_signals",
+		},
+		"moderation": {
+			"moderation.explicit_content.deleted",
+		},
+	}
+
+	for cat, types := range categories {
+		for _, t := range types {
+			if t == eventType {
+				return cat
+			}
+		}
+	}
+	return "system"
 }
