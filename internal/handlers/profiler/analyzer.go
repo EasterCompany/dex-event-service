@@ -109,17 +109,33 @@ func (h *AnalyzerAgent) runWorker() {
 
 func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 	// 1. Scan for all user profiles in Redis
-	var usersToProcess []string
+	userSet := make(map[string]bool)
 	iter := h.RedisClient.Scan(ctx, 0, "user:profile:*", 0).Iterator()
 	for iter.Next(ctx) {
 		key := iter.Val()
 		targetUserID := strings.TrimPrefix(key, "user:profile:")
 		if targetUserID != "" {
-			usersToProcess = append(usersToProcess, targetUserID)
+			userSet[targetUserID] = true
 		}
 	}
 	// Explicitly add Dexter for self-reflection
-	usersToProcess = append(usersToProcess, "dexter")
+	userSet["dexter"] = true
+
+	var usersToProcess []string
+	for uid := range userSet {
+		usersToProcess = append(usersToProcess, uid)
+	}
+
+	if len(usersToProcess) == 0 {
+		return
+	}
+
+	// Enforce global sequential execution for the ENTIRE batch
+	// This prevents Guardian or other agents from interleaving between user updates
+	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+
+	log.Printf("[%s] Starting synthesis batch for %d users...", h.Config.Name, len(usersToProcess))
 
 	for _, targetUserID := range usersToProcess {
 		// Check cooldown
@@ -129,19 +145,12 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 		}
 
 		h.processUserSynthesis(ctx, targetUserID, cooldownKey)
-
-		// Respect sequential execution - process users one by one
-		// The next user will be picked up immediately in this loop
 	}
 	log.Printf("[%s] Synthesis batch complete.", h.Config.Name)
 }
 
 func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID string, cooldownKey string) {
 	log.Printf("[%s] Starting synthesis for user %s", h.Config.Name, targetUserID)
-
-	// Enforce global sequential execution
-	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name)
-	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, fmt.Sprintf("Analyzing User: %s", targetUserID))
 	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
