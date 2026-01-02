@@ -135,6 +135,9 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Synthesis Batch")
+	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
+
 	log.Printf("[%s] Starting synthesis batch for %d users...", h.Config.Name, len(usersToProcess))
 
 	for _, targetUserID := range usersToProcess {
@@ -150,81 +153,93 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 }
 
 func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID string, cooldownKey string) {
+	startTime := time.Now()
 	log.Printf("[%s] Starting synthesis for user %s", h.Config.Name, targetUserID)
 
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, fmt.Sprintf("Analyzing User: %s", targetUserID))
-	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
-
 	// Set active tier for frontend visibility
-	h.RedisClient.Set(ctx, "analyzer:active_tier", "synthesis", 0)
+	h.RedisClient.Set(ctx, "analyzer:active_tier", fmt.Sprintf("Working: %s", targetUserID), 0)
 	defer h.RedisClient.Set(ctx, "analyzer:active_tier", "", 0)
+
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, fmt.Sprintf("Analyzing User: %s", targetUserID))
+	// No defer clear here, because we want the process to stay visible during the batch
 
 	p, err := LoadProfile(ctx, h.RedisClient, targetUserID)
 	if err != nil {
 		return
 	}
 
-	// AUTOMATED STEP: Sanitize and Enrich
+	// 1. ALWAYS AUTOMATED: Sanitize and Enrich
 	h.SanitizeAndEnrichProfile(ctx, p, targetUserID)
-	// Save the sanitized version immediately to ensure integrity even if synthesis fails/skips
+	// Initial save of the integrity-checked profile
 	_ = saveProfile(ctx, h.RedisClient, p)
 
+	// 2. Gather Context
 	input := h.gatherHistoryContext(ctx, targetUserID)
-	if strings.Contains(input, "No interaction history found") {
-		log.Printf("[%s] No interaction history for user %s. Skipping synthesis.", h.Config.Name, targetUserID)
+	historyFound := !strings.Contains(input, "No interaction history found") && !strings.Contains(input, "No recent system events")
+
+	var auditID string
+
+	if historyFound {
+		// 3. AI STEP: Run Cognitive Loop
+		sessionID := fmt.Sprintf("synthesis-%s-%d", targetUserID, time.Now().Unix())
+		results, aid, err := h.RunCognitiveLoop(ctx, h, "synthesis", h.Config.Models["synthesis"], sessionID, h.buildSynthesisPrompt(p), input, 1)
+		auditID = aid
+
+		if err == nil && len(results) > 0 {
+			// Parse and update with AI results
+			history, _ := h.ChatManager.LoadHistory(ctx, sessionID)
+			if len(history) > 0 {
+				resp := history[len(history)-1].Content
+				var update UserProfile
+				cleanJSON := h.CleanJSON(resp)
+				if err := json.Unmarshal([]byte(cleanJSON), &update); err == nil {
+					// Preserve ID and critical fields
+					update.UserID = p.UserID
+					update.Stats = p.Stats
+					update.Identity.FirstSeen = p.Identity.FirstSeen
+					// Final sanitize before save
+					h.SanitizeAndEnrichProfile(ctx, &update, targetUserID)
+					if err := saveProfile(ctx, h.RedisClient, &update); err != nil {
+						log.Printf("[%s] Failed to save AI updated profile: %v", h.Config.Name, err)
+					}
+				}
+			}
+			h.RedisClient.Set(ctx, cooldownKey, "1", time.Duration(h.Config.Cooldowns["synthesis"])*time.Second)
+		} else if err != nil {
+			log.Printf("[%s] AI Synthesis failed: %v", h.Config.Name, err)
+			h.RedisClient.Set(ctx, cooldownKey, "1", 30*time.Minute) // Short backoff
+		} else {
+			log.Printf("[%s] AI Synthesis returned no changes for %s", h.Config.Name, targetUserID)
+			h.RedisClient.Set(ctx, cooldownKey, "1", 4*time.Hour)
+		}
+	} else {
+		// 4. SKIP AI: Just post a "Maintenance" audit
+		log.Printf("[%s] No history for %s. Skipping AI synthesis.", h.Config.Name, targetUserID)
+
+		audit := agent.AuditPayload{
+			Type:         "system.analysis.audit",
+			AgentName:    h.Config.Name,
+			Tier:         "Maintenance",
+			Model:        "automated-integrity-check",
+			InputContext: input,
+			RawOutput:    "AI Synthesis skipped: No recent interaction history. Performed automated integrity check and data enrichment.",
+			Status:       "SUCCESS",
+			Success:      true,
+			Timestamp:    time.Now().Unix(),
+			Duration:     time.Since(startTime).String(),
+		}
+
+		auditJSON, _ := json.Marshal(audit)
+		var auditMap map[string]interface{}
+		_ = json.Unmarshal(auditJSON, &auditMap)
+		auditID, _ = utils.SendEvent(ctx, h.RedisClient, "dex-event-service", "system.analysis.audit", auditMap)
+
 		h.RedisClient.Set(ctx, cooldownKey, "1", 4*time.Hour)
-		return
-	}
-	sessionID := fmt.Sprintf("synthesis-%s-%d", targetUserID, time.Now().Unix())
-
-	// Use RunCognitiveLoop which handles EnforceJSON and retries automatically
-	results, auditID, err := h.RunCognitiveLoop(ctx, h, "synthesis", h.Config.Models["synthesis"], sessionID, h.buildSynthesisPrompt(p), input, 1)
-
-	if err != nil {
-		log.Printf("[%s] Synthesis loop failed: %v", h.Config.Name, err)
-		// Backoff cooldown on cognitive failure
-		h.RedisClient.Set(ctx, cooldownKey, "1", 30*time.Minute)
-		return
 	}
 
-	if len(results) == 0 {
-		// This happens if the model thinks no update is needed (e.g. stop token)
-		log.Printf("[%s] No update needed for user %s", h.Config.Name, targetUserID)
-		h.RedisClient.Set(ctx, cooldownKey, "1", 4*time.Hour) // Shorter cooldown for no-op
-		return
-	}
-
-	// 3. Parse and Update (The loop already validated the JSON syntax)
-	history, _ := h.ChatManager.LoadHistory(ctx, sessionID)
-	if len(history) == 0 {
-		return
-	}
-	resp := history[len(history)-1].Content
-
-	var update UserProfile
-	cleanJSON := h.CleanJSON(resp)
-	if err := json.Unmarshal([]byte(cleanJSON), &update); err != nil {
-		log.Printf("[%s] CRITICAL: JSON validation passed but Unmarshal failed: %v", h.Config.Name, err)
-		return
-	}
-
-	// Preserve ID and core stats
-	update.UserID = p.UserID
-	update.Stats = p.Stats
-	update.Identity.FirstSeen = p.Identity.FirstSeen
-
-	if err := saveProfile(ctx, h.RedisClient, &update); err != nil {
-		log.Printf("[%s] Failed to save updated profile: %v", h.Config.Name, err)
-		return
-	}
-
-	// Update last run time
+	// 5. Update last run global metric
 	h.RedisClient.Set(ctx, "analyzer:last_run:synthesis", time.Now().Unix(), 0)
-
-	// Set long cooldown on success
-	h.RedisClient.Set(ctx, cooldownKey, "1", time.Duration(h.Config.Cooldowns["synthesis"])*time.Second)
-
-	log.Printf("[%s] Synthesis completed for user %s (Audit: %s)", h.Config.Name, targetUserID, auditID)
+	log.Printf("[%s] Synthesis completed for user %s (Audit: %s, AI: %v)", h.Config.Name, targetUserID, auditID, historyFound)
 }
 
 func (h *AnalyzerAgent) gatherHistoryContext(ctx context.Context, userID string) string {

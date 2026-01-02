@@ -50,6 +50,9 @@ var (
 
 	// GuardianTrigger is a global hook for the API to call the background worker logic
 	GuardianTrigger func(int) ([]interface{}, error)
+
+	// AnalyzerTrigger is a global hook for the API to call the background worker logic
+	AnalyzerTrigger func() error
 )
 
 type job struct {
@@ -113,6 +116,13 @@ func initBackgroundHandlers() {
 					continue
 				}
 				runningBackgroundHandlers[handlerConfig.Name] = analyzerAgent
+
+				// Wire up the trigger
+				AnalyzerTrigger = func() error {
+					analyzerAgent.PerformSynthesis(context.Background())
+					return nil
+				}
+
 				log.Printf("Background handler '%s' started.", handlerConfig.Name)
 			default:
 				log.Printf("WARNING: Unknown background handler '%s'. Not started.", handlerConfig.Name)

@@ -223,6 +223,12 @@ func main() {
 		return handlers.GuardianTrigger(tier)
 	})).Methods("POST")
 	router.HandleFunc("/analyzer/reset", endpoints.ResetAnalyzerHandler(redisClient)).Methods("POST", "GET")
+	router.HandleFunc("/analyzer/run", endpoints.RunAnalyzerHandler(redisClient, func() error {
+		if handlers.AnalyzerTrigger == nil {
+			return fmt.Errorf("analyzer handler not initialized")
+		}
+		return handlers.AnalyzerTrigger()
+	})).Methods("POST")
 	router.HandleFunc("/cli/execute", endpoints.HandleCLIExecute).Methods("POST")
 	router.HandleFunc("/system/status", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }).Methods("GET", "HEAD")
 	router.HandleFunc("/roadmap", endpoints.RoadmapHandler(redisClient)).Methods("GET", "POST", "PATCH", "DELETE")

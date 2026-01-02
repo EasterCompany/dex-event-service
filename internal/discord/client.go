@@ -289,6 +289,39 @@ func (c *Client) FetchChannelMembers(channelID string) ([]UserContext, string, e
 	return ctxResp.Users, sb.String(), nil
 }
 
+func (c *Client) FetchMember(userID string) (*MemberContext, error) {
+	url := fmt.Sprintf("%s/member/%s", c.BaseURL, userID)
+
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("X-Service-Name", "dex-event-service")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	var member MemberContext
+	if err := json.NewDecoder(resp.Body).Decode(&member); err != nil {
+		return nil, err
+	}
+
+	return &member, nil
+}
+
+type MemberContext struct {
+	ID        string `json:"id"`
+	Username  string `json:"username"`
+	AvatarURL string `json:"avatar_url"`
+	Level     string `json:"level"`
+	Color     int    `json:"color"`
+	Status    string `json:"status"`
+}
+
 func (c *Client) PlayAudio(audioData []byte) error {
 
 	req, err := http.NewRequest("POST", c.BaseURL+"/audio/play", bytes.NewBuffer(audioData))

@@ -50,7 +50,49 @@ func (h *AnalyzerAgent) SanitizeAndEnrichProfile(ctx context.Context, p *UserPro
 		p.Dossier.Career.Skills = []string{}
 	}
 
-	// 2. Gender Normalization
+	// 2. Data Enrichment from Discord (Source of Truth)
+
+	if h.DiscordClient != nil && userID != "dexter" {
+
+		member, err := h.DiscordClient.FetchMember(userID)
+
+		if err == nil && member != nil {
+
+			// Update Core Identity
+
+			p.Identity.Username = member.Username
+
+			p.Identity.AvatarURL = member.AvatarURL
+
+			p.Identity.Status = member.Status
+
+			// Add Level Badge if missing
+
+			hasLevelBadge := false
+
+			for _, b := range p.Identity.Badges {
+
+				if b == member.Level {
+
+					hasLevelBadge = true
+
+					break
+
+				}
+
+			}
+
+			if !hasLevelBadge && member.Level != "" {
+
+				p.Identity.Badges = append(p.Identity.Badges, member.Level)
+
+			}
+
+		}
+
+	}
+
+	// 3. Gender Normalization
 
 	g := strings.ToLower(p.Dossier.Identity.Gender)
 
@@ -66,15 +108,15 @@ func (h *AnalyzerAgent) SanitizeAndEnrichProfile(ctx context.Context, p *UserPro
 
 	default:
 
-		// Reset invalid values to empty/unknown for AI to refill
+		if p.Dossier.Identity.Gender == "" {
 
-		p.Dossier.Identity.Gender = "Unknown"
+			p.Dossier.Identity.Gender = "Unknown"
+
+		}
 
 	}
 
-	// 3. Remove "Unknown" spam
-
-	// If fields are literally the string "Unknown", clear them to allow clean UI rendering
+	// 4. Remove "Unknown" spam (Redundant strings)
 
 	if p.Dossier.Identity.AgeRange == "Unknown" {
 		p.Dossier.Identity.AgeRange = ""
@@ -100,7 +142,7 @@ func (h *AnalyzerAgent) SanitizeAndEnrichProfile(ctx context.Context, p *UserPro
 		p.Dossier.Career.Company = ""
 	}
 
-	// 4. Identity Consistency
+	// 5. Final Identity Consistency
 
 	if p.Identity.Username == "" {
 
@@ -116,6 +158,6 @@ func (h *AnalyzerAgent) SanitizeAndEnrichProfile(ctx context.Context, p *UserPro
 
 	}
 
-	log.Printf("[%s] Profile sanitized for user %s", h.Config.Name, userID)
+	log.Printf("[%s] Profile sanitized/enriched for user %s", h.Config.Name, userID)
 
 }
