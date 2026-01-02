@@ -267,6 +267,7 @@ type DashboardSnapshot struct {
 	Alerts           []types.Event          `json:"alerts"`
 	Contacts         *ContactsResponse      `json:"contacts"`
 	Profiles         map[string]interface{} `json:"profiles"`
+	AgentStatus      map[string]interface{} `json:"agent_status"`
 	Timestamp        int64                  `json:"timestamp"`
 }
 
@@ -319,6 +320,9 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	}
 	profiles := make(map[string]interface{})
 
+	// 6. Agent Status
+	agentStatus := GetAgentStatusSnapshot(redisClient)
+
 	// Try to find Dexter's ID from the contacts cache if it exists
 	if redisClient != nil {
 		// We'll try to find any member with Level "Me" (Dexter) or "Master" (Owen)
@@ -362,6 +366,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 		Alerts:           alerts,
 		Contacts:         contacts,
 		Profiles:         profiles,
+		AgentStatus:      agentStatus,
 		Timestamp:        time.Now().Unix(),
 	}
 }

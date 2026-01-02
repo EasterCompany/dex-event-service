@@ -130,6 +130,76 @@ func GetAgentStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 	}
 }
 
+// GetAgentStatusSnapshot returns current status data without HTTP context
+func GetAgentStatusSnapshot(redisClient *redis.Client) map[string]interface{} {
+	if redisClient == nil {
+		return nil
+	}
+
+	ctx := context.Background()
+
+	// 1. Guardian Agent
+	activeTier, _ := redisClient.Get(ctx, "guardian:active_tier").Result()
+	lastSentryTS, _ := redisClient.Get(ctx, "guardian:last_run:sentry").Int64()
+	sentryModel := "dex-guardian-t1"
+	sentryAttempts, _ := redisClient.Get(ctx, "system:metrics:model:"+sentryModel+":attempts").Int64()
+	sentryFailures, _ := redisClient.Get(ctx, "system:metrics:model:"+sentryModel+":failures").Int64()
+	sentryAbsolute, _ := redisClient.Get(ctx, "system:metrics:model:"+sentryModel+":absolute_failures").Int64()
+
+	lastArchitectTS, _ := redisClient.Get(ctx, "guardian:last_run:architect").Int64()
+	architectModel := "dex-guardian-t2"
+	architectAttempts, _ := redisClient.Get(ctx, "system:metrics:model:"+architectModel+":attempts").Int64()
+	architectFailures, _ := redisClient.Get(ctx, "system:metrics:model:"+architectModel+":failures").Int64()
+	architectAbsolute, _ := redisClient.Get(ctx, "system:metrics:model:"+architectModel+":absolute_failures").Int64()
+
+	// 2. Analyzer Agent
+	activeSynthesis, _ := redisClient.Get(ctx, "analyzer:active_tier").Result()
+	lastSynthesisTS, _ := redisClient.Get(ctx, "analyzer:last_run:synthesis").Int64()
+	synthesisModel := "dex-master-model"
+	synthesisAttempts, _ := redisClient.Get(ctx, "system:metrics:model:"+synthesisModel+":attempts").Int64()
+	synthesisFailures, _ := redisClient.Get(ctx, "system:metrics:model:"+synthesisModel+":failures").Int64()
+	synthesisAbsolute, _ := redisClient.Get(ctx, "system:metrics:model:"+synthesisModel+":absolute_failures").Int64()
+
+	// 3. System State & Metrics
+	lastTransition, _ := redisClient.Get(ctx, "system:last_transition_ts").Int64()
+	state, _ := redisClient.Get(ctx, "system:state").Result()
+	if state == "" {
+		state = "idle"
+	}
+	var stateTime int64
+	if lastTransition > 0 {
+		stateTime = time.Now().Unix() - lastTransition
+	}
+
+	activeSecs, _ := redisClient.Get(ctx, "system:metrics:total_active_seconds").Int64()
+	wasteSecs, _ := redisClient.Get(ctx, "system:metrics:total_waste_seconds").Int64()
+	idleSecs, _ := redisClient.Get(ctx, "system:metrics:total_idle_seconds").Int64()
+
+	// 4. Flatten for frontend compatibility
+	response := make(map[string]interface{})
+	response["active_tier"] = activeTier
+	response["sentry"] = map[string]interface{}{
+		"last_run": lastSentryTS, "next_run": lastSentryTS + 1800, "model": sentryModel,
+		"attempts": sentryAttempts, "failures": sentryFailures, "absolute_failures": sentryAbsolute,
+	}
+	response["architect"] = map[string]interface{}{
+		"last_run": lastArchitectTS, "next_run": lastArchitectTS + 1800, "model": architectModel,
+		"attempts": architectAttempts, "failures": architectFailures, "absolute_failures": architectAbsolute,
+	}
+	response["active_synthesis"] = activeSynthesis
+	response["synthesis"] = map[string]interface{}{
+		"last_run": lastSynthesisTS, "next_run": lastSynthesisTS + 43200, "model": synthesisModel,
+		"attempts": synthesisAttempts, "failures": synthesisFailures, "absolute_failures": synthesisAbsolute,
+	}
+	response["system_state"] = state
+	response["system_state_time"] = stateTime
+	response["total_active_time"] = activeSecs
+	response["total_idle_time"] = idleSecs
+	response["total_waste_time"] = wasteSecs
+
+	return response
+}
+
 // HandleUpdateGuardianStatus updates the guardian status (e.g., setting the active tier).
 func HandleUpdateGuardianStatus(redisClient *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
