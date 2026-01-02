@@ -278,8 +278,8 @@ type MemberContext struct {
 	Level     string `json:"level"`
 	Color     int    `json:"color"`
 	Status    string `json:"status"`
+	Gender    string `json:"gender"`
 }
-
 type ContactsResponse struct {
 	GuildName string          `json:"guild_name"`
 	Members   []MemberContext `json:"members"`
