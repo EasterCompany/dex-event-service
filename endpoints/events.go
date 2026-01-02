@@ -399,7 +399,10 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		// Generate unique ID
 		eventID := uuid.New().String()
-		timestamp := time.Now().Unix()
+		now := time.Now()
+		timestamp := now.Unix()
+		// Use microsecond precision for the score to ensure correct ordering of events within the same second
+		score := float64(now.UnixMicro()) / 1000000.0
 
 		// Create event object
 		event := types.Event{
@@ -425,21 +428,21 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		// Add event ID to the global sorted set (timeline) with timestamp as score
 		pipe.ZAdd(ctx, timelineKey, redis.Z{
-			Score:  float64(timestamp),
+			Score:  score,
 			Member: eventID,
 		})
 
 		// Add event ID to a service-specific sorted set for filtering
 		serviceTimelineKey := fmt.Sprintf("events:service:%s", req.Service)
 		pipe.ZAdd(ctx, serviceTimelineKey, redis.Z{
-			Score:  float64(timestamp),
+			Score:  score,
 			Member: eventID,
 		})
 
 		// Add event ID to a type-specific sorted set for fast filtering
 		typeTimelineKey := fmt.Sprintf("events:type:%s", eventType)
 		pipe.ZAdd(ctx, typeTimelineKey, redis.Z{
-			Score:  float64(timestamp),
+			Score:  score,
 			Member: eventID,
 		})
 
@@ -454,7 +457,7 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 		if channelID != "" {
 			channelTimelineKey := fmt.Sprintf("events:channel:%s", channelID)
 			pipe.ZAdd(ctx, channelTimelineKey, redis.Z{
-				Score:  float64(timestamp),
+				Score:  score,
 				Member: eventID,
 			})
 		}
