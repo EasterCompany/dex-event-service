@@ -315,8 +315,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 
 	// 5. Public Contacts & Profiles (Owen & Dexter only)
 	owenID := "313071000877137920"
-	// Dexter's ID is usually cached or stored in system config, for now we search for it if possible
-	// or assume it's in the contacts cache.
+	// Dexter's ID will be found via Level "Me"
 
 	contacts := &ContactsResponse{
 		GuildName: "Easter Company",
@@ -338,7 +337,9 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 			}
 			data, _ := redisClient.Get(ctx, iter.Val()).Result()
 			if err := json.Unmarshal([]byte(data), &cachedData); err == nil {
-				contacts.GuildName = cachedData.GuildName
+				if cachedData.GuildName != "" {
+					contacts.GuildName = cachedData.GuildName
+				}
 				for _, m := range cachedData.Members {
 					// Check if we already added this member to avoid duplicates
 					isDuplicate := false
@@ -352,6 +353,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 						continue
 					}
 
+					// We include Owen (Master) and Dexter (Me)
 					if m.ID == owenID || m.Level == "Me" {
 						contacts.Members = append(contacts.Members, m)
 
@@ -363,6 +365,34 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 								profiles[m.ID] = p
 							}
 						}
+					}
+				}
+			}
+		}
+
+		// Fallback: If Owen was not in the contacts cache (offline), try to fetch his profile anyway
+		if _, found := profiles[owenID]; !found {
+			profileData, err := redisClient.Get(ctx, "user:profile:"+owenID).Result()
+			if err == nil {
+				var p interface{}
+				if err := json.Unmarshal([]byte(profileData), &p); err == nil {
+					profiles[owenID] = p
+					// Also add a minimal MemberContext if missing
+					hasOwenMember := false
+					for _, m := range contacts.Members {
+						if m.ID == owenID {
+							hasOwenMember = true
+							break
+						}
+					}
+					if !hasOwenMember {
+						contacts.Members = append(contacts.Members, MemberContext{
+							ID:        owenID,
+							Username:  "oweneaster",
+							AvatarURL: "",
+							Level:     "Master",
+							Status:    "offline",
+						})
 					}
 				}
 			}
