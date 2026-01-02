@@ -151,6 +151,11 @@ func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID s
 	}
 
 	input := h.gatherHistoryContext(ctx, targetUserID)
+	if strings.Contains(input, "No interaction history found") {
+		log.Printf("[%s] No interaction history for user %s. Skipping synthesis.", h.Config.Name, targetUserID)
+		h.RedisClient.Set(ctx, cooldownKey, "1", 4*time.Hour)
+		return
+	}
 	sessionID := fmt.Sprintf("synthesis-%s-%d", targetUserID, time.Now().Unix())
 
 	// Use RunCognitiveLoop which handles EnforceJSON and retries automatically
