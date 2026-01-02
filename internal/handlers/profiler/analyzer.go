@@ -155,6 +155,11 @@ func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID s
 		return
 	}
 
+	// AUTOMATED STEP: Sanitize and Enrich
+	h.SanitizeAndEnrichProfile(ctx, p, targetUserID)
+	// Save the sanitized version immediately to ensure integrity even if synthesis fails/skips
+	_ = saveProfile(ctx, h.RedisClient, p)
+
 	input := h.gatherHistoryContext(ctx, targetUserID)
 	if strings.Contains(input, "No interaction history found") {
 		log.Printf("[%s] No interaction history for user %s. Skipping synthesis.", h.Config.Name, targetUserID)
