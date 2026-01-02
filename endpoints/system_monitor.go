@@ -329,19 +329,29 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 
 	// Try to find Dexter's ID from the contacts cache if it exists
 	if redisClient != nil {
-		// We'll try to find any member with Level "Me" (Dexter) or "Master" (Owen)
-		// Better: just fetch Owen directly and search for the Bot's ID in the cache
-
-		// 1. Load full contacts from cache to find Dexter
-		// We don't know the exact server ID here easily without loading config,
-		// but we can try common keys or Scan
+		// 1. Scan for all contact cache keys
 		iter := redisClient.Scan(ctx, 0, "cache:contacts:*", 0).Iterator()
-		if iter.Next(ctx) {
-			var fullContacts ContactsResponse
+		for iter.Next(ctx) {
+			var cachedData struct {
+				GuildName string          `json:"guild_name"`
+				Members   []MemberContext `json:"members"`
+			}
 			data, _ := redisClient.Get(ctx, iter.Val()).Result()
-			if err := json.Unmarshal([]byte(data), &fullContacts); err == nil {
-				contacts.GuildName = fullContacts.GuildName
-				for _, m := range fullContacts.Members {
+			if err := json.Unmarshal([]byte(data), &cachedData); err == nil {
+				contacts.GuildName = cachedData.GuildName
+				for _, m := range cachedData.Members {
+					// Check if we already added this member to avoid duplicates
+					isDuplicate := false
+					for _, existing := range contacts.Members {
+						if existing.ID == m.ID {
+							isDuplicate = true
+							break
+						}
+					}
+					if isDuplicate {
+						continue
+					}
+
 					if m.ID == owenID || m.Level == "Me" {
 						contacts.Members = append(contacts.Members, m)
 
