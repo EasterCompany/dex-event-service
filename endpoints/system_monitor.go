@@ -257,11 +257,15 @@ func GetSystemMonitorSnapshot() *SystemMonitorResponse {
 
 // DashboardSnapshot represents the full state of the dashboard for public consumption
 type DashboardSnapshot struct {
-	Monitor   *SystemMonitorResponse `json:"monitor"`
-	Processes *ProcessesSnapshot     `json:"processes"`
-	Events    []types.Event          `json:"events"`
-	Alerts    []types.Event          `json:"alerts"`
-	Timestamp int64                  `json:"timestamp"`
+	Monitor          *SystemMonitorResponse `json:"monitor"`
+	Processes        *ProcessesSnapshot     `json:"processes"`
+	Events           []types.Event          `json:"events"`
+	MessagingEvents  []types.Event          `json:"messaging_events"`
+	SystemEvents     []types.Event          `json:"system_events"`
+	CognitiveEvents  []types.Event          `json:"cognitive_events"`
+	ModerationEvents []types.Event          `json:"moderation_events"`
+	Alerts           []types.Event          `json:"alerts"`
+	Timestamp        int64                  `json:"timestamp"`
 }
 
 // GetDashboardSnapshot captures the full system state for public mirroring
@@ -278,20 +282,27 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 		processes.History = processes.History[:10]
 	}
 
-	// 3. Sanitized Events
-	// Fetch latest 50 events
+	// 3. Sanitized Events (Global + Categorized)
 	events := getSanitizedEvents(ctx, "events:timeline", 50)
+	messaging := getSanitizedEvents(ctx, "events:category:messaging", 50)
+	system := getSanitizedEvents(ctx, "events:category:system", 50)
+	cognitive := getSanitizedEvents(ctx, "events:category:cognitive", 50)
+	moderation := getSanitizedEvents(ctx, "events:category:moderation", 50)
 
 	// 4. Sanitized Alerts
 	// Fetch latest 50 notifications
 	alerts := getSanitizedEvents(ctx, "events:type:system.notification.generated", 50)
 
 	return &DashboardSnapshot{
-		Monitor:   monitor,
-		Processes: processes,
-		Events:    events,
-		Alerts:    alerts,
-		Timestamp: time.Now().Unix(),
+		Monitor:          monitor,
+		Processes:        processes,
+		Events:           events,
+		MessagingEvents:  messaging,
+		SystemEvents:     system,
+		CognitiveEvents:  cognitive,
+		ModerationEvents: moderation,
+		Alerts:           alerts,
+		Timestamp:        time.Now().Unix(),
 	}
 }
 
