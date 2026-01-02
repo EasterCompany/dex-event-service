@@ -265,10 +265,26 @@ type DashboardSnapshot struct {
 	CognitiveEvents  []types.Event          `json:"cognitive_events"`
 	ModerationEvents []types.Event          `json:"moderation_events"`
 	Alerts           []types.Event          `json:"alerts"`
+	Contacts         *ContactsResponse      `json:"contacts"`
+	Profiles         map[string]interface{} `json:"profiles"`
 	Timestamp        int64                  `json:"timestamp"`
 }
 
-// GetDashboardSnapshot captures the full system state for public mirroring
+type MemberContext struct {
+	ID        string `json:"id"`
+	Username  string `json:"username"`
+	AvatarURL string `json:"avatar_url"`
+	Level     string `json:"level"`
+	Color     int    `json:"color"`
+	Status    string `json:"status"`
+}
+
+type ContactsResponse struct {
+	GuildName string          `json:"guild_name"`
+	Members   []MemberContext `json:"members"`
+}
+
+// Capture the full system state for public mirroring
 func GetDashboardSnapshot() *DashboardSnapshot {
 	ctx := context.Background()
 
@@ -290,8 +306,50 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	moderation := getSanitizedEvents(ctx, "events:category:moderation", 50)
 
 	// 4. Sanitized Alerts
-	// Fetch latest 50 notifications
 	alerts := getSanitizedEvents(ctx, "events:type:system.notification.generated", 50)
+
+	// 5. Public Contacts & Profiles (Owen & Dexter only)
+	owenID := "313071000877137920"
+	// Dexter's ID is usually cached or stored in system config, for now we search for it if possible
+	// or assume it's in the contacts cache.
+
+	contacts := &ContactsResponse{
+		GuildName: "Easter Company",
+		Members:   []MemberContext{},
+	}
+	profiles := make(map[string]interface{})
+
+	// Try to find Dexter's ID from the contacts cache if it exists
+	if redisClient != nil {
+		// We'll try to find any member with Level "Me" (Dexter) or "Master" (Owen)
+		// Better: just fetch Owen directly and search for the Bot's ID in the cache
+
+		// 1. Load full contacts from cache to find Dexter
+		// We don't know the exact server ID here easily without loading config,
+		// but we can try common keys or Scan
+		iter := redisClient.Scan(ctx, 0, "cache:contacts:*", 0).Iterator()
+		if iter.Next(ctx) {
+			var fullContacts ContactsResponse
+			data, _ := redisClient.Get(ctx, iter.Val()).Result()
+			if err := json.Unmarshal([]byte(data), &fullContacts); err == nil {
+				contacts.GuildName = fullContacts.GuildName
+				for _, m := range fullContacts.Members {
+					if m.ID == owenID || m.Level == "Me" {
+						contacts.Members = append(contacts.Members, m)
+
+						// Also fetch their full profile/dossier
+						profileData, err := redisClient.Get(ctx, "user:profile:"+m.ID).Result()
+						if err == nil {
+							var p interface{}
+							if err := json.Unmarshal([]byte(profileData), &p); err == nil {
+								profiles[m.ID] = p
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 
 	return &DashboardSnapshot{
 		Monitor:          monitor,
@@ -302,6 +360,8 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 		CognitiveEvents:  cognitive,
 		ModerationEvents: moderation,
 		Alerts:           alerts,
+		Contacts:         contacts,
+		Profiles:         profiles,
 		Timestamp:        time.Now().Unix(),
 	}
 }
