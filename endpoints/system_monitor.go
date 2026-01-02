@@ -184,7 +184,7 @@ func checkXTTSStatus() *XTTSStatusReport {
 }
 
 // GetSystemMonitorSnapshot captures the full system state
-func GetSystemMonitorSnapshot() *SystemMonitorResponse {
+func GetSystemMonitorSnapshot(isPublic bool) *SystemMonitorResponse {
 	configuredServices, err := config.LoadServiceMap()
 	if err != nil {
 		// Return empty or error state if we can't load config
@@ -233,7 +233,7 @@ func GetSystemMonitorSnapshot() *SystemMonitorResponse {
 			return servicesInGroup[i].ID < servicesInGroup[j].ID
 		})
 		for _, serviceDef := range servicesInGroup {
-			report := checkService(serviceDef, group)
+			report := checkService(serviceDef, group, isPublic)
 			serviceReports = append(serviceReports, report)
 		}
 	}
@@ -284,12 +284,12 @@ type ContactsResponse struct {
 	Members   []MemberContext `json:"members"`
 }
 
-// Capture the full system state for public mirroring
+// GetDashboardSnapshot captures the full system state for public mirroring
 func GetDashboardSnapshot() *DashboardSnapshot {
 	ctx := context.Background()
 
 	// 1. Monitor State
-	monitor := GetSystemMonitorSnapshot()
+	monitor := GetSystemMonitorSnapshot(true)
 
 	// 2. Processes State
 	processes := GetProcessesSnapshot()
@@ -412,7 +412,7 @@ func getSanitizedEvents(ctx context.Context, key string, count int) []types.Even
 
 // SystemMonitorHandler collects status for all configured services and returns as JSON
 func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
-	response := GetSystemMonitorSnapshot()
+	response := GetSystemMonitorSnapshot(false)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -504,7 +504,7 @@ func checkModelsStatus() []ModelReport {
 }
 
 // checkService dispatches to appropriate status checker based on service type.
-func checkService(service config.ServiceEntry, serviceType string) types.ServiceReport {
+func checkService(service config.ServiceEntry, serviceType string, isPublic bool) types.ServiceReport {
 	// Populate basic info, ShortName will be ID as no ShortName field in ServiceEntry
 	baseReport := types.ServiceReport{
 		ID:        service.ID,
@@ -512,6 +512,11 @@ func checkService(service config.ServiceEntry, serviceType string) types.Service
 		Type:      serviceType,
 		Domain:    service.Domain,
 		Port:      service.Port,
+	}
+
+	if isPublic {
+		baseReport.Domain = "easter.company"
+		baseReport.Port = ""
 	}
 
 	switch serviceType {
@@ -523,8 +528,8 @@ func checkService(service config.ServiceEntry, serviceType string) types.Service
 			return checkOllamaStatus(baseReport)
 		}
 		// Check for Redis cache services
-		if strings.Contains(strings.ToLower(service.ID), "cache") {
-			return checkRedisStatus(baseReport, service.Credentials)
+		if strings.Contains(strings.ToLower(service.ID), "cache") || strings.Contains(strings.ToLower(service.ID), "upstash") {
+			return checkRedisStatus(baseReport, service.Credentials, isPublic)
 		}
 		// For other OS services, attempt HTTP check if port is defined
 		if service.Port != "" {
@@ -826,8 +831,21 @@ func checkHTTPStatus(baseReport types.ServiceReport) types.ServiceReport {
 }
 
 // checkRedisStatus checks a Redis server via PING and INFO commands
-func checkRedisStatus(baseReport types.ServiceReport, creds *config.ServiceCredentials) types.ServiceReport {
+func checkRedisStatus(baseReport types.ServiceReport, creds *config.ServiceCredentials, isPublic bool) types.ServiceReport {
 	report := baseReport
+
+	// MOCKED STATUS FOR UPSTASH IN PUBLIC SNAPSHOTS
+	// If we are generating a public snapshot, we assume Upstash is Online because
+	// we are currently using it to host the snapshot. This saves ops/latency.
+	if isPublic && strings.Contains(strings.ToLower(report.ID), "upstash") {
+		report.Status = "online"
+		report.HealthMessage = "System is operational"
+		report.Uptime = "Healthy"
+		report.CPU = "-"
+		report.Memory = "Healthy"
+		report.Version.Str = "Cloud"
+		return report
+	}
 
 	host := report.Domain
 	if report.Domain == "0.0.0.0" {
