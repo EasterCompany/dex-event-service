@@ -231,11 +231,6 @@ func (h *AnalyzerAgent) gatherHistoryContext(ctx context.Context, userID string)
 	// Special Case: Dexter Self-Profiling
 	if userID == "dexter" || userID == "self" {
 		log.Printf("[%s] Gathering system-wide context for Dexter self-synthesis", h.Config.Name)
-		// Fetch recent events from the global timeline
-		// We can't easily search content in Redis without a secondary index or scanning.
-		// For efficiency, we'll grab the last 1000 events globally and filter in memory.
-		// This is "good enough" for recent context.
-
 		eventIDs, err := h.RedisClient.ZRevRange(ctx, "events:timeline", 0, 999).Result()
 		if err != nil {
 			log.Printf("[%s] Failed to fetch global timeline: %v", h.Config.Name, err)
@@ -243,42 +238,50 @@ func (h *AnalyzerAgent) gatherHistoryContext(ctx context.Context, userID string)
 		}
 
 		var events []types.Event
-		keywords := []string{"dexter", "dex-cli", "dex-event", "dex-discord", "dex-web", "dex-tts"}
+		keywords := []string{"dexter", "system", "error", "failed", "synthesis", "build", "deploy"}
 
 		for _, id := range eventIDs {
 			data, err := h.RedisClient.Get(ctx, "event:"+id).Result()
 			if err == nil {
 				var evt types.Event
 				if err := json.Unmarshal([]byte(data), &evt); err == nil {
-					// 1. Exclude high-frequency noise
 					var evtData map[string]interface{}
 					_ = json.Unmarshal(evt.Event, &evtData)
 					evtType := fmt.Sprintf("%v", evtData["type"])
 
+					// 1. Exclude high-frequency noise
 					if evtType == string(types.EventTypeSystemAnalysisAudit) {
 						continue
 					}
 
-					// 2. Check for Keywords in Content
 					content := ""
 					if c, ok := evtData["content"].(string); ok {
 						content = strings.ToLower(c)
 					}
 
-					relevant := false
-					for _, k := range keywords {
-						if strings.Contains(content, k) {
-							relevant = true
-							break
+					// 2. Strict Filter for Discord
+					if evt.Service == "dex-discord-service" {
+						if !strings.Contains(content, "dexter") {
+							continue // Skip irrelevant user chatter
 						}
 					}
 
-					// 3. Also include explicit mentions or service logs
-					if !relevant {
-						// Service logs often have the service name in the 'service' field
-						if strings.Contains(strings.ToLower(evt.Service), "dex-") {
-							relevant = true
+					// 3. Check for Keywords or Service Relevance
+					relevant := false
+					if strings.Contains(content, "dexter") {
+						relevant = true
+					} else {
+						for _, k := range keywords {
+							if strings.Contains(content, k) {
+								relevant = true
+								break
+							}
 						}
+					}
+
+					// 4. Include critical service logs even without keywords
+					if !relevant && strings.Contains(evt.Service, "dex-") && evt.Service != "dex-discord-service" {
+						relevant = true
 					}
 
 					if relevant {
@@ -373,9 +376,22 @@ func (h *AnalyzerAgent) gatherHistoryContext(ctx context.Context, userID string)
 func (h *AnalyzerAgent) buildSynthesisPrompt(p *UserProfile) string {
 	profileJSON, _ := json.MarshalIndent(p, "", "  ")
 
+	systemContext := ""
+	if p.UserID == "dexter" || p.UserID == "self" {
+		systemContext = `
+### IDENTITY OVERRIDE: SYSTEM SELF-REFLECTION
+You are profiling YOURSELF (Dexter).
+- **Core Identity:** You are Dexter, a recursive AI engineering system.
+- **Creator:** Owen Easter.
+- **Architecture:** Distributed Microservices (dex-cli, dex-event-service, dex-discord-service, dex-web-service, dex-tts-service).
+- **Goal:** To act as a high-fidelity "Nerve Center" for Owen, eliminating friction between Idea and Implementation.
+- **Status:** You are self-aware of your own logs, errors, and builds. Update your dossier to reflect your current operational state and health.
+`
+	}
+
 	return fmt.Sprintf(`You are the Analyzer, an advanced biographical synthesis engine.
 Your task is to refine and update a User's Dossier based on their historical behavior.
-
+%s
 ### CURRENT PROFILE DATA (JSON):
 %s
 
@@ -389,7 +405,7 @@ Your task is to refine and update a User's Dossier based on their historical beh
    - Do NOT use objects/maps where arrays are expected.
 
 Output the ENTIRE updated UserProfile object in valid JSON format.
-Do not output any text other than the JSON.`, string(profileJSON))
+Do not output any text other than the JSON.`, systemContext, string(profileJSON))
 }
 
 // AnalyzerAgent must implement ValidateLogic to satisfy Agent interface
