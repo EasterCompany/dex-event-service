@@ -542,20 +542,28 @@ func checkService(service config.ServiceEntry, serviceType string, isPublic bool
 		report.Domain = "easter.company"
 		report.Port = ""
 
-		// 2. Specialized Naming & Mocking for Cloud Services
+		// 2. Specialized Naming & Mocking for Cloud/System Services
 		lowerID := strings.ToLower(report.ID)
-		if lowerID == "upstash-redis-ro" {
+		switch {
+		case lowerID == "upstash-redis-ro":
 			report.ShortName = "public-cache-1"
-		} else if lowerID == "upstash-redis-rw" {
+			report.Uptime = "∞"
+		case lowerID == "upstash-redis-rw":
 			report.ShortName = "public-cache-2"
-		} else if strings.Contains(lowerID, "cloud-cache") {
-			// Hardcode cloud-cache to always be online/Cloud in public view
+			report.Uptime = "∞"
+		case lowerID == "dex-cli":
+			report.Uptime = "∞"
+		case strings.Contains(lowerID, "cloud-cache"):
 			report.Status = "online"
 			report.HealthMessage = "System is operational"
 			report.Version.Str = "Cloud"
-			report.Uptime = "Healthy"
-			report.CPU = "-"
-			report.Memory = "Healthy"
+			report.Uptime = "∞"
+			report.CPU = "0.2%"
+			report.Memory = "1.4%"
+		case strings.Contains(lowerID, "upstash"):
+			report.Uptime = "∞"
+			report.CPU = "0.2%"
+			report.Memory = "1.4%"
 		}
 	}
 
@@ -861,9 +869,9 @@ func checkRedisStatus(baseReport types.ServiceReport, creds *config.ServiceCrede
 	if isPublic && strings.Contains(strings.ToLower(report.ID), "upstash") {
 		report.Status = "online"
 		report.HealthMessage = "System is operational"
-		report.Uptime = "Healthy"
-		report.CPU = "-"
-		report.Memory = "Healthy"
+		report.Uptime = "∞"
+		report.CPU = "0.2%"
+		report.Memory = "1.4%"
 		report.Version.Str = "Cloud"
 		return report
 	}
