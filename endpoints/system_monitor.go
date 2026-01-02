@@ -43,55 +43,54 @@ type ProcessInfo struct {
 	EndTime   int64  `json:"end_time,omitempty"`
 }
 
-// ListProcessesHandler fetches and returns information about active event handler processes
-func ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
+// ProcessesSnapshot represents the full state of processes
+type ProcessesSnapshot struct {
+	Active  []ProcessInfo `json:"active"`
+	Queue   []ProcessInfo `json:"queue"`
+	History []ProcessInfo `json:"history"`
+}
+
+// GetProcessesSnapshot captures the current state of processes from Redis
+func GetProcessesSnapshot() *ProcessesSnapshot {
 	if redisClient == nil {
-		http.Error(w, "Redis client not initialized", http.StatusServiceUnavailable)
-		return
+		return &ProcessesSnapshot{
+			Active:  []ProcessInfo{},
+			Queue:   []ProcessInfo{},
+			History: []ProcessInfo{},
+		}
 	}
 
-	activeProcesses := []ProcessInfo{}
 	ctx := context.Background()
 
-	// Scan for all process:info:* keys
+	// 1. Fetch Active Processes
+	activeProcesses := []ProcessInfo{}
 	iter := redisClient.Scan(ctx, 0, "process:info:*", 0).Iterator()
 	for iter.Next(ctx) {
 		key := iter.Val()
 		val, err := redisClient.Get(ctx, key).Result()
-		if err != nil {
-			fmt.Printf("Error fetching process info for key %s: %v\n", key, err)
-			continue
+		if err == nil {
+			var pi ProcessInfo
+			if err := json.Unmarshal([]byte(val), &pi); err == nil {
+				activeProcesses = append(activeProcesses, pi)
+			}
 		}
-
-		var pi ProcessInfo
-		if err := json.Unmarshal([]byte(val), &pi); err != nil {
-			fmt.Printf("Error unmarshaling process info for key %s: %v\n", key, err)
-			continue
-		}
-		activeProcesses = append(activeProcesses, pi)
-	}
-	if err := iter.Err(); err != nil {
-		http.Error(w, fmt.Sprintf("Error scanning Redis keys: %v", err), http.StatusInternalServerError)
-		return
 	}
 
-	// Fetch Queue
+	// 2. Fetch Queue
 	queuedProcesses := []ProcessInfo{}
 	qIter := redisClient.Scan(ctx, 0, "process:queued:*", 0).Iterator()
 	for qIter.Next(ctx) {
 		key := qIter.Val()
 		val, err := redisClient.Get(ctx, key).Result()
-		if err != nil {
-			continue
-		}
-
-		var pi ProcessInfo
-		if err := json.Unmarshal([]byte(val), &pi); err == nil {
-			queuedProcesses = append(queuedProcesses, pi)
+		if err == nil {
+			var pi ProcessInfo
+			if err := json.Unmarshal([]byte(val), &pi); err == nil {
+				queuedProcesses = append(queuedProcesses, pi)
+			}
 		}
 	}
 
-	// Fetch History
+	// 3. Fetch History
 	historyProcesses := []ProcessInfo{}
 	historyVals, err := redisClient.LRange(ctx, "process:history", 0, -1).Result()
 	if err == nil {
@@ -103,18 +102,24 @@ func ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	response := struct {
-		Active  []ProcessInfo `json:"active"`
-		Queue   []ProcessInfo `json:"queue"`
-		History []ProcessInfo `json:"history"`
-	}{
+	return &ProcessesSnapshot{
 		Active:  activeProcesses,
 		Queue:   queuedProcesses,
 		History: historyProcesses,
 	}
+}
+
+// ListProcessesHandler fetches and returns information about active event handler processes
+func ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
+	if redisClient == nil {
+		http.Error(w, "Redis client not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	snapshot := GetProcessesSnapshot()
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	if err := json.NewEncoder(w).Encode(snapshot); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
 	}
 }
@@ -184,12 +189,15 @@ func checkXTTSStatus() *XTTSStatusReport {
 	return report
 }
 
-// SystemMonitorHandler collects status for all configured services and returns as JSON
-func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
+// GetSystemMonitorSnapshot captures the full system state
+func GetSystemMonitorSnapshot() *SystemMonitorResponse {
 	configuredServices, err := config.LoadServiceMap()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load service map: %v", err), http.StatusInternalServerError)
-		return
+		// Return empty or error state if we can't load config
+		return &SystemMonitorResponse{
+			Services: []types.ServiceReport{},
+			Models:   []ModelReport{},
+		}
 	}
 
 	var serviceReports []types.ServiceReport
@@ -245,13 +253,17 @@ func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
 	// Get XTTS status report
 	xttsReport := checkXTTSStatus()
 
-	// Combine into the final response
-	response := SystemMonitorResponse{
+	return &SystemMonitorResponse{
 		Services: serviceReports,
 		Models:   modelReports,
 		Whisper:  whisperReport,
 		XTTS:     xttsReport,
 	}
+}
+
+// SystemMonitorHandler collects status for all configured services and returns as JSON
+func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
+	response := GetSystemMonitorSnapshot()
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {

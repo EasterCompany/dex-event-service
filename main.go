@@ -109,6 +109,7 @@ func main() {
 				} else {
 					log.Println("Cloud Redis mirroring enabled.")
 					endpoints.SetCloudRedisClient(cloudClient)
+					endpoints.StartCloudPulse(ctx, cloudClient, 15*time.Second)
 					defer func() {
 						if err := cloudClient.Close(); err != nil {
 							log.Printf("Error closing Cloud Redis client: %v", err)
