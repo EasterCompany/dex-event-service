@@ -156,8 +156,8 @@ func main() {
 		// Fallback to Upstash RW from service map
 		for _, s := range serviceMap.Services["os"] {
 			if s.ID == "upstash-redis-rw" {
-				// Construct redis://default:PASSWORD@DOMAIN:6379 (Upstash standard port)
-				cloudURL = fmt.Sprintf("redis://default:%s@%s:6379", s.Credentials.Password, s.Domain)
+				// Construct rediss://default:PASSWORD@DOMAIN:6379 (Upstash standard port)
+				cloudURL = fmt.Sprintf("rediss://default:%s@%s:6379", s.Credentials.Password, s.Domain)
 				break
 			}
 		}
