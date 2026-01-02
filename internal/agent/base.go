@@ -191,7 +191,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 		attempts++
 		b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":attempts")
 
-		tCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		tCtx, cancel := context.WithTimeout(ctx, 60*time.Minute)
 		respMsg, err := b.OllamaClient.Chat(tCtx, model, currentTurnHistory)
 		cancel()
 
