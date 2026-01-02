@@ -62,6 +62,7 @@ type IdentityDetails struct {
 	FullName     string `json:"fullName"`
 	AgeRange     string `json:"ageRange"`
 	Location     string `json:"location"`
+	Gender       string `json:"gender"`
 	Sexuality    string `json:"sexuality"`
 	Relationship string `json:"relationship"`
 }

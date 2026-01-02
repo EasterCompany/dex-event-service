@@ -262,6 +262,7 @@ Your task is to refine and update a User's Dossier based on their historical beh
 3. CRITICAL: Follow the exact JSON schema provided. 
    - "attributes" MUST be an ARRAY of objects: [{"key": "string", "value": "string", "confidence": float}]
    - "dossier.social" MUST be an ARRAY of objects: [{"name": "string", "relation": "string", "trust": "string"}]
+   - "dossier.identity.gender" MUST be either "Male" or "Female".
    - Do NOT use objects/maps where arrays are expected.
 
 Output the ENTIRE updated UserProfile object in valid JSON format.
