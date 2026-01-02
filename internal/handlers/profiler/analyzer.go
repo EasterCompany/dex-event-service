@@ -287,26 +287,54 @@ func (h *AnalyzerAgent) gatherHistoryContext(ctx context.Context, userID string)
 
 	userTimelineKey := "events:user:" + userID
 
-	// 1. Fetch all event IDs for the last 24 hours
-	// Since Redis only holds 24 hours of data, we just get the whole sorted set
-	eventIDs, err := h.RedisClient.ZRange(ctx, userTimelineKey, 0, -1).Result()
+	// 1. Fetch core event IDs for the last 24 hours
+	coreEventIDs, err := h.RedisClient.ZRange(ctx, userTimelineKey, 0, -1).Result()
 	if err != nil {
 		log.Printf("[%s] Failed to fetch user timeline: %v", h.Config.Name, err)
 		return ""
 	}
 
-	if len(eventIDs) == 0 {
+	if len(coreEventIDs) == 0 {
 		return "No interaction history found for this period."
 	}
 
-	// 2. Fetch event data
+	// 2. Expand Context (Neighbors)
+	// Use a map to deduplicate IDs
+	uniqueEventIDs := make(map[string]bool)
+	for _, id := range coreEventIDs {
+		uniqueEventIDs[id] = true
+
+		// Find rank in global timeline
+		rank, err := h.RedisClient.ZRank(ctx, "events:timeline", id).Result()
+		if err == nil {
+			// Fetch context window (+/- 2 events)
+			start := rank - 2
+			if start < 0 {
+				start = 0
+			}
+			stop := rank + 2
+
+			neighbors, _ := h.RedisClient.ZRange(ctx, "events:timeline", start, stop).Result()
+			for _, nid := range neighbors {
+				uniqueEventIDs[nid] = true
+			}
+		}
+	}
+
+	// 3. Fetch Event Data
+	// To maintain chronological order, we should fetch ZScores or just re-sort by checking the global timeline order.
+	// Since we have a mix of IDs, efficient way is to just grab them and rely on their internal timestamps if available,
+	// or ZScore them.
+	// Actually, easier: ZRange the global timeline filtered by our unique set? No, Redis doesn't do that.
+	// We'll just fetch all valid events and sort them in Go by their timestamp.
+
 	var events []types.Event
-	for _, id := range eventIDs {
+	for id := range uniqueEventIDs {
 		data, err := h.RedisClient.Get(ctx, "event:"+id).Result()
 		if err == nil {
 			var evt types.Event
 			if err := json.Unmarshal([]byte(data), &evt); err == nil {
-				// We filter out audits to avoid context loops, but keep signals and messages
+				// Filter out system audits
 				var evtData map[string]interface{}
 				_ = json.Unmarshal(evt.Event, &evtData)
 				if evtData["type"] != string(types.EventTypeSystemAnalysisAudit) {
@@ -316,9 +344,21 @@ func (h *AnalyzerAgent) gatherHistoryContext(ctx context.Context, userID string)
 		}
 	}
 
-	// 3. Format as a clinical log for synthesis
-	// We use the shared smartcontext formatter
-	return "### 24-HOUR INTERACTION HISTORY:\n" + smartcontext.FormatEventsBlock(events)
+	// 4. Sort by Timestamp
+	// Using a simple bubble sort or slice sort since list is relatively small (hundreds, not millions)
+	// Or better: re-use smartcontext logic if available, but standard sort is fine.
+	// We'll rely on the smartcontext formatter which usually expects chronological order.
+	// Let's implement a quick sort here.
+	for i := 0; i < len(events); i++ {
+		for j := i + 1; j < len(events); j++ {
+			if events[i].Timestamp > events[j].Timestamp {
+				events[i], events[j] = events[j], events[i]
+			}
+		}
+	}
+
+	// 5. Format as a clinical log for synthesis
+	return "### 24-HOUR INTERACTION HISTORY (Including Context):\n" + smartcontext.FormatEventsBlock(events)
 }
 
 func (h *AnalyzerAgent) buildSynthesisPrompt(p *UserProfile) string {
