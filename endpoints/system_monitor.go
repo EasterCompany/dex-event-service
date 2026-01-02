@@ -20,16 +20,10 @@ import (
 )
 
 var redisClient *redis.Client
-var cloudRedisClient *redis.Client
 
 // SetRedisClient sets the Redis client for endpoints
 func SetRedisClient(client *redis.Client) {
 	redisClient = client
-}
-
-// SetCloudRedisClient sets the Cloud Redis client for endpoints
-func SetCloudRedisClient(client *redis.Client) {
-	cloudRedisClient = client
 }
 
 // ProcessInfo represents the data stored by a handler in Redis for the processes tab
@@ -259,6 +253,90 @@ func GetSystemMonitorSnapshot() *SystemMonitorResponse {
 		Whisper:  whisperReport,
 		XTTS:     xttsReport,
 	}
+}
+
+// DashboardSnapshot represents the full state of the dashboard for public consumption
+type DashboardSnapshot struct {
+	Monitor   *SystemMonitorResponse `json:"monitor"`
+	Processes *ProcessesSnapshot     `json:"processes"`
+	Events    []types.Event          `json:"events"`
+	Alerts    []types.Event          `json:"alerts"`
+	Timestamp int64                  `json:"timestamp"`
+}
+
+// GetDashboardSnapshot captures the full system state for public mirroring
+func GetDashboardSnapshot() *DashboardSnapshot {
+	ctx := context.Background()
+
+	// 1. Monitor State
+	monitor := GetSystemMonitorSnapshot()
+
+	// 2. Processes State
+	processes := GetProcessesSnapshot()
+	// Limit history in public snapshot to keep payload small
+	if len(processes.History) > 10 {
+		processes.History = processes.History[:10]
+	}
+
+	// 3. Sanitized Events
+	// Fetch latest 50 events
+	events := getSanitizedEvents(ctx, "events:timeline", 50)
+
+	// 4. Sanitized Alerts
+	// Fetch latest 50 notifications
+	alerts := getSanitizedEvents(ctx, "events:type:system.notification.generated", 50)
+
+	return &DashboardSnapshot{
+		Monitor:   monitor,
+		Processes: processes,
+		Events:    events,
+		Alerts:    alerts,
+		Timestamp: time.Now().Unix(),
+	}
+}
+
+func getSanitizedEvents(ctx context.Context, key string, count int) []types.Event {
+	if redisClient == nil {
+		return []types.Event{}
+	}
+
+	ids, err := redisClient.ZRevRange(ctx, key, 0, int64(count-1)).Result()
+	if err != nil {
+		return []types.Event{}
+	}
+
+	events := make([]types.Event, 0, len(ids))
+	for _, id := range ids {
+		val, err := redisClient.Get(ctx, "event:"+id).Result()
+		if err != nil {
+			continue
+		}
+
+		var event types.Event
+		if err := json.Unmarshal([]byte(val), &event); err != nil {
+			continue
+		}
+
+		// SANITIZATION: Strip heavy fields for public payload
+		var eventData map[string]interface{}
+		if err := json.Unmarshal(event.Event, &eventData); err == nil {
+			// Remove fields not needed for display
+			delete(eventData, "raw_input")
+			delete(eventData, "raw_output")
+			delete(eventData, "chat_history")
+			delete(eventData, "context_history")
+			delete(eventData, "engagement_raw")
+			delete(eventData, "response_raw")
+
+			// Re-marshal sanitized data
+			cleanJSON, _ := json.Marshal(eventData)
+			event.Event = cleanJSON
+		}
+
+		events = append(events, event)
+	}
+
+	return events
 }
 
 // SystemMonitorHandler collects status for all configured services and returns as JSON

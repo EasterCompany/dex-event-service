@@ -16,12 +16,23 @@ func StartCloudPulse(ctx context.Context, cloudClient *redis.Client, interval ti
 		return
 	}
 
-	ticker := time.NewTicker(interval)
 	go func() {
-		defer ticker.Stop()
-		log.Printf("Starting Cloud Pulse (Interval: %v)", interval)
+		log.Printf("Aligning Cloud Pulse to :00 second mark (Interval: %v)", interval)
 
-		// Run once immediately
+		// 1. Alignment Logic: Wait until the start of the next minute
+		now := time.Now()
+		nextMinute := now.Truncate(time.Minute).Add(time.Minute)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Until(nextMinute)):
+			// Aligned
+		}
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		// Run first aligned pulse
 		if err := pulse(ctx, cloudClient); err != nil {
 			log.Printf("Cloud Pulse initial error: %v", err)
 		}
@@ -41,26 +52,20 @@ func StartCloudPulse(ctx context.Context, cloudClient *redis.Client, interval ti
 }
 
 func pulse(ctx context.Context, cloudClient *redis.Client) error {
-	pipe := cloudClient.Pipeline()
 	ttl := 5 * time.Minute // Short TTL for state to avoid stale data if we go offline
 
-	// 1. System Monitor Snapshot
-	// This captures Services (CPU/RAM), Models, and Hardware status
-	monitorState := GetSystemMonitorSnapshot()
-	monitorJSON, err := json.Marshal(monitorState)
-	if err == nil {
-		pipe.Set(ctx, "state:system:monitor", monitorJSON, ttl)
+	// Generate Monolithic Snapshot
+	snapshot := GetDashboardSnapshot()
+	snapshotJSON, err := json.Marshal(snapshot)
+	if err != nil {
+		return fmt.Errorf("failed to marshal dashboard snapshot: %w", err)
 	}
 
-	// 2. Processes Snapshot
-	// This captures Active Processes, Queue, and History
-	procState := GetProcessesSnapshot()
-	procJSON, err := json.Marshal(procState)
-	if err == nil {
-		pipe.Set(ctx, "state:system:processes", procJSON, ttl)
+	// Single atomic write to Upstash
+	err = cloudClient.Set(ctx, "state:dashboard:full", snapshotJSON, ttl).Err()
+	if err != nil {
+		return fmt.Errorf("failed to write dashboard snapshot to cloud: %w", err)
 	}
 
-	// Execute Pipeline
-	_, err = pipe.Exec(ctx)
-	return err
+	return nil
 }
