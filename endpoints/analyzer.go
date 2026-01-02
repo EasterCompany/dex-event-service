@@ -25,6 +25,12 @@ func ResetAnalyzerHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		if tier == "" || tier == "all" || tier == "synthesis" {
 			redisClient.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
+
+			// Clear per-user cooldowns
+			iter := redisClient.Scan(ctx, 0, "agent:Analyzer:cooldown:*", 0).Iterator()
+			for iter.Next(ctx) {
+				redisClient.Del(ctx, iter.Val())
+			}
 		}
 
 		w.WriteHeader(http.StatusOK)
