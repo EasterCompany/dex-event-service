@@ -94,32 +94,6 @@ func main() {
 		}()
 		endpoints.SetRedisClient(redisClient) // Set for endpoints
 
-		// Initialize Cloud Redis Client (Optional)
-		if cloudURL := os.Getenv("REDIS_CLOUD_URL"); cloudURL != "" {
-			opt, err := redis.ParseURL(cloudURL)
-			if err != nil {
-				log.Printf("Warning: Failed to parse REDIS_CLOUD_URL: %v. Cloud mirroring disabled.", err)
-			} else {
-				cloudClient := redis.NewClient(opt)
-				// Test connection
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				if _, err := cloudClient.Ping(ctx).Result(); err != nil {
-					log.Printf("Warning: Failed to connect to Cloud Redis: %v. Cloud mirroring disabled.", err)
-					_ = cloudClient.Close()
-				} else {
-					log.Println("Cloud Redis mirroring enabled.")
-					endpoints.SetCloudRedisClient(cloudClient)
-					endpoints.StartCloudPulse(ctx, cloudClient, 15*time.Second)
-					defer func() {
-						if err := cloudClient.Close(); err != nil {
-							log.Printf("Error closing Cloud Redis client: %v", err)
-						}
-					}()
-				}
-				cancel()
-			}
-		}
-
 		// Perform startup cleanup
 		performStartupCleanup(ctx, redisClient)
 	}
@@ -174,6 +148,44 @@ func main() {
 
 	if selfConfig == nil {
 		log.Fatalf("FATAL: Service '%s' not found in service-map.json. Shutting down.", ServiceName)
+	}
+
+	// Initialize Cloud Redis Client (Optional)
+	cloudURL := os.Getenv("REDIS_CLOUD_URL")
+	if cloudURL == "" {
+		// Fallback to Upstash RW from service map
+		for _, s := range serviceMap.Services["os"] {
+			if s.ID == "upstash-redis-rw" {
+				// Construct redis://default:PASSWORD@DOMAIN:6379 (Upstash standard port)
+				cloudURL = fmt.Sprintf("redis://default:%s@%s:6379", s.Credentials.Password, s.Domain)
+				break
+			}
+		}
+	}
+
+	if cloudURL != "" {
+		opt, err := redis.ParseURL(cloudURL)
+		if err != nil {
+			log.Printf("Warning: Failed to parse Cloud Redis URL: %v. Cloud mirroring disabled.", err)
+		} else {
+			cloudClient := redis.NewClient(opt)
+			// Test connection
+			ctxCloud, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if _, err := cloudClient.Ping(ctxCloud).Result(); err != nil {
+				log.Printf("Warning: Failed to connect to Cloud Redis: %v. Cloud mirroring disabled.", err)
+				_ = cloudClient.Close()
+			} else {
+				log.Println("Cloud Redis mirroring enabled.")
+				endpoints.SetCloudRedisClient(cloudClient)
+				endpoints.StartCloudPulse(ctx, cloudClient, 15*time.Second)
+				defer func() {
+					if err := cloudClient.Close(); err != nil {
+						log.Printf("Error closing Cloud Redis client: %v", err)
+					}
+				}()
+			}
+			cancel()
+		}
 	}
 
 	// Get port from config, convert to integer.
