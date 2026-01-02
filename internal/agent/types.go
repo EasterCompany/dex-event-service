@@ -32,17 +32,19 @@ type Correction struct {
 
 // AgentConfig holds parameters for the agent's behavior.
 type AgentConfig struct {
-	Name             string
-	ProcessID        string
-	Models           map[string]string // e.g. "t1": "dex-guardian-t1"
-	ProtocolAliases  map[string]string // e.g. "t1": "Sentry", "t2": "Architect"
-	Cooldowns        map[string]int    // e.g. "t1": 1800
-	IdleRequirement  int
-	DateTimeAware    bool
-	EnforceMarkdown  bool
-	EnforceJSON      bool
-	JSONSchema       interface{} // Optional: A struct or map representing the expected JSON structure
-	RequiredSections []string    // Mandatory sections for this agent's reports
+	Name                       string
+	ProcessID                  string
+	Models                     map[string]string // e.g. "t1": "dex-guardian-t1"
+	ProtocolAliases            map[string]string // e.g. "t1": "Sentry", "t2": "Architect"
+	Cooldowns                  map[string]int    // e.g. "t1": 1800
+	IdleRequirement            int
+	DateTimeAware              bool
+	EnforceMarkdown            bool
+	EnforceJSON                bool
+	JSONSchema                 interface{} // Optional: A struct or map representing the expected JSON structure
+	RequiredSections           []string    // Mandatory sections for this agent's reports
+	ResetAttemptsOnStateChange bool
+	PostAuditPerState          bool
 }
 
 // Agent is the interface all automated workflows must implement.

@@ -51,10 +51,12 @@ func NewAnalyzerAgent(redis *redis.Client, ollama *ollama.Client, discord *disco
 			Cooldowns: map[string]int{
 				"synthesis": 43200, // 12 hours
 			},
-			IdleRequirement: 300, // 5 minutes idle (matched with Guardian)
-			DateTimeAware:   true,
-			EnforceJSON:     true,
-			JSONSchema:      UserProfile{},
+			IdleRequirement:            300, // 5 minutes idle (matched with Guardian)
+			DateTimeAware:              true,
+			EnforceJSON:                true,
+			JSONSchema:                 UserProfile{},
+			ResetAttemptsOnStateChange: true,
+			PostAuditPerState:          true,
 		},
 		DiscordClient: discord,
 		ctx:           ctx,
@@ -125,10 +127,10 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 
 		h.processUserSynthesis(ctx, targetUserID, cooldownKey)
 
-		// Respect sequential execution - only one user per synthesis pass
-		// The next user will be picked up in the next heartbeat (every 1 min)
-		return
+		// Respect sequential execution - process users one by one
+		// The next user will be picked up immediately in this loop
 	}
+	log.Printf("[%s] Synthesis batch complete.", h.Config.Name)
 }
 
 func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID string, cooldownKey string) {
