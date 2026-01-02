@@ -404,6 +404,11 @@ func getSanitizedEvents(ctx context.Context, key string, count int) []types.Even
 			delete(eventData, "engagement_raw")
 			delete(eventData, "response_raw")
 
+			// MASKING: Hide sensitive message content for public view
+			if _, ok := eventData["content"]; ok {
+				eventData["content"] = "[Encrypted Content]"
+			}
+
 			// Re-marshal sanitized data
 			cleanJSON, _ := json.Marshal(eventData)
 			event.Event = cleanJSON
