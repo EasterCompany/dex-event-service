@@ -425,6 +425,53 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 				}
 			}
 		}
+
+		// Fallback for Dexter: If no member with level "Me" was found, try to find him in profiles
+		hasDexter := false
+		for _, m := range contacts.Members {
+			if m.Level == "Me" {
+				hasDexter = true
+				break
+			}
+		}
+
+		if !hasDexter {
+			// Scan user profiles to find the one that belongs to Dexter
+			pIter := redisClient.Scan(ctx, 0, "user:profile:*", 0).Iterator()
+			for pIter.Next(ctx) {
+				pKey := pIter.Val()
+				pData, _ := redisClient.Get(ctx, pKey).Result()
+				var profile map[string]interface{}
+				if err := json.Unmarshal([]byte(pData), &profile); err == nil {
+					// Check identity or badges for "Me" or "Dexter"
+					identity, _ := profile["identity"].(map[string]interface{})
+					badges, _ := identity["badges"].([]interface{})
+					isBot := false
+					for _, b := range badges {
+						if b == "Me" || b == "Dexter" {
+							isBot = true
+							break
+						}
+					}
+
+					if isBot {
+						dID := strings.TrimPrefix(pKey, "user:profile:")
+						username, _ := identity["username"].(string)
+						avatar, _ := identity["avatar_url"].(string)
+
+						contacts.Members = append(contacts.Members, MemberContext{
+							ID:        dID,
+							Username:  username,
+							AvatarURL: avatar,
+							Level:     "Me",
+							Status:    "online", // The bot is always online if we are here
+						})
+						profiles[dID] = profile
+						break
+					}
+				}
+			}
+		}
 	}
 
 	return &DashboardSnapshot{
