@@ -83,24 +83,12 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 				content = cleanEventText(eventType, eventData, evt.Timestamp)
 			}
 
-			// If it's a message, we might want to still know the time,
-			// but let's try raw content first to stop the prefixing.
-			// We can inject the timestamp into the user message if needed.
-			if role == "user" {
-				t := ""
-				if evt.Timestamp > 0 {
-					t = time.Unix(evt.Timestamp, 0).UTC().Format("15:04:05")
-				}
-				content = fmt.Sprintf("[%s] %s", t, content)
-			}
-
 			messages = append(messages, ollama.Message{
 				Role:    role,
 				Content: content,
 			})
 		}
 	}
-
 	return messages, nil
 }
 
