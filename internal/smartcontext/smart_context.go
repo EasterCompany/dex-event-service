@@ -65,26 +65,38 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 		}
 	}
 
-	// Add remaining events as system "context" messages to maintain roles correctly without guessing
-	// In DMs, we could try to map roles, but keeping them as system context is safer for general events.
-	// HOWEVER, for a cleaner "Chat" feel, we can try to map them.
+	// Add remaining events
 	for _, evt := range events {
 		var eventData map[string]interface{}
 		if err := json.Unmarshal(evt.Event, &eventData); err == nil {
 			eventType, _ := eventData["type"].(string)
-			text := cleanEventText(eventType, eventData, evt.Timestamp)
 
-			role := "user"
+			role := "system"
+			content, _ := eventData["content"].(string)
+
 			if eventType == string(types.EventTypeMessagingBotSentMessage) ||
 				eventType == "messaging.bot.voice_response" {
 				role = "assistant"
-			} else if !strings.Contains(eventType, "message") {
-				role = "system"
+			} else if eventType == string(types.EventTypeMessagingUserSentMessage) {
+				role = "user"
+			} else {
+				content = cleanEventText(eventType, eventData, evt.Timestamp)
+			}
+
+			// If it's a message, we might want to still know the time,
+			// but let's try raw content first to stop the prefixing.
+			// We can inject the timestamp into the user message if needed.
+			if role == "user" {
+				t := ""
+				if evt.Timestamp > 0 {
+					t = time.Unix(evt.Timestamp, 0).UTC().Format("15:04:05")
+				}
+				content = fmt.Sprintf("[%s] %s", t, content)
 			}
 
 			messages = append(messages, ollama.Message{
 				Role:    role,
-				Content: text,
+				Content: content,
 			})
 		}
 	}
