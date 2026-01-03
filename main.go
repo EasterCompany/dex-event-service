@@ -244,6 +244,8 @@ func main() {
 	router.HandleFunc("/service", endpoints.ServiceHandler).Methods("GET")
 	router.HandleFunc("/events", endpoints.EventsHandler(redisClient)).Methods("POST", "GET", "DELETE")
 	router.HandleFunc("/events/{id}", endpoints.EventsHandler(redisClient)).Methods("GET", "PATCH", "DELETE")
+	router.HandleFunc("/chores", endpoints.ChoresHandler(redisClient)).Methods("GET", "POST")
+	router.HandleFunc("/chores/{path:.*}", endpoints.ChoresHandler(redisClient)).Methods("GET", "PATCH", "DELETE", "POST")
 	router.HandleFunc("/system_monitor", endpoints.SystemMonitorHandler).Methods("GET")
 	router.HandleFunc("/system/hardware", endpoints.SystemHardwareHandler).Methods("GET")
 	router.HandleFunc("/processes", endpoints.ListProcessesHandler).Methods("GET")
