@@ -15,6 +15,7 @@ import (
 	"github.com/EasterCompany/dex-event-service/internal/analysis"
 	"github.com/EasterCompany/dex-event-service/internal/handlers"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/profiler"
+	"github.com/EasterCompany/dex-event-service/internal/ollama"
 	"github.com/EasterCompany/dex-event-service/internal/smartcontext"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
@@ -322,22 +323,16 @@ Rules:
 		defer deps.Redis.Del(context.Background(), lockKey)
 	}
 
-	masterUserID := ""
-	if deps.Options != nil {
-		masterUserID = deps.Options.Discord.MasterUser
-	}
-
 	responseModel := "dex-private-message-model"
 	summaryModel := "dex-summary-model"
 	decisionStr := "REPLY_REGULAR"
 	engagementReason := "Automatic engagement for Private Message"
 	shouldEngage := true
 
-	_ = masterUserID // Keep for future use if needed
-
-	contextHistory, err := smartcontext.Get(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
+	// 1. Fetch structured context history
+	messages, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
 	if err != nil {
-		log.Printf("Warning: Failed to fetch context: %v", err)
+		log.Printf("Warning: Failed to fetch messages context: %v", err)
 	}
 
 	// Fetch channel members for normalization
@@ -367,7 +362,7 @@ Rules:
 		"message_content":  content,
 		"timestamp":        time.Now().Unix(),
 		"engagement_model": "hardcoded",
-		"context_history":  contextHistory,
+		"message_count":    len(messages),
 		"engagement_raw":   "automatic",
 	}
 
@@ -381,7 +376,7 @@ Rules:
 			return types.HandlerOutput{Success: true}, nil
 		}
 
-		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Typing response...")
+		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Thinking...")
 		deps.Discord.TriggerTyping(channelID)
 
 		if deps.Redis != nil {
@@ -409,8 +404,14 @@ Rules:
 			dossierPrompt += "\nUse this dossier to personalize your tone, technical depth, and overall engagement strategy for this specific user."
 		}
 
-		systemPrompt := utils.GetBaseSystemPrompt()
-		prompt := fmt.Sprintf("%s%s\n\nContext:\n%s\n\nUser: %s", systemPrompt, dossierPrompt, contextHistory, content)
+		systemPrompt := utils.GetBaseSystemPrompt() + dossierPrompt
+
+		// Final construction of chat messages
+		finalMessages := []ollama.Message{
+			{Role: "system", Content: systemPrompt},
+		}
+		finalMessages = append(finalMessages, messages...)
+		finalMessages = append(finalMessages, ollama.Message{Role: "user", Content: content})
 
 		streamMessageID, err := deps.Discord.InitStream(channelID, "<a:typing:1449387367315275786>")
 		if err != nil {
@@ -422,7 +423,7 @@ Rules:
 		options := map[string]interface{}{
 			"repeat_penalty": 1.3,
 		}
-		stats, err := deps.Ollama.GenerateStream(responseModel, prompt, nil, options, func(chunk string) {
+		stats, err := deps.Ollama.ChatStream(ctx, responseModel, finalMessages, options, func(chunk string) {
 			fullResponse += chunk
 
 			denormalizedResponse := fullResponse
@@ -445,12 +446,12 @@ Rules:
 		finalMessageID, _ := deps.Discord.CompleteStream(channelID, streamMessageID, finalResponse)
 		log.Printf("Generated response: %s", fullResponse)
 
-		// Build structured history for observability
-		chatHistory := []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": "Context:\n" + contextHistory + "\n\nUser: " + content},
-			{"role": "assistant", "content": fullResponse},
+		// Build chat history for audit event
+		var chatHistory []map[string]string
+		for _, m := range finalMessages {
+			chatHistory = append(chatHistory, map[string]string{"role": m.Role, "content": m.Content})
 		}
+		chatHistory = append(chatHistory, map[string]string{"role": "assistant", "content": fullResponse})
 
 		botEventData := map[string]interface{}{
 			"type":               types.EventTypeMessagingBotSentMessage,
@@ -466,7 +467,7 @@ Rules:
 			"timestamp":          time.Now().Format(time.RFC3339),
 			"response_model":     responseModel,
 			"response_raw":       fullResponse,
-			"raw_input":          prompt,
+			"raw_input":          fmt.Sprintf("%v", finalMessages), // Store representation of structured input
 			"chat_history":       chatHistory,
 			"eval_count":         stats.EvalCount,
 			"prompt_count":       stats.PromptEvalCount,
@@ -482,7 +483,12 @@ Rules:
 		// --- Async Signal Extraction ---
 		go func() {
 			analysisModel := "dex-summary-model"
-			signals, raw, err := analysis.Extract(context.Background(), deps.Ollama, analysisModel, content, contextHistory)
+			// For analysis we still use text block
+			historyText := ""
+			for _, m := range messages {
+				historyText += fmt.Sprintf("%s: %s\n", m.Role, m.Content)
+			}
+			signals, raw, err := analysis.Extract(context.Background(), deps.Ollama, analysisModel, content, historyText)
 			if err != nil {
 				log.Printf("Signal extraction failed: %v", err)
 				return

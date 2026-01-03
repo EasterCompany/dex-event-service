@@ -5,12 +5,119 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/EasterCompany/dex-event-service/internal/ollama"
 	"github.com/EasterCompany/dex-event-service/templates"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/redis/go-redis/v9"
 )
+
+// GetMessages fetches history and returns it as a slice of ollama.Message for the /chat endpoint.
+func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Client, channelID string, summaryModel string) ([]ollama.Message, error) {
+	// 1. Fetch last 25 events
+	eventIDs, err := redisClient.ZRevRange(ctx, "events:channel:"+channelID, 0, 24).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(eventIDs) == 0 {
+		return []ollama.Message{}, nil
+	}
+
+	// 2. Fetch event data
+	var events []types.Event
+	for _, id := range eventIDs {
+		data, err := redisClient.Get(ctx, "event:"+id).Result()
+		if err == nil {
+			var evt types.Event
+			if err := json.Unmarshal([]byte(data), &evt); err == nil {
+				events = append(events, evt)
+			}
+		}
+	}
+
+	// 3. Reorder to chronological (Oldest -> Newest)
+	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+		events[i], events[j] = events[j], events[i]
+	}
+
+	total := len(events)
+	var messages []ollama.Message
+
+	if total > 5 {
+		// Summarize older 20
+		olderEvents := events[:total-5]
+		olderText := FormatEventsBlock(olderEvents)
+		if summaryModel == "" {
+			summaryModel = "dex-summary-model"
+		}
+
+		summaryPrompt := fmt.Sprintf("Summarize this conversation log concisely, retaining key details and user intent:\n\n%s", olderText)
+		summary, _, err := ollamaClient.Generate(summaryModel, summaryPrompt, nil)
+		if err == nil {
+			messages = append(messages, ollama.Message{
+				Role:    "system",
+				Content: "Previous conversation summary: " + strings.TrimSpace(summary),
+			})
+			// Only process recent ones
+			events = events[total-5:]
+		}
+	}
+
+	// Add remaining events as system "context" messages to maintain roles correctly without guessing
+	// In DMs, we could try to map roles, but keeping them as system context is safer for general events.
+	// HOWEVER, for a cleaner "Chat" feel, we can try to map them.
+	for _, evt := range events {
+		var eventData map[string]interface{}
+		if err := json.Unmarshal(evt.Event, &eventData); err == nil {
+			eventType, _ := eventData["type"].(string)
+			text := cleanEventText(eventType, eventData, evt.Timestamp)
+
+			role := "user"
+			if eventType == string(types.EventTypeMessagingBotSentMessage) ||
+				eventType == "messaging.bot.voice_response" {
+				role = "assistant"
+			} else if !strings.Contains(eventType, "message") {
+				role = "system"
+			}
+
+			messages = append(messages, ollama.Message{
+				Role:    role,
+				Content: text,
+			})
+		}
+	}
+
+	return messages, nil
+}
+
+// cleanEventText provides a human-friendly version of the event log
+func cleanEventText(eventType string, data map[string]interface{}, ts int64) string {
+	t := ""
+	if ts > 0 {
+		t = time.Unix(ts, 0).UTC().Format("15:04:05") + " | "
+	}
+
+	switch eventType {
+	case string(types.EventTypeMessagingUserSentMessage):
+		user, _ := data["user_name"].(string)
+		content, _ := data["content"].(string)
+		return fmt.Sprintf("%s%s: %s", t, user, content)
+	case string(types.EventTypeMessagingBotSentMessage):
+		content, _ := data["content"].(string)
+		return fmt.Sprintf("%sDexter: %s", t, content)
+	default:
+		// Fallback to standard but cleaner
+		line := templates.FormatEventAsText(eventType, data, "", ts, 0, "UTC", "en")
+		// Remove the service part if it exists (e.g., " | dex-discord-service | ")
+		parts := strings.Split(line, " | ")
+		if len(parts) >= 3 {
+			return parts[0] + " | " + strings.Join(parts[2:], " | ")
+		}
+		return line
+	}
+}
 
 // Get fetches the last 25 events, summarizes the older 20, and keeps the recent 5 raw.
 // It returns a formatted string ready for injection into the prompt.

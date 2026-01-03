@@ -120,6 +120,71 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message) (Me
 	return response.Message, nil
 }
 
+func (c *Client) ChatStream(ctx context.Context, model string, messages []Message, options map[string]interface{}, callback func(string)) (GenerationStats, error) {
+	reqBody := ChatRequest{
+		Model:    model,
+		Messages: messages,
+		Stream:   true,
+		Options:  options,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return GenerationStats{}, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/chat", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return GenerationStats{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return GenerationStats{}, err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing ollama chat response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return GenerationStats{}, fmt.Errorf("ollama chat returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	stats := GenerationStats{}
+	reader := bufio.NewReader(resp.Body)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return stats, err
+		}
+
+		var chunk ChatResponse
+		if err := json.Unmarshal(line, &chunk); err != nil {
+			continue
+		}
+		if chunk.Message.Content != "" {
+			callback(chunk.Message.Content)
+		}
+		if chunk.Done {
+			stats.EvalCount = chunk.EvalCount
+			stats.PromptEvalCount = chunk.PromptEvalCount
+			stats.TotalDuration = time.Duration(chunk.TotalDuration)
+			stats.LoadDuration = time.Duration(chunk.LoadDuration)
+			stats.PromptEvalDuration = time.Duration(chunk.PromptEvalDuration)
+			stats.EvalDuration = time.Duration(chunk.EvalDuration)
+			break
+		}
+	}
+	return stats, nil
+}
+
 func (c *Client) Generate(model, prompt string, images []string) (string, GenerationStats, error) {
 	return c.GenerateWithContext(context.Background(), model, prompt, images, nil)
 }
