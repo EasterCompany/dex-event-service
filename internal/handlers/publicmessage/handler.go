@@ -689,9 +689,9 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 		// Build chat history for audit event
 		var chatHistory []map[string]string
 		for _, m := range finalMessages {
-			chatHistory = append(chatHistory, map[string]string{"role": m.Role, "content": m.Content})
+			chatHistory = append(chatHistory, map[string]string{"role": m.Role, "content": m.Content, "name": m.Name})
 		}
-		chatHistory = append(chatHistory, map[string]string{"role": "assistant", "content": fullResponse})
+		chatHistory = append(chatHistory, map[string]string{"role": "assistant", "content": fullResponse, "name": "Dexter"})
 
 		botEventData := map[string]interface{}{
 			"type":               types.EventTypeMessagingBotSentMessage,

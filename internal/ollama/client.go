@@ -47,6 +47,7 @@ type GenerateResponse struct {
 type Message struct {
 	Role    string   `json:"role"`
 	Content string   `json:"content"`
+	Name    string   `json:"name,omitempty"`
 	Images  []string `json:"images,omitempty"`
 }
 

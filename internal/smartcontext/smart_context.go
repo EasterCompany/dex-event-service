@@ -73,19 +73,28 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 
 			role := "system"
 			content, _ := eventData["content"].(string)
+			name := ""
 
 			if eventType == string(types.EventTypeMessagingBotSentMessage) ||
 				eventType == "messaging.bot.voice_response" {
 				role = "assistant"
+				name = "Dexter"
 			} else if eventType == string(types.EventTypeMessagingUserSentMessage) {
 				role = "user"
+				name, _ = eventData["user_name"].(string)
 			} else {
 				content = cleanEventText(eventType, eventData, evt.Timestamp)
+			}
+
+			// If it's a message, we prefix with name for LLM clarity
+			if role == "user" || role == "assistant" {
+				content = fmt.Sprintf("[%s] %s", name, content)
 			}
 
 			messages = append(messages, ollama.Message{
 				Role:    role,
 				Content: content,
+				Name:    name,
 			})
 		}
 	}
