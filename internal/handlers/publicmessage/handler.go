@@ -439,6 +439,7 @@ Rules:
 	shouldEngage := false
 	engagementReason := "Evaluated by dex-engagement-model"
 	var engagementRaw string
+	var err error
 
 	// --- 1. First Determine the Engagement Decision & Model ---
 	const MainChatChannelID = "1426957003108122656"
@@ -453,7 +454,7 @@ Rules:
 	}
 
 	var decisionStr string
-	responseModel := "dex-fast-public-message-model" // Default to fast
+	responseModel := "dex-public-message-model"
 
 	// --- 0. Check for Quiet Mode (Reload options dynamically) ---
 	quietMode := false
@@ -472,9 +473,7 @@ Rules:
 		shouldEngage = true
 		decisionStr = "REPLY"
 		engagementReason = "Direct mention"
-		if channelID == MainChatChannelID {
-			responseModel = "dex-public-message-model"
-		}
+		responseModel = "dex-public-message-model"
 	} else if restrictedChannels[channelID] {
 		log.Printf("Channel %s is restricted (analysis only). Skipping engagement check.", channelID)
 		shouldEngage = false
@@ -502,7 +501,6 @@ User ID: %s (Master ID: %s)
 
 Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 
-		var err error
 		engagementRaw, _, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
 		if err != nil {
 			log.Printf("Regular engagement check failed: %v, defaulting to IGNORE", err)
@@ -523,7 +521,7 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 			} else if strings.Contains(upperRaw, "ENGAGE_FAST") {
 				shouldEngage = true
 				decisionStr = "ENGAGE_FAST"
-				responseModel = "dex-fast-public-message-model"
+				responseModel = "dex-public-message-model"
 			} else if strings.Contains(upperRaw, "REACTION:") {
 				shouldEngage = false
 				decisionStr = "REACTION"
@@ -545,15 +543,15 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 			}
 		}
 	} else {
-		// --- OTHER CHANNELS: Fast Binary Engagement ---
+		// --- OTHER CHANNELS: Binary Engagement ---
 		evalHistory, _ := deps.Discord.FetchContext(channelID, 10)
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Vibe Check")
 		prompt := fmt.Sprintf("Analyze if Dexter should respond to this message. Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", evalHistory, content)
-		engagementRaw, _, err := deps.Ollama.Generate("dex-fast-engagement-model", prompt, nil)
+		engagementRaw, _, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
 		if err == nil && strings.Contains(engagementRaw, "<ENGAGE/>") {
 			shouldEngage = true
 			decisionStr = "ENGAGE_FAST"
-			responseModel = "dex-fast-public-message-model"
+			responseModel = "dex-public-message-model"
 		} else {
 			shouldEngage = false
 			decisionStr = "IGNORE"
@@ -561,14 +559,8 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 	}
 
 	// --- 2. Build Response Context based on Model Choice ---
-	isFastModel := strings.Contains(responseModel, "-fast-")
 	systemPrompt := utils.GetBaseSystemPrompt()
 	summaryModel := "dex-summary-model"
-
-	if isFastModel {
-		systemPrompt = utils.GetFastSystemPrompt()
-		summaryModel = "dex-fast-summary-model"
-	}
 
 	contextHistory, err := smartcontext.Get(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
 	if err != nil {
@@ -594,7 +586,7 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 		}
 	}
 
-	if channelMembers != "" && !isFastModel { // Only provide detailed member list to regular models
+	if channelMembers != "" { // Only provide detailed member list to regular models
 		contextHistory += "\n\n" + channelMembers
 	}
 
@@ -723,7 +715,7 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 
 		// --- 3. Async Signal Extraction for User Profiling ---
 		go func() {
-			analysisModel := "dex-fast-summary-model"
+			analysisModel := "dex-summary-model"
 			signals, raw, err := analysis.Extract(context.Background(), deps.Ollama, analysisModel, content, contextHistory)
 			if err != nil {
 				log.Printf("Signal extraction failed: %v", err)

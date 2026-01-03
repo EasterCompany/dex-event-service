@@ -327,18 +327,13 @@ Rules:
 		masterUserID = deps.Options.Discord.MasterUser
 	}
 
-	responseModel := "dex-fast-private-message-model"
-	summaryModel := "dex-fast-summary-model"
-	decisionStr := "REPLY_FAST"
+	responseModel := "dex-private-message-model"
+	summaryModel := "dex-summary-model"
+	decisionStr := "REPLY_REGULAR"
 	engagementReason := "Automatic engagement for Private Message"
 	shouldEngage := true
 
-	if userID == masterUserID {
-		responseModel = "dex-private-message-model"
-		summaryModel = "dex-summary-model"
-		decisionStr = "REPLY_REGULAR"
-		engagementReason = "Master user detected in DM, using regular model"
-	}
+	_ = masterUserID // Keep for future use if needed
 
 	contextHistory, err := smartcontext.Get(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
 	if err != nil {
@@ -486,7 +481,7 @@ Rules:
 
 		// --- Async Signal Extraction ---
 		go func() {
-			analysisModel := "dex-fast-summary-model"
+			analysisModel := "dex-summary-model"
 			signals, raw, err := analysis.Extract(context.Background(), deps.Ollama, analysisModel, content, contextHistory)
 			if err != nil {
 				log.Printf("Signal extraction failed: %v", err)
