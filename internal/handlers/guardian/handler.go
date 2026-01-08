@@ -49,16 +49,13 @@ func NewGuardianHandler(redis *redis.Client, ollama *ollama.Client, discord *dis
 			Name:      "Guardian",
 			ProcessID: "system-guardian",
 			Models: map[string]string{
-				"sentry":    "dex-guardian-t1",
-				"architect": "dex-guardian-t2",
+				"sentry": "dex-guardian-t1",
 			},
 			ProtocolAliases: map[string]string{
-				"sentry":    "Sentry",
-				"architect": "Architect",
+				"sentry": "Sentry",
 			},
 			Cooldowns: map[string]int{
-				"sentry":    1800,
-				"architect": 1800,
+				"sentry": 1800,
 			},
 			IdleRequirement: 300,
 			DateTimeAware:   true,
@@ -140,9 +137,8 @@ func (h *GuardianHandler) checkAndAnalyze() {
 
 	// 5. Cooldown checks
 	lastSentry, _ := h.RedisClient.Get(ctx, "guardian:last_run:sentry").Int64()
-	lastArchitect, _ := h.RedisClient.Get(ctx, "guardian:last_run:architect").Int64()
 
-	if (now-lastSentry < int64(h.Config.Cooldowns["sentry"])) || (now-lastArchitect < int64(h.Config.Cooldowns["architect"])) {
+	if now-lastSentry < int64(h.Config.Cooldowns["sentry"]) {
 		return
 	}
 
@@ -168,8 +164,6 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 
 	// Tier 1: Technical Sentry
 	var sentryResults []agent.AnalysisResult
-	var architectResults []agent.AnalysisResult
-	var sentryEventIDs []string
 	if tier == 0 || tier == 1 {
 		h.RedisClient.Set(ctx, "guardian:active_tier", "Working (Sentry)", utils.DefaultTTL)
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Sentry Protocol")
@@ -185,8 +179,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
 			for i := range sentryResults {
 				sentryResults[i].Type = "alert"
-				id, _ := h.emitResult(ctx, sentryResults[i], "sentry", auditEventID)
-				sentryEventIDs = append(sentryEventIDs, id)
+				_, _ = h.emitResult(ctx, sentryResults[i], "sentry", auditEventID)
 			}
 			h.RedisClient.Set(ctx, "guardian:last_run:sentry", time.Now().Unix(), 0)
 		} else {
@@ -194,36 +187,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 		}
 	}
 
-	// Determine if Architect should run
-	// Run if explicitly requested (tier 2) OR if full cycle (tier 0) AND Sentry found issues
-	shouldRunArchitect := (tier == 2) || (tier == 0 && len(sentryResults) > 0)
-
-	// Tier 2: Architect
-	if shouldRunArchitect {
-		h.RedisClient.Set(ctx, "guardian:active_tier", "Working (Architect)", utils.DefaultTTL)
-		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Architect Protocol")
-
-		input := h.gatherContext(ctx, "architect", sentryResults)
-		sessionID := fmt.Sprintf("architect-%d", time.Now().Unix())
-		architectResults, auditEventID, err := h.RunCognitiveLoop(ctx, h, "architect", h.Config.Models["architect"], sessionID, "", input, 1)
-		lastAuditID = auditEventID
-
-		if err == nil {
-			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
-			for i := range architectResults {
-				architectResults[i].Type = "blueprint"
-				architectResults[i].Body = architectResults[i].Summary
-				architectResults[i].SourceEventIDs = sentryEventIDs
-				_, _ = h.emitResult(ctx, architectResults[i], "architect", auditEventID)
-			}
-			h.RedisClient.Set(ctx, "guardian:last_run:architect", time.Now().Unix(), 0)
-		} else {
-			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
-		}
-	}
-
-	allResults := append(sentryResults, architectResults...)
-	return allResults, lastAuditID, nil
+	return sentryResults, lastAuditID, nil
 }
 
 // ValidateLogic implements protocol-specific logical checks.
@@ -235,15 +199,6 @@ func (h *GuardianHandler) ValidateLogic(res agent.AnalysisResult) []agent.Correc
 		corrections = append(corrections, agent.Correction{
 			Type: "LOGIC", Guidance: "The summary is too brief. Provide a high-fidelity one-sentence description of the issue or proposal.", Mandatory: true,
 		})
-	}
-
-	// 2. Blueprint Specifics
-	if res.Type == "blueprint" {
-		if len(res.ImplementationPath) == 0 {
-			corrections = append(corrections, agent.Correction{
-				Type: "LOGIC", Guidance: "This is a [BLUEPRINT]. You MUST provide a 'Proposed Steps' section with at least one technical step to resolve the issue.", Mandatory: true,
-			})
-		}
 	}
 
 	return corrections
@@ -259,8 +214,6 @@ func (h *GuardianHandler) gatherContext(ctx context.Context, tier string, previo
 		tests, _ = h.fetchTestResults(ctx)
 		events, _ = h.fetchEventsForAnalysis(ctx)
 		systemInfo, _ = h.fetchSystemHardware(ctx)
-	case "architect":
-		cliHelp, _ = h.fetchCLICapabilities(ctx)
 	}
 
 	return h.formatContext(tier, status, logs, cliHelp, tests, events, systemInfo, previousResults)
@@ -275,12 +228,6 @@ func (h *GuardianHandler) formatContext(tier, status, logs, cliHelp, tests, even
 	case "sentry":
 		context += fmt.Sprintf("\n## TEST\n%s\n## SYSTEM\n%s\n## EVENTS\n%s",
 			tests, systemInfo, events)
-	case "architect":
-		context += fmt.Sprintf("\n## CLI (help)\n%s", cliHelp)
-		if len(previousResults) > 0 {
-			sentryJSON, _ := json.Marshal(previousResults)
-			context += "\n## RECENT SENTRY REPORTS:\n\n" + string(sentryJSON)
-		}
 	}
 
 	return context
@@ -300,19 +247,9 @@ func (h *GuardianHandler) emitResult(ctx context.Context, res agent.AnalysisResu
 		"audit_event_id": auditEventID,
 	}
 
-	var eventType string
-	if res.Type == "blueprint" {
-		eventType = string(types.EventTypeSystemBlueprintGenerated)
-		payload["blueprint"] = true
-		payload["summary"] = res.Summary
-		payload["content"] = res.Content
-		payload["related_services"] = res.RelatedServices
-		payload["implementation_path"] = res.ImplementationPath
-	} else {
-		eventType = string(types.EventTypeSystemNotificationGenerated)
-		if res.Type == "alert" || res.Priority == "high" || res.Priority == "critical" {
-			payload["alert"] = true
-		}
+	eventType := string(types.EventTypeSystemNotificationGenerated)
+	if res.Type == "alert" || res.Priority == "high" || res.Priority == "critical" {
+		payload["alert"] = true
 	}
 	payload["type"] = eventType
 	eventJSON, _ := json.Marshal(payload)
@@ -384,12 +321,6 @@ func (h *GuardianHandler) fetchRecentLogs(ctx context.Context) (string, error) {
 
 func (h *GuardianHandler) fetchTestResults(ctx context.Context) (string, error) {
 	cmd := h.createDexCommand(ctx, "test", "--no-event")
-	out, _ := cmd.CombinedOutput()
-	return utils.StripANSI(string(out)), nil
-}
-
-func (h *GuardianHandler) fetchCLICapabilities(ctx context.Context) (string, error) {
-	cmd := h.createDexCommand(ctx, "help", "--no-event")
 	out, _ := cmd.CombinedOutput()
 	return utils.StripANSI(string(out)), nil
 }

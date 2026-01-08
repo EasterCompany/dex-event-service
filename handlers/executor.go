@@ -17,6 +17,7 @@ import (
 	internalHandlers "github.com/EasterCompany/dex-event-service/internal/handlers"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/greeting"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/guardian"
+	"github.com/EasterCompany/dex-event-service/internal/handlers/imaginator"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/privatemessage"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/profiler"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/publicmessage"
@@ -108,6 +109,14 @@ func initBackgroundHandlers() {
 					return genericResults, nil
 				}
 
+				log.Printf("Background handler '%s' started.", handlerConfig.Name)
+			case imaginator.HandlerName:
+				imaginatorHandler := imaginator.NewImaginatorHandler(dependencies.Redis, dependencies.Ollama, dependencies.Discord)
+				if err := imaginatorHandler.Init(context.Background()); err != nil {
+					log.Printf("ERROR: Failed to initialize imaginator handler: %v", err)
+					continue
+				}
+				runningBackgroundHandlers[handlerConfig.Name] = imaginatorHandler
 				log.Printf("Background handler '%s' started.", handlerConfig.Name)
 			case profiler.AnalyzerHandlerName:
 				analyzerAgent := profiler.NewAnalyzerAgent(dependencies.Redis, dependencies.Ollama, dependencies.Discord)

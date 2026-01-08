@@ -54,6 +54,11 @@ var handlerConfigs = map[string]types.HandlerConfig{
 		IsBackgroundWorker: true,
 		Timeout:            0, // Managed by its own internal loop
 	},
+	"imaginator-handler": {
+		Name:               "imaginator-handler",
+		IsBackgroundWorker: true,
+		Timeout:            0,
+	},
 	"profiler-handler": {
 		Name:        "profiler-handler",
 		Description: "Accumulates analytical signals into user profiles",
