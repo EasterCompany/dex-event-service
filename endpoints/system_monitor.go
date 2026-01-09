@@ -269,6 +269,7 @@ type DashboardSnapshot struct {
 	Contacts         *ContactsResponse      `json:"contacts"`
 	Profiles         map[string]interface{} `json:"profiles"`
 	AgentStatus      map[string]interface{} `json:"agent_status"`
+	WebHistory       []utils.WebHistoryItem `json:"web_history"`
 	Timestamp        int64                  `json:"timestamp"`
 }
 
@@ -353,6 +354,9 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 
 	// 6. Agent Status
 	agentStatus := GetAgentStatusSnapshot(redisClient)
+
+	// 7. Web History
+	webHistory, _ := utils.GetWebHistory(redisClient)
 
 	// Try to find Dexter's ID from the contacts cache if it exists
 	if redisClient != nil {
@@ -487,6 +491,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 		Contacts:         contacts,
 		Profiles:         profiles,
 		AgentStatus:      agentStatus,
+		WebHistory:       webHistory,
 		Timestamp:        time.Now().Unix(),
 	}
 }
