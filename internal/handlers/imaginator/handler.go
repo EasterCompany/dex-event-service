@@ -133,6 +133,9 @@ func (h *ImaginatorHandler) checkAndAnalyze() {
 func (h *ImaginatorHandler) PerformAnalysis(ctx context.Context, alert types.Event) ([]agent.AnalysisResult, string, error) {
 	log.Printf("[%s] Starting Imaginator Analysis on Alert: %s", HandlerName, alert.ID)
 
+	// Update last run timestamp
+	h.RedisClient.Set(ctx, "imaginator:last_run:alert_review", time.Now().Unix(), 0)
+
 	// Enforce global sequential execution
 	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)

@@ -55,21 +55,21 @@ func GetAgentStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 			"attempts": sentryAttempts, "failures": sentryFailures, "absolute_failures": sentryAbsolute,
 		}
 
-		// Architect
-		lastArchitectTS, _ := redisClient.Get(ctx, "guardian:last_run:architect").Int64()
-		architectModel := "dex-guardian-t2"
-		architectAttempts, _ := redisClient.Get(ctx, "system:metrics:model:"+architectModel+":attempts").Int64()
-		architectFailures, _ := redisClient.Get(ctx, "system:metrics:model:"+architectModel+":failures").Int64()
-		architectAbsolute, _ := redisClient.Get(ctx, "system:metrics:model:"+architectModel+":absolute_failures").Int64()
-		guardian["architect"] = map[string]interface{}{
-			"last_run": lastArchitectTS, "next_run": lastArchitectTS + 1800, "model": architectModel,
-			"attempts": architectAttempts, "failures": architectFailures, "absolute_failures": architectAbsolute,
+		// Alert Review (Imaginator)
+		lastAlertReviewTS, _ := redisClient.Get(ctx, "imaginator:last_run:alert_review").Int64()
+		alertReviewModel := "dex-imaginator-model"
+		alertReviewAttempts, _ := redisClient.Get(ctx, "system:metrics:model:"+alertReviewModel+":attempts").Int64()
+		alertReviewFailures, _ := redisClient.Get(ctx, "system:metrics:model:"+alertReviewModel+":failures").Int64()
+		alertReviewAbsolute, _ := redisClient.Get(ctx, "system:metrics:model:"+alertReviewModel+":absolute_failures").Int64()
+		guardian["alert_review"] = map[string]interface{}{
+			"last_run": lastAlertReviewTS, "next_run": lastAlertReviewTS + 60, "model": alertReviewModel,
+			"attempts": alertReviewAttempts, "failures": alertReviewFailures, "absolute_failures": alertReviewAbsolute,
 		}
 
 		// Protocol Aliases
 		guardian["protocol_aliases"] = map[string]string{
-			"sentry":    "Sentry",
-			"architect": "Architect",
+			"sentry":       "Sentry",
+			"alert_review": "Alert Review",
 		}
 
 		status.Agents["guardian"] = guardian
@@ -111,7 +111,7 @@ func GetAgentStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 		response := make(map[string]interface{})
 		response["active_tier"] = guardian["active_tier"]
 		response["sentry"] = guardian["sentry"]
-		response["architect"] = guardian["architect"]
+		response["alert_review"] = guardian["alert_review"]
 
 		// Analyzer
 		response["active_synthesis"] = analyzer["active_tier"]
@@ -146,11 +146,11 @@ func GetAgentStatusSnapshot(redisClient *redis.Client) map[string]interface{} {
 	sentryFailures, _ := redisClient.Get(ctx, "system:metrics:model:"+sentryModel+":failures").Int64()
 	sentryAbsolute, _ := redisClient.Get(ctx, "system:metrics:model:"+sentryModel+":absolute_failures").Int64()
 
-	lastArchitectTS, _ := redisClient.Get(ctx, "guardian:last_run:architect").Int64()
-	architectModel := "dex-guardian-t2"
-	architectAttempts, _ := redisClient.Get(ctx, "system:metrics:model:"+architectModel+":attempts").Int64()
-	architectFailures, _ := redisClient.Get(ctx, "system:metrics:model:"+architectModel+":failures").Int64()
-	architectAbsolute, _ := redisClient.Get(ctx, "system:metrics:model:"+architectModel+":absolute_failures").Int64()
+	lastAlertReviewTS, _ := redisClient.Get(ctx, "imaginator:last_run:alert_review").Int64()
+	alertReviewModel := "dex-imaginator-model"
+	alertReviewAttempts, _ := redisClient.Get(ctx, "system:metrics:model:"+alertReviewModel+":attempts").Int64()
+	alertReviewFailures, _ := redisClient.Get(ctx, "system:metrics:model:"+alertReviewModel+":failures").Int64()
+	alertReviewAbsolute, _ := redisClient.Get(ctx, "system:metrics:model:"+alertReviewModel+":absolute_failures").Int64()
 
 	// 2. Analyzer Agent
 	activeSynthesis, _ := redisClient.Get(ctx, "analyzer:active_tier").Result()
@@ -182,9 +182,9 @@ func GetAgentStatusSnapshot(redisClient *redis.Client) map[string]interface{} {
 		"last_run": lastSentryTS, "next_run": lastSentryTS + 1800, "model": sentryModel,
 		"attempts": sentryAttempts, "failures": sentryFailures, "absolute_failures": sentryAbsolute,
 	}
-	response["architect"] = map[string]interface{}{
-		"last_run": lastArchitectTS, "next_run": lastArchitectTS + 1800, "model": architectModel,
-		"attempts": architectAttempts, "failures": architectFailures, "absolute_failures": architectAbsolute,
+	response["alert_review"] = map[string]interface{}{
+		"last_run": lastAlertReviewTS, "next_run": lastAlertReviewTS + 60, "model": alertReviewModel,
+		"attempts": alertReviewAttempts, "failures": alertReviewFailures, "absolute_failures": alertReviewAbsolute,
 	}
 	response["active_synthesis"] = activeSynthesis
 	response["synthesis"] = map[string]interface{}{
@@ -263,8 +263,8 @@ func ResetGuardianHandler(redisClient *redis.Client) http.HandlerFunc {
 			tier = query.Get("protocol")
 		}
 
-		if tier == "" || tier == "all" || tier == "architect" {
-			redisClient.Set(ctx, "guardian:last_run:architect", 0, utils.DefaultTTL)
+		if tier == "" || tier == "all" || tier == "alert_review" {
+			redisClient.Set(ctx, "imaginator:last_run:alert_review", 0, utils.DefaultTTL)
 		}
 		if tier == "" || tier == "all" || tier == "sentry" {
 			redisClient.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
