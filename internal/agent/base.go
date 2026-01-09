@@ -455,7 +455,7 @@ func (b *BaseAgent) ValidateSchema(res AnalysisResult, required []string) []Corr
 			if len(res.RelatedServices) == 0 {
 				missing = true
 			}
-		case "implementation path", "proposed steps":
+		case "implementation path", "proposed steps", "implementation plan", "implementation_steps":
 			if len(res.ImplementationPath) == 0 {
 				missing = true
 			}
@@ -559,15 +559,15 @@ func (b *BaseAgent) ParseSingleMarkdownReport(input string) AnalysisResult {
 		}
 
 		// Section headers
-		if strings.Contains(lower, "summary") {
+		if strings.Contains(lower, "summary") || strings.Contains(lower, "overview") {
 			currentSection = "summary"
 			continue
 		}
-		if strings.Contains(lower, "content") || strings.Contains(lower, "insight") || strings.Contains(lower, "body") {
+		if strings.Contains(lower, "content") || strings.Contains(lower, "insight") || strings.Contains(lower, "body") || strings.Contains(lower, "analysis") {
 			currentSection = "content"
 			continue
 		}
-		if strings.Contains(lower, "implementation path") || strings.Contains(lower, "proposed steps") {
+		if strings.Contains(lower, "implementation path") || strings.Contains(lower, "proposed steps") || strings.Contains(lower, "implementation plan") {
 			currentSection = "path"
 			continue
 		}

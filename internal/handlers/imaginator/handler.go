@@ -178,7 +178,7 @@ func (h *ImaginatorHandler) ValidateLogic(res agent.AnalysisResult) []agent.Corr
 	// If decision is to act, ensure blueprint steps
 	if res.Title != "IGNORE" && len(res.ImplementationPath) == 0 {
 		corrections = append(corrections, agent.Correction{
-			Type: "LOGIC", Guidance: "If this is a valid issue, you MUST provide a 'Proposed Steps' section with at least one technical step.", Mandatory: true,
+			Type: "LOGIC", Guidance: "If this is a valid issue, you MUST provide an 'Implementation Plan' (or 'Proposed Steps') section with at least one technical step.", Mandatory: true,
 		})
 	}
 
