@@ -40,6 +40,14 @@ func StoreWebHistory(redis *redis.Client, resp *web.WebViewResponse, url string)
 		Content:    content,
 	}
 
+	return StoreWebHistoryItem(redis, item)
+}
+
+func StoreWebHistoryItem(redis *redis.Client, item WebHistoryItem) error {
+	if redis == nil {
+		return fmt.Errorf("redis client is nil")
+	}
+
 	data, err := json.Marshal(item)
 	if err != nil {
 		return err
