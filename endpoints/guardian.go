@@ -112,6 +112,7 @@ func GetAgentStatusHandler(redisClient *redis.Client) http.HandlerFunc {
 		response["active_tier"] = guardian["active_tier"]
 		response["sentry"] = guardian["sentry"]
 		response["alert_review"] = guardian["alert_review"]
+		response["protocol_aliases"] = guardian["protocol_aliases"]
 
 		// Analyzer
 		response["active_synthesis"] = analyzer["active_tier"]
@@ -190,6 +191,11 @@ func GetAgentStatusSnapshot(redisClient *redis.Client) map[string]interface{} {
 	response["synthesis"] = map[string]interface{}{
 		"last_run": lastSynthesisTS, "next_run": lastSynthesisTS + 43200, "model": synthesisModel,
 		"attempts": synthesisAttempts, "failures": synthesisFailures, "absolute_failures": synthesisAbsolute,
+	}
+	response["protocol_aliases"] = map[string]string{
+		"sentry":       "Sentry",
+		"alert_review": "Alert Review",
+		"synthesis":    "Synthesis",
 	}
 	response["system_state"] = state
 	response["system_state_time"] = stateTime
