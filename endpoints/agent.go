@@ -123,10 +123,6 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 	guardianProtocols["sentry"] = calculateProtocolStatus(
 		ctx, rdb, guardianActive, "sentry", 1800, "dex-guardian-t1", "guardian",
 	)
-	// Alert Review (Every 1 min = 60s)
-	guardianProtocols["alert_review"] = calculateProtocolStatus(
-		ctx, rdb, guardianActive, "alert_review", 60, "dex-imaginator-model", "imaginator",
-	)
 	// Architect (Every 15 mins = 900s)
 	guardianProtocols["architect"] = calculateProtocolStatus(
 		ctx, rdb, guardianActive, "architect", 900, "dex-guardian-t2", "guardian",
@@ -135,6 +131,20 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 	resp.Agents["guardian"] = AgentState{
 		ActiveProtocol: guardianActive,
 		Protocols:      guardianProtocols,
+	}
+
+	// --- Imaginator Agent ---
+	// Imaginator shares the 'guardian:active_tier' key logic currently or has its own?
+	// The alert_review triggers set "guardian:active_tier" to "alert_review".
+	// So we use guardianActive for now, but conceptually it's Imaginator.
+	imaginatorProtocols := make(map[string]ProtocolStatus)
+	imaginatorProtocols["alert_review"] = calculateProtocolStatus(
+		ctx, rdb, guardianActive, "alert_review", 60, "dex-imaginator-model", "imaginator",
+	)
+
+	resp.Agents["imaginator"] = AgentState{
+		ActiveProtocol: guardianActive, // Temporarily shared
+		Protocols:      imaginatorProtocols,
 	}
 
 	// --- Analyzer Agent ---
