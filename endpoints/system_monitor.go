@@ -689,13 +689,6 @@ func checkService(service config.ServiceEntry, serviceType string, isPublic bool
 			report.Uptime = "∞"
 		case lowerID == "dex-cli":
 			report.Uptime = "∞"
-		case strings.Contains(lowerID, "cloud-cache"):
-			report.Status = "online"
-			report.HealthMessage = "System is operational"
-			report.Version.Str = "Cloud"
-			report.Uptime = "∞"
-			report.CPU = "0.2%"
-			report.Memory = "1.4%"
 		case strings.Contains(lowerID, "upstash"):
 			report.Uptime = "∞"
 			report.CPU = "0.2%"
