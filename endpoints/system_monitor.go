@@ -294,6 +294,17 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	// 1. Monitor State
 	monitor := GetSystemMonitorSnapshot(true)
 
+	// Filter services for public consumption
+	var filteredServices []types.ServiceReport
+	for _, service := range monitor.Services {
+		id := strings.ToLower(service.ID)
+		if id == "local-cache-0" || id == "local-ollama-0" || id == "upstash-redis-rw" {
+			continue
+		}
+		filteredServices = append(filteredServices, service)
+	}
+	monitor.Services = filteredServices
+
 	// 2. Processes State
 	processes := GetProcessesSnapshot()
 	// Limit history in public snapshot to keep payload small

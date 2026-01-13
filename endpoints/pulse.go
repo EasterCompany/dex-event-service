@@ -17,6 +17,11 @@ func StartCloudPulse(ctx context.Context, cloudClient *redis.Client, interval ti
 	}
 
 	go func() {
+		// Run initial pulse immediately on boot
+		if err := pulse(ctx, cloudClient); err != nil {
+			log.Printf("Cloud Pulse initial boot error: %v", err)
+		}
+
 		log.Printf("Aligning Cloud Pulse to :00 second mark (Interval: %v)", interval)
 
 		// 1. Alignment Logic: Wait until the start of the next minute
@@ -34,7 +39,7 @@ func StartCloudPulse(ctx context.Context, cloudClient *redis.Client, interval ti
 
 		// Run first aligned pulse
 		if err := pulse(ctx, cloudClient); err != nil {
-			log.Printf("Cloud Pulse initial error: %v", err)
+			log.Printf("Cloud Pulse initial aligned error: %v", err)
 		}
 
 		for {
