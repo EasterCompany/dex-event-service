@@ -198,12 +198,13 @@ func GetSystemMonitorSnapshot(isPublic bool) *SystemMonitorResponse {
 
 	// Define service type order for consistent sorting
 	typeOrder := map[string]int{
-		"fe":  0,
-		"be":  1,
-		"cs":  2,
-		"th":  3,
-		"os":  4,
-		"cli": 5,
+		"fe":   0,
+		"be":   1,
+		"cs":   2,
+		"th":   3,
+		"prod": 4,
+		"os":   5,
+		"cli":  6,
 	}
 
 	// Get sorted group keys to ensure consistent order
@@ -298,7 +299,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	var filteredServices []types.ServiceReport
 	for _, service := range monitor.Services {
 		id := strings.ToLower(service.ID)
-		if id == "local-cache-0" || id == "local-ollama-0" || id == "upstash-redis-rw" {
+		if id == "local-cache-0" || id == "local-ollama-0" || id == "upstash-redis-rw" || id == "easter-company" {
 			continue
 		}
 		filteredServices = append(filteredServices, service)
@@ -666,6 +667,8 @@ func checkService(service config.ServiceEntry, serviceType string, isPublic bool
 	switch serviceType {
 	case "cli":
 		report = checkCLIStatus(baseReport)
+	case "prod":
+		report = checkProdStatus(baseReport)
 	case "os":
 		// Check for Ollama services
 		if strings.Contains(strings.ToLower(service.ID), "ollama") {
@@ -1167,6 +1170,42 @@ func checkRedisStatus(baseReport types.ServiceReport, creds *config.ServiceCrede
 		report.CPU = "N/A"
 		report.Memory = "N/A"
 	}
+
+	return report
+}
+
+// checkProdStatus checks a production service via simple HTTPS ping
+func checkProdStatus(baseReport types.ServiceReport) types.ServiceReport {
+	report := baseReport
+	url := fmt.Sprintf("https://%s", report.Domain)
+
+	client := http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		report.Status = "offline"
+		report.HealthMessage = fmt.Sprintf("Failed to reach production site: %v", err)
+		report.Uptime = "N/A"
+		report.CPU = "N/A"
+		report.Memory = "N/A"
+		return report
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusOK {
+		report.Status = "online"
+		report.HealthMessage = "Production site is operational"
+	} else {
+		report.Status = "offline"
+		report.HealthMessage = fmt.Sprintf("Production site returned status: %d", resp.StatusCode)
+	}
+
+	report.Uptime = "∞" // Prod sites managed externally
+	report.CPU = "N/A"
+	report.Memory = "N/A"
+	report.Version.Str = "Live"
 
 	return report
 }
