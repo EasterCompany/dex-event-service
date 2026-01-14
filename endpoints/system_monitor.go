@@ -1216,7 +1216,7 @@ func checkProdStatus(baseReport types.ServiceReport) types.ServiceReport {
 	report.Uptime = "∞" // Prod sites managed externally
 	report.CPU = "N/A"
 	report.Memory = "N/A"
-	report.Version.Str = "Live"
+	report.Version.Str = "Cloud"
 
 	return report
 }
