@@ -299,6 +299,12 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	var filteredServices []types.ServiceReport
 	for _, service := range monitor.Services {
 		id := strings.ToLower(service.ID)
+		// Explicitly keep production services regardless of other rules
+		if service.Type == "prod" {
+			filteredServices = append(filteredServices, service)
+			continue
+		}
+
 		if id == "local-cache-0" || id == "local-ollama-0" || id == "upstash-redis-rw" || id == "easter-company" {
 			continue
 		}
@@ -688,9 +694,11 @@ func checkService(service config.ServiceEntry, serviceType string, isPublic bool
 
 	// Post-check processing for Public Dashboard
 	if isPublic {
-		// 1. Obfuscate Address
-		report.Domain = "easter.company"
-		report.Port = ""
+		// 1. Obfuscate Address (except for production services)
+		if serviceType != "prod" {
+			report.Domain = "easter.company"
+			report.Port = ""
+		}
 
 		// 2. Specialized Naming & Mocking for Cloud/System Services
 		lowerID := strings.ToLower(report.ID)
