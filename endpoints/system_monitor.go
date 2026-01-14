@@ -711,6 +711,9 @@ func checkService(service config.ServiceEntry, serviceType string, isPublic bool
 			report.Uptime = "∞"
 		case lowerID == "dex-cli":
 			report.Uptime = "∞"
+		case lowerID == "easter-company-production":
+			report.ShortName = "easter.company"
+			report.Uptime = "∞"
 		case strings.Contains(lowerID, "upstash"):
 			report.Uptime = "∞"
 			report.CPU = "0.2%"
