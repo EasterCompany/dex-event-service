@@ -403,11 +403,11 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 						continue
 					}
 
-					// We include Owen (Master) and Dexter (Me)
-					if m.ID == owenID || m.Level == "Me" {
-						contacts.Members = append(contacts.Members, m)
+					// Always include all members in the contact list for public mode
+					contacts.Members = append(contacts.Members, m)
 
-						// Also fetch their full profile/dossier
+					// But only fetch full profile/dossier for Owen (Master) and Dexter (Me)
+					if m.ID == owenID || m.Level == "Me" {
 						profileData, err := redisClient.Get(ctx, "user:profile:"+m.ID).Result()
 						if err == nil {
 							var p interface{}
