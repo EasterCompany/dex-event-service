@@ -274,14 +274,6 @@ func main() {
 	router.HandleFunc("/roadmap", endpoints.RoadmapHandler(redisClient)).Methods("GET", "POST", "PATCH", "DELETE")
 	router.HandleFunc("/roadmap/{id}", endpoints.RoadmapHandler(redisClient)).Methods("GET", "PATCH", "DELETE")
 
-	// Mount the static web UI
-	webDir := filepath.Join(os.ExpandEnv("$HOME"), "Dexter", "web", "dist")
-	if _, err := os.Stat(webDir); os.IsNotExist(err) {
-		log.Printf("Warning: Web UI directory not found at %s. Serving only API endpoints.", webDir)
-	} else {
-		router.PathPrefix("/").Handler(http.FileServer(http.Dir(webDir)))
-	}
-
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      middleware.CorsMiddleware(router),
