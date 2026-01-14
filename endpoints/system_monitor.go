@@ -198,13 +198,13 @@ func GetSystemMonitorSnapshot(isPublic bool) *SystemMonitorResponse {
 
 	// Define service type order for consistent sorting
 	typeOrder := map[string]int{
-		"fe":   0,
-		"be":   1,
-		"cs":   2,
-		"th":   3,
-		"prod": 4,
-		"os":   5,
-		"cli":  6,
+		"fe":  0,
+		"be":  1,
+		"cs":  2,
+		"th":  3,
+		"prd": 4,
+		"os":  5,
+		"cli": 6,
 	}
 
 	// Get sorted group keys to ensure consistent order
@@ -300,7 +300,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	for _, service := range monitor.Services {
 		id := strings.ToLower(service.ID)
 		// Explicitly keep production services regardless of other rules
-		if service.Type == "prod" {
+		if service.Type == "prd" {
 			filteredServices = append(filteredServices, service)
 			continue
 		}
@@ -673,7 +673,7 @@ func checkService(service config.ServiceEntry, serviceType string, isPublic bool
 	switch serviceType {
 	case "cli":
 		report = checkCLIStatus(baseReport)
-	case "prod":
+	case "prd":
 		report = checkProdStatus(baseReport)
 	case "os":
 		// Check for Ollama services
@@ -695,7 +695,7 @@ func checkService(service config.ServiceEntry, serviceType string, isPublic bool
 	// Post-check processing for Public Dashboard
 	if isPublic {
 		// 1. Obfuscate Address (except for production services)
-		if serviceType != "prod" {
+		if serviceType != "prd" {
 			report.Domain = "easter.company"
 			report.Port = ""
 		}
