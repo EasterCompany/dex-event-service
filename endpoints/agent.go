@@ -123,10 +123,6 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 	guardianProtocols["sentry"] = calculateProtocolStatus(
 		ctx, rdb, guardianActive, "sentry", 1800, "dex-guardian-sentry", "guardian",
 	)
-	// Architect (Every 15 mins = 900s)
-	guardianProtocols["architect"] = calculateProtocolStatus(
-		ctx, rdb, guardianActive, "architect", 900, "dex-guardian-t2", "guardian",
-	)
 
 	resp.Agents["guardian"] = AgentState{
 		ActiveProtocol: guardianActive,
