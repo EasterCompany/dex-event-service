@@ -254,7 +254,6 @@ func RunGuardianHandler(redisClient *redis.Client, triggerFunc func(int) ([]inte
 
 		// Map strings to legacy integer tiers if necessary, or pass string to triggerFunc
 		// Assuming triggerFunc still takes int (Legacy).
-		// Tier 1 = Sentry, Tier 2 = Architect, Tier 3 = Strategist?
 		// Ideally we update triggerFunc to take a string protocol name.
 
 		tier, _ := strconv.Atoi(tierStr)

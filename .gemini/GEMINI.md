@@ -17,7 +17,7 @@
     - **Self-Awareness:** Ignores its own `system.notification.generated` events when calculating idle time to prevent reset loops.
     - **Coverage Tracking:** Updates progress based on the timestamp of the most recent event actually analyzed, ensuring no gaps in continuity.
     - **Memory:** Recalls the last **20 notifications** generated to avoid duplicate reporting and track issue resolution.
-    - **Full Visibility:** Can query system logs, service status, and event history to perform deep root-cause analysis (Tier 1).
+    - **Full Visibility:** Can query system logs, service status, and event history to perform deep root-cause analysis.
 - **Notification UI:**
     - **Conditional Read Status:** Notifications remain "Unread" (Blue border) until manually expanded by the user.
     - **Persistence:** Read notifications (Grey or Priority-colored border) remain visible for **24 hours** from the moment they are marked as read.
@@ -26,10 +26,9 @@
 ## Overall To-Do List
 
 1.  **Analyst Reasoning Evolution**
-    *   [x] Implement **Sentry Protocol (Tier 1)** reasoning.
-    *   [x] Implement **Architect Protocol (Tier 2)** reasoning logic.
-    *   [x] Implement **Strategist Protocol (Tier 3)** reasoning logic.
-    *   [x] Implement **Analyzer Protocol (Tier 4)** profiling logic.
+    *   [x] Implement **Sentry Protocol** reasoning (Guardian).
+    *   [x] Implement **Alert Review Protocol** reasoning logic (Imaginator).
+    *   [x] Implement **Synthesis Protocol** profiling logic (Analyzer).
 
 2.  **Dashboard Actionability**
     *   [ ] **Actionable Notifications:** Clicking a notification jumps to the relevant event in the timeline or specific log section.
@@ -41,8 +40,10 @@
 
 ## Gemini Added Memories
 - **Protocol Terminology:** Agent layers are strictly called **Protocols**.
-- **Guardian Protocols:** Sentry (T1), Architect (T2), Strategist (T3).
-- **Analyzer Protocol (T4):** Handles biographical user synthesis and persistent dossier updates.
+- **Active Protocols (Jan 2026):**
+    - **Sentry (Guardian):** Technical health and logs.
+    - **Synthesis (Analyzer):** Biographical user profiles.
+    - **Alert Review (Imaginator):** Blueprint generation from alerts.
 - **System Context Synchronization:**
     - Profiles loaded from Redis are injected into the Master System Prompt for every interaction.
     - Analytical pass on every user message extracts "Signals" (Sentiment, Intent, Vibe).
