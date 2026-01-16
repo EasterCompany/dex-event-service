@@ -253,6 +253,8 @@ func main() {
 	router.HandleFunc("/processes/{id}", endpoints.HandleProcessUnregistration).Methods("DELETE")
 	router.HandleFunc("/logs", endpoints.LogsHandler).Methods("GET", "DELETE")
 	router.HandleFunc("/agent/status", endpoints.GetAgentStatusHandler(redisClient)).Methods("GET")
+	router.HandleFunc("/agent/pause", endpoints.HandlePauseSystem(redisClient)).Methods("POST")
+	router.HandleFunc("/agent/resume", endpoints.HandleResumeSystem(redisClient)).Methods("POST")
 	router.HandleFunc("/guardian/status", endpoints.GetAgentStatusHandler(redisClient)).Methods("GET") // Keep legacy for fallback during transition
 	router.HandleFunc("/guardian/reset", endpoints.ResetGuardianHandler(redisClient)).Methods("POST", "GET")
 	router.HandleFunc("/guardian/run", endpoints.RunGuardianHandler(redisClient, func(tier int) ([]interface{}, error) {

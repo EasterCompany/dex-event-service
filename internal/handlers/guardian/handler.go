@@ -49,7 +49,7 @@ func NewGuardianHandler(redis *redis.Client, ollama *ollama.Client, discord *dis
 			Name:      "Guardian",
 			ProcessID: "system-guardian",
 			Models: map[string]string{
-				"sentry": "dex-guardian-t1",
+				"sentry": "dex-guardian-sentry",
 			},
 			ProtocolAliases: map[string]string{
 				"sentry": "Sentry",
@@ -118,6 +118,11 @@ func (h *GuardianHandler) checkAndAnalyze() {
 	// 1. System Idle Requirement
 	lastCognitiveEvent, _ := h.RedisClient.Get(ctx, "system:last_cognitive_event").Int64()
 	if now-lastCognitiveEvent < int64(h.Config.IdleRequirement) {
+		return
+	}
+
+	// 1.5 System Pause Check
+	if utils.IsSystemPaused(ctx, h.RedisClient) {
 		return
 	}
 

@@ -112,6 +112,11 @@ func (h *ImaginatorHandler) runWorker() {
 func (h *ImaginatorHandler) checkAndAnalyze() {
 	ctx := h.ctx
 
+	// 0. Check if system is paused
+	if utils.IsSystemPaused(ctx, h.RedisClient) {
+		return
+	}
+
 	// 1. Check for unprocessed alerts
 	alerts, err := h.fetchUnprocessedAlerts(ctx)
 	if err != nil || len(alerts) == 0 {

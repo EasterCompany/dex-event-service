@@ -108,7 +108,18 @@ func (h *AnalyzerAgent) runWorker() {
 }
 
 func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
-	// 1. Scan for all user profiles in Redis
+	if utils.IsSystemPaused(ctx, h.RedisClient) {
+		log.Printf("[%s] Synthesis skipped: System is paused.", h.Config.Name)
+		return
+	}
+
+	log.Printf("[%s] Starting Synthesis Protocol...", h.Config.Name)
+
+	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+
+	// 1. Identify candidates (Users active in last 24h, not synthesized in 12h)
+	// users, err := h.RedisClient.Keys(ctx, "user:profile:*").Result() // Removed unused call
 	userSet := make(map[string]bool)
 	iter := h.RedisClient.Scan(ctx, 0, "user:profile:*", 0).Iterator()
 	for iter.Next(ctx) {

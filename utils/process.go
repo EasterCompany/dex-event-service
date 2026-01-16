@@ -17,7 +17,18 @@ const (
 	CognitiveLockKey = "system:cognitive_lock"
 	// CognitiveLockTTL is the maximum time an agent can hold the lock (safety timeout).
 	CognitiveLockTTL = 10 * time.Minute
+	// SystemPausedKey is the key used to indicate the system is paused.
+	SystemPausedKey = "system:is_paused"
 )
+
+// IsSystemPaused checks if the system is currently paused.
+func IsSystemPaused(ctx context.Context, redisClient *redis.Client) bool {
+	if redisClient == nil {
+		return false
+	}
+	val, _ := redisClient.Get(ctx, SystemPausedKey).Result()
+	return val == "true"
+}
 
 // AcquireCognitiveLock attempts to take the global cognitive lock.
 // If the lock is held, it will wait (poll) until it becomes available.
@@ -31,7 +42,14 @@ func AcquireCognitiveLock(ctx context.Context, redisClient *redis.Client, agentN
 		case <-ctx.Done():
 			return
 		default:
-			// Attempt to set the lock with a TTL
+			// 1. Check if system is paused
+			if IsSystemPaused(ctx, redisClient) {
+				// If paused, we wait. We do not try to acquire.
+				time.Sleep(5 * time.Second)
+				continue
+			}
+
+			// 2. Attempt to set the lock with a TTL
 			ok, err := redisClient.SetNX(ctx, CognitiveLockKey, agentName, CognitiveLockTTL).Result()
 			if err == nil && ok {
 				log.Printf("[%s] Cognitive Lock ACQUIRED.", agentName)
@@ -63,6 +81,9 @@ const DefaultTTL = 24 * time.Hour
 
 // TransitionToBusy handles the state change from Idle to Busy.
 func TransitionToBusy(ctx context.Context, redisClient *redis.Client) {
+	if IsSystemPaused(ctx, redisClient) {
+		return
+	}
 	lastState, _ := redisClient.Get(ctx, "system:state").Result()
 	if lastState == "busy" {
 		return

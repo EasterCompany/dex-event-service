@@ -121,7 +121,7 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 
 	// Sentry (Every 30 mins = 1800s)
 	guardianProtocols["sentry"] = calculateProtocolStatus(
-		ctx, rdb, guardianActive, "sentry", 1800, "dex-guardian-t1", "guardian",
+		ctx, rdb, guardianActive, "sentry", 1800, "dex-guardian-sentry", "guardian",
 	)
 	// Architect (Every 15 mins = 900s)
 	guardianProtocols["architect"] = calculateProtocolStatus(
@@ -312,5 +312,38 @@ func ResetGuardianHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("Protocols reset successfully"))
+	}
+}
+
+// HandlePauseSystem pauses all system agents.
+func HandlePauseSystem(redisClient *redis.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		// 1. Set System Paused
+		redisClient.Set(ctx, "system:is_paused", "true", 0)
+		redisClient.Set(ctx, "system:state", "paused", 0)
+		// 2. Set Cognitive Lock to PAUSED (forcibly)
+		redisClient.Set(ctx, "system:cognitive_lock", "PAUSED", 0)
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("System paused"))
+	}
+}
+
+// HandleResumeSystem resumes all system agents.
+func HandleResumeSystem(redisClient *redis.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		// 1. Del System Paused
+		redisClient.Del(ctx, "system:is_paused")
+		redisClient.Set(ctx, "system:state", "idle", 0)
+		// 2. Del Cognitive Lock if it is "PAUSED"
+		val, _ := redisClient.Get(ctx, "system:cognitive_lock").Result()
+		if val == "PAUSED" {
+			redisClient.Del(ctx, "system:cognitive_lock")
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("System resumed"))
 	}
 }
