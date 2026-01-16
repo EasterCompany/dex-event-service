@@ -270,6 +270,13 @@ func main() {
 		}
 		return handlers.AnalyzerTrigger()
 	})).Methods("POST")
+	router.HandleFunc("/fabricator/reset", endpoints.ResetGuardianHandler(redisClient)).Methods("POST", "GET") // Reusing reset handler logic for simplicity or create specific one
+	router.HandleFunc("/fabricator/run", endpoints.RunFabricatorHandler(redisClient, func() error {
+		if handlers.FabricatorTrigger == nil {
+			return fmt.Errorf("fabricator handler not initialized")
+		}
+		return handlers.FabricatorTrigger()
+	})).Methods("POST")
 	router.HandleFunc("/cli/execute", endpoints.HandleCLIExecute).Methods("POST")
 	router.HandleFunc("/web/history", endpoints.WebHistoryHandler).Methods("GET", "POST")
 	router.HandleFunc("/system/status", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }).Methods("GET", "HEAD")

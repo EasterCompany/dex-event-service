@@ -15,6 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	internalHandlers "github.com/EasterCompany/dex-event-service/internal/handlers"
+	"github.com/EasterCompany/dex-event-service/internal/handlers/fabricator"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/greeting"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/guardian"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/imaginator"
@@ -54,6 +55,9 @@ var (
 
 	// AnalyzerTrigger is a global hook for the API to call the background worker logic
 	AnalyzerTrigger func() error
+
+	// FabricatorTrigger is a global hook for the API to call the background worker logic
+	FabricatorTrigger func() error
 )
 
 type job struct {
@@ -129,6 +133,21 @@ func initBackgroundHandlers() {
 				// Wire up the trigger
 				AnalyzerTrigger = func() error {
 					analyzerAgent.PerformSynthesis(context.Background())
+					return nil
+				}
+
+				log.Printf("Background handler '%s' started.", handlerConfig.Name)
+			case fabricator.HandlerName:
+				fabricatorHandler := fabricator.NewFabricatorHandler(dependencies.Redis, dependencies.Ollama, dependencies.Discord)
+				if err := fabricatorHandler.Init(context.Background()); err != nil {
+					log.Printf("ERROR: Failed to initialize fabricator handler: %v", err)
+					continue
+				}
+				runningBackgroundHandlers[handlerConfig.Name] = fabricatorHandler
+
+				// Wire up the trigger
+				FabricatorTrigger = func() error {
+					_, _, _ = fabricatorHandler.Run(context.Background())
 					return nil
 				}
 

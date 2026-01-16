@@ -157,6 +157,20 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 		Protocols:      analyzerProtocols,
 	}
 
+	// --- Fabricator Agent ---
+	fabricatorActive, _ := rdb.Get(ctx, "fabricator:active_tier").Result()
+	fabricatorProtocols := make(map[string]ProtocolStatus)
+
+	// Construction (Every 60s check)
+	fabricatorProtocols["construction"] = calculateProtocolStatus(
+		ctx, rdb, fabricatorActive, "construction", 60, "gemini-cli-yolo", "fabricator",
+	)
+
+	resp.Agents["fabricator"] = AgentState{
+		ActiveProtocol: fabricatorActive,
+		Protocols:      fabricatorProtocols,
+	}
+
 	// --- System State ---
 	lastTransition, _ := rdb.Get(ctx, "system:last_transition_ts").Int64()
 	state, _ := rdb.Get(ctx, "system:state").Result()
@@ -305,8 +319,25 @@ func ResetGuardianHandler(redisClient *redis.Client) http.HandlerFunc {
 		}
 		// TODO: Add Synthesis reset if needed, though usually handled by analyzer endpoints
 
+		if tier == "construction" || tier == "all" {
+			redisClient.Set(ctx, "fabricator:last_run:construction", 0, utils.DefaultTTL)
+		}
+
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("Protocols reset successfully"))
+	}
+}
+
+// RunFabricatorHandler triggers immediate execution of protocols.
+func RunFabricatorHandler(redisClient *redis.Client, triggerFunc func() error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := triggerFunc(); err != nil {
+			http.Error(w, fmt.Sprintf("Fabricator run failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status": "triggered"}`))
 	}
 }
 
