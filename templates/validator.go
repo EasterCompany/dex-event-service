@@ -13,7 +13,7 @@ func Validate(eventType string, eventData map[string]interface{}) []ValidationEr
 	if !exists {
 		return []ValidationError{{
 			Field:   "type",
-			Message: fmt.Sprintf("unknown event type '%s' - must be one of: message_received, action_performed, log_entry, error_occurred, status_change, metric_recorded", eventType),
+			Message: fmt.Sprintf("unknown event type '%s' - must be one of: %v", eventType, GetTemplateList()),
 		}}
 	}
 

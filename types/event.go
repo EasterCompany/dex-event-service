@@ -45,6 +45,7 @@ const (
 	EventTypeSystemStatusChange   EventType = "system.status.change"
 	EventTypeSystemTestCompleted  EventType = "system.test.completed"
 	EventTypeSystemBuildCompleted EventType = "system.build.completed"
+	EventTypeSystemDiagnosticPing EventType = "system.diagnostic.ping"
 
 	// CLI Events
 	EventTypeCLICommand EventType = "system.cli.command"

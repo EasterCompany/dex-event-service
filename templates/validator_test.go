@@ -167,9 +167,9 @@ func TestGetTemplateList(t *testing.T) {
 	// Need to import types to use the constants
 	eventTypes := GetTemplateList()
 
-	if len(eventTypes) != 36 {
+	if len(eventTypes) != 37 {
 
-		t.Errorf("Expected 36 event types, got %d", len(eventTypes))
+		t.Errorf("Expected 37 event types, got %d", len(eventTypes))
 
 	}
 
@@ -236,6 +236,8 @@ func TestGetTemplateList(t *testing.T) {
 		string(types.EventTypeSystemBuildCompleted): true,
 
 		string(types.EventTypeSystemStatusChange): true,
+
+		string(types.EventTypeSystemDiagnosticPing): true,
 
 		"voice_speaking_started": true,
 

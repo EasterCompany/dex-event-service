@@ -910,5 +910,22 @@ func GetTemplates() map[string]EventTemplate {
 				},
 			},
 		},
+
+		"system.diagnostic.ping": {
+			Description: "A synthetic diagnostic ping to verify system health",
+			Format:      "Diagnostic Ping: {ping_id} from {source}",
+			Fields: map[string]FieldSpec{
+				"ping_id": {
+					Type:        "string",
+					Required:    true,
+					Description: "Unique identifier for this ping",
+				},
+				"source": {
+					Type:        "string",
+					Required:    true,
+					Description: "Source service or component generating the ping",
+				},
+			},
+		},
 	}
 }
