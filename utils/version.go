@@ -30,7 +30,7 @@ func SetVersion(version, branch, commit, buildDate, buildYear, buildHash, arch s
 // GetVersion returns the version information for the service.
 func GetVersion() Version {
 	major, minor, patch, _ := ParseVersionTag(VersionStr)
-	fullStr := fmt.Sprintf("%s.%s.%s.%s.%s.%s", VersionStr, GitBranch, GitCommit, BuildDate, Architecture, BuildHash)
+	fullStr := fmt.Sprintf("%s.%s.%s.%s.%s", VersionStr, GitBranch, GitCommit, BuildDate, Architecture)
 	return Version{
 		Str: fullStr,
 		Obj: VersionDetails{
