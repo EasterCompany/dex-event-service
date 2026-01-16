@@ -558,22 +558,21 @@ func (b *BaseAgent) ParseSingleMarkdownReport(input string) AnalysisResult {
 			continue
 		}
 
-		// Section headers
-		if strings.Contains(lower, "summary") || strings.Contains(lower, "overview") {
-			currentSection = "summary"
-			continue
-		}
-		if strings.Contains(lower, "content") || strings.Contains(lower, "insight") || strings.Contains(lower, "body") || strings.Contains(lower, "analysis") {
-			currentSection = "content"
-			continue
-		}
-		if strings.Contains(lower, "implementation path") || strings.Contains(lower, "proposed steps") || strings.Contains(lower, "implementation plan") {
-			currentSection = "path"
-			continue
-		}
-
-		// Strict header parsing - any unknown header stops capture
+		// Section headers (Must start with #)
 		if strings.HasPrefix(trimmed, "#") {
+			if strings.Contains(lower, "summary") || strings.Contains(lower, "overview") {
+				currentSection = "summary"
+				continue
+			}
+			if strings.Contains(lower, "content") || strings.Contains(lower, "insight") || strings.Contains(lower, "body") || strings.Contains(lower, "analysis") {
+				currentSection = "content"
+				continue
+			}
+			if strings.Contains(lower, "implementation path") || strings.Contains(lower, "proposed steps") || strings.Contains(lower, "implementation plan") {
+				currentSection = "path"
+				continue
+			}
+			// Unknown header - stop capture
 			currentSection = ""
 			continue
 		}
