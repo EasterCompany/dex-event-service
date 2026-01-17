@@ -122,12 +122,11 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 
 	// 2. Increment Ref Count ONLY if it's a new process
 	if exists == 0 {
-		newCount, _ := redisClient.Incr(ctx, "system:busy_ref_count").Result()
-		// If transitioning from Idle (0 -> 1), handle transition
-		if newCount == 1 {
-			TransitionToBusy(ctx, redisClient)
-		}
+		_, _ = redisClient.Incr(ctx, "system:busy_ref_count").Result()
 	}
+
+	// Always ensure we transition to busy if a process is active
+	TransitionToBusy(ctx, redisClient)
 
 	data := map[string]interface{}{
 		"channel_id": processID, // Legacy field name for dashboard compatibility

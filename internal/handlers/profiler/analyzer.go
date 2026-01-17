@@ -168,7 +168,7 @@ func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID s
 	log.Printf("[%s] Starting synthesis for user %s", h.Config.Name, targetUserID)
 
 	// Set active tier for frontend visibility
-	h.RedisClient.Set(ctx, "analyzer:active_tier", fmt.Sprintf("Working: %s", targetUserID), 0)
+	h.RedisClient.Set(ctx, "analyzer:active_tier", "synthesis", 0)
 	defer h.RedisClient.Set(ctx, "analyzer:active_tier", "", 0)
 
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, fmt.Sprintf("Analyzing User: %s", targetUserID))

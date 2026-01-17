@@ -170,7 +170,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 	// Tier 1: Technical Sentry
 	var sentryResults []agent.AnalysisResult
 	if tier == 0 || tier == 1 {
-		h.RedisClient.Set(ctx, "guardian:active_tier", "Working (Sentry)", utils.DefaultTTL)
+		h.RedisClient.Set(ctx, "guardian:active_tier", "sentry", utils.DefaultTTL)
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Sentry Protocol")
 
 		input := h.gatherContext(ctx, "sentry", nil)

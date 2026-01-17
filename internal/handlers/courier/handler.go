@@ -201,7 +201,7 @@ func (h *CourierHandler) PerformResearch(ctx context.Context) ([]agent.AnalysisR
 	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 
-	h.RedisClient.Set(ctx, "courier:active_tier", "Working (Researcher)", utils.DefaultTTL)
+	h.RedisClient.Set(ctx, "courier:active_tier", "researcher", utils.DefaultTTL)
 	defer h.RedisClient.Del(ctx, "courier:active_tier")
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Researcher Protocol")
 	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
