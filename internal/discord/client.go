@@ -508,3 +508,19 @@ func (c *Client) PlayMusic(url string) error {
 
 	return nil
 }
+
+func (c *Client) SetVoiceState(mute, deaf bool) {
+	reqBody := map[string]bool{
+		"mute": mute,
+		"deaf": deaf,
+	}
+	jsonData, _ := json.Marshal(reqBody)
+
+	// Fire and forget
+	go func() {
+		resp, err := c.httpClient.Post(c.BaseURL+"/voice/state", "application/json", bytes.NewBuffer(jsonData))
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+}

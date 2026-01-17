@@ -200,6 +200,8 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 	if discordClient != nil && state != "Queued" {
 		// Activity Type 3 = "Watching"
 		discordClient.UpdateBotStatus(state, "online", 3)
+		// Busy Mode: Mute and Deafen to enforce Single Serving AI
+		discordClient.SetVoiceState(true, true)
 	}
 }
 
@@ -345,8 +347,14 @@ func SyncDiscordStatus(ctx context.Context, redisClient *redis.Client, discordCl
 		}
 
 		discordClient.UpdateBotStatus(idleStatus, "online", 3)
+		// Idle Mode: Unmute and Undeafen to allow voice interaction
+		discordClient.SetVoiceState(false, false)
 	} else if latestProcessState != "" {
 		// Update to the most recently updated process state
 		discordClient.UpdateBotStatus(latestProcessState, "online", 3)
+		// Ensure we remain muted if still active
+		if latestProcessState != "Queued" {
+			discordClient.SetVoiceState(true, true)
+		}
 	}
 }
