@@ -94,11 +94,20 @@ func (c *Client) CompleteStream(channelID, messageID, content string) (string, e
 	return messageID, nil
 }
 
-func (c *Client) PostMessage(channelID, content string) (string, error) {
+func (c *Client) PostMessage(targetID, content string) (string, error) {
 	reqBody := map[string]string{
-		"channel_id": channelID,
-		"content":    content,
+		"content": content,
 	}
+
+	// Logic: If targetID starts with 'channel:', it's a channel.
+	// If it's a pure numeric string (and long), it's likely a User ID for DMs.
+	if strings.HasPrefix(targetID, "channel:") {
+		reqBody["channel_id"] = strings.TrimPrefix(targetID, "channel:")
+	} else {
+		// Default to User ID for legacy compat and simplicity
+		reqBody["user_id"] = targetID
+	}
+
 	jsonData, _ := json.Marshal(reqBody)
 
 	resp, err := c.httpClient.Post(c.BaseURL+"/post", "application/json", bytes.NewBuffer(jsonData))

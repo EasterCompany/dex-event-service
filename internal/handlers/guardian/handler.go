@@ -73,6 +73,7 @@ func NewGuardianHandler(redis *redis.Client, ollama *ollama.Client, discord *dis
 
 func (h *GuardianHandler) Init(ctx context.Context) error {
 	h.stopChan = make(chan struct{})
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Standby")
 	go h.runWorker()
 	log.Printf("[%s] Background worker started.", HandlerName)
 	return nil

@@ -66,6 +66,7 @@ func NewAnalyzerAgent(redis *redis.Client, ollama *ollama.Client, discord *disco
 
 func (h *AnalyzerAgent) Init(ctx context.Context) error {
 	h.stopChan = make(chan struct{})
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Standby")
 	go h.runWorker()
 	log.Printf("[%s] Background worker started.", AnalyzerHandlerName)
 	return nil

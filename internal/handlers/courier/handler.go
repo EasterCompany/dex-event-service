@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/internal/agent"
@@ -69,6 +68,7 @@ func NewCourierHandler(redis *redis.Client, ollama *ollama.Client, discord *disc
 
 func (h *CourierHandler) Init(ctx context.Context) error {
 	h.stopChan = make(chan struct{})
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Standby")
 	go h.runWorker()
 	log.Printf("[%s] Background worker started.", HandlerName)
 	return nil
@@ -284,15 +284,7 @@ func (h *CourierHandler) deliverToRecipient(ctx context.Context, recipient strin
 	}
 
 	msg := fmt.Sprintf("📦 **Research Task Completed**\n\n**Task:** %s\n\n%s", task.NaturalInstruction, res.Content)
-
-	if strings.HasPrefix(recipient, "channel:") {
-		// Deliver to Channel
-		channelID := strings.TrimPrefix(recipient, "channel:")
-		_, _ = h.DiscordClient.PostMessage(channelID, msg)
-	} else {
-		// Deliver to User (DM)
-		_, _ = h.DiscordClient.PostMessage(recipient, msg)
-	}
+	_, _ = h.DiscordClient.PostMessage(recipient, msg)
 }
 
 func (h *CourierHandler) ValidateLogic(res agent.AnalysisResult) []agent.Correction {
