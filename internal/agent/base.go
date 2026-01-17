@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -19,6 +20,27 @@ type BaseAgent struct {
 	OllamaClient *ollama.Client
 	ChatManager  *utils.ChatContextManager
 	StopTokens   []string
+}
+
+func (b *BaseAgent) isHeavyModel(model string) bool {
+	// Explicit heavy models
+	heavyModels := map[string]bool{
+		"dex-researcher-model": true,
+		"dex-guardian-sentry":  true,
+		"dex-imaginator-model": true,
+		"dex-master-model":     true,
+	}
+	if heavyModels[model] {
+		return true
+	}
+
+	// Check for size indicators in name
+	lower := strings.ToLower(model)
+	if strings.Contains(lower, "27b") || strings.Contains(lower, "70b") || strings.Contains(lower, "llama4") {
+		return true
+	}
+
+	return false
 }
 
 // IsActuallyBusy checks if the system is currently processing tasks.
@@ -128,6 +150,14 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 	}
 	taskHeader := fmt.Sprintf("# TASK\n\nYour task is to generate a %s %s report from the following data.\n\n", agentConfig.Name, protocolAlias)
 	inputContext = taskHeader + inputContext
+
+	// VRAM Optimization for heavy models
+	if b.isHeavyModel(model) {
+		log.Printf("VRAM Optimization: Unloading other models for heavy lifter %s...", model)
+		if err := b.OllamaClient.UnloadAllModelsExcept(ctx, model); err != nil {
+			log.Printf("Warning: VRAM optimization failed: %v", err)
+		}
+	}
 
 	var allCorrections []Correction
 	var rawOutput string

@@ -304,3 +304,93 @@ func (c *Client) GenerateStream(model, prompt string, images []string, options m
 	}
 	return stats, nil
 }
+
+type ProcessModel struct {
+	Name      string    `json:"name"`
+	Model     string    `json:"model"`
+	Size      int64     `json:"size"`
+	Digest    string    `json:"digest"`
+	Details   Details   `json:"details"`
+	ExpiresAt time.Time `json:"expires_at"`
+	SizeVRAM  int64     `json:"size_vram"`
+}
+
+type Details struct {
+	ParentModel       string   `json:"parent_model"`
+	Format            string   `json:"format"`
+	Family            string   `json:"family"`
+	Families          []string `json:"families"`
+	ParameterSize     string   `json:"parameter_size"`
+	QuantizationLevel string   `json:"quantization_level"`
+}
+
+type ProcessResponse struct {
+	Models []ProcessModel `json:"models"`
+}
+
+// ListRunningModels returns a list of currently loaded models via /api/ps
+func (c *Client) ListRunningModels(ctx context.Context) ([]ProcessModel, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/api/ps", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ollama ps returned status: %d", resp.StatusCode)
+	}
+
+	var response ProcessResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, err
+	}
+	return response.Models, nil
+}
+
+// UnloadModel forces a model to unload by sending a request with keep_alive: 0
+func (c *Client) UnloadModel(ctx context.Context, model string) error {
+	payload := map[string]interface{}{
+		"model":      model,
+		"keep_alive": 0,
+	}
+
+	jsonData, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/generate", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	return nil
+}
+
+// UnloadAllModelsExcept unloads all running models except the specified one.
+func (c *Client) UnloadAllModelsExcept(ctx context.Context, keepModel string) error {
+	models, err := c.ListRunningModels(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, m := range models {
+		if m.Name != keepModel && m.Model != keepModel {
+			log.Printf("Optimizing VRAM: Unloading idle model %s...", m.Name)
+			if err := c.UnloadModel(ctx, m.Name); err != nil {
+				log.Printf("Failed to unload %s: %v", m.Name, err)
+			}
+		}
+	}
+	return nil
+}

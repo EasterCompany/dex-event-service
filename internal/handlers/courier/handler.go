@@ -241,11 +241,15 @@ func (h *CourierHandler) PerformResearch(ctx context.Context) ([]agent.AnalysisR
 }
 
 func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([]agent.AnalysisResult, string, error) {
+	statusMsg := fmt.Sprintf("Researching: %s", task.NaturalInstruction)
 	log.Printf("[%s] Executing Task: %s", HandlerName, task.NaturalInstruction)
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, statusMsg)
 
 	// 1. Generate Optimized Search Query
+	// Inject current date context specifically for query generation
+	now := time.Now().Format("2006-01-02")
 	queryModel := h.Config.Models["researcher"]
-	queryPrompt := fmt.Sprintf("You are an intelligence officer. Generate a highly specific, bot-friendly search query for the following research task: %s. Output ONLY the query string, no quotes or explanations.", task.NaturalInstruction)
+	queryPrompt := fmt.Sprintf("Current Date: %s. You are an intelligence officer. Generate a highly specific, bot-friendly search query for the following research task: %s. Ensure the query targets RECENT events (last 48 hours) if the task implies 'daily' news. Output ONLY the query string, no quotes or explanations.", now, task.NaturalInstruction)
 
 	// Quick one-off chat for query optimization
 	queryResp, err := h.OllamaClient.Chat(ctx, queryModel, []ollama.Message{{Role: "user", Content: queryPrompt}})
@@ -259,25 +263,32 @@ func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([
 	targetURL := task.ExecutionPlan.EntryURL
 	var webData strings.Builder
 	var sourceLinks []string
+	seenURLs := make(map[string]bool) // Deduplication set
 
 	if targetURL != "" {
 		scraped, _ := h.WebClient.PerformScrape(ctx, targetURL)
 		if scraped != nil {
 			webData.WriteString(fmt.Sprintf("# CONTENT FROM TARGET URL: %s\n\n%s\n\n", targetURL, scraped.Content))
 			sourceLinks = append(sourceLinks, targetURL)
+			seenURLs[targetURL] = true
 		}
 	} else {
 		results, _ := h.WebClient.PerformSearch(ctx, searchQuery, 5)
 		webData.WriteString(fmt.Sprintf("# SEARCH RESULTS FOR: %s\n\n", searchQuery))
 
 		for i, r := range results {
-			if i >= 5 {
+			if len(sourceLinks) >= 5 { // Hard limit of 5 unique sources
 				break
-			} // Hard limit
-			log.Printf("[%s] Scraping result %d: %s", HandlerName, i+1, r.URL)
+			}
 
-			// Indicate progress in process state
-			utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, fmt.Sprintf("Scraping %d/5: %s", i+1, r.Title))
+			// Normalize URL for deduplication (strip trailing slash)
+			cleanURL := strings.TrimSuffix(r.URL, "/")
+			if seenURLs[cleanURL] {
+				continue
+			}
+			seenURLs[cleanURL] = true
+
+			log.Printf("[%s] Scraping result %d: %s", HandlerName, i+1, r.URL)
 
 			scraped, _ := h.WebClient.PerformScrape(ctx, r.URL)
 			if scraped != nil && len(scraped.Content) > 100 {
@@ -296,15 +307,11 @@ func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Synthesizing Report")
 
 	sourcesBlock := "\n\n### SOURCES\n"
-
 	for _, link := range sourceLinks {
-
 		sourcesBlock += fmt.Sprintf("- %s\n", link)
-
 	}
 
-	systemPrompt := "You are the Courier Agent's Researcher Protocol. Your goal is to act as a high-fidelity intelligence analyst. Analyze the provided web data and sources to create a comprehensive, factual, and surgically accurate report. Always include a 'Sources' section at the end with the provided links."
-
+	systemPrompt := "You are the Courier Agent's Researcher Protocol. Your goal is to act as a high-fidelity intelligence analyst. Analyze the provided web data and sources to create a comprehensive, factual, and surgically accurate report.\n\nFILTERING RULES:\n1. IGNORE repetitive 'Latest Updates' feed lists, navigation menus, or sidebar widgets.\n2. IGNORE local crime stories, celebrity gossip, or minor human interest stories unless they have geopolitical significance.\n3. IGNORE marketing content or blog posts that are not primary news reporting.\n4. Prioritize geopolitical events, economic indicators, and major policy changes.\n\nAlways include a 'Sources' section at the end with the provided links."
 	inputContext := fmt.Sprintf("## USER INSTRUCTION\n%s\n\n## RESEARCH DATA\n%s%s", task.NaturalInstruction, webData.String(), sourcesBlock)
 
 	sessionID := fmt.Sprintf("research-%s-%d", task.ID, time.Now().Unix())
