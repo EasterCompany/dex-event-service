@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/internal/agent"
@@ -227,30 +228,64 @@ func (h *CourierHandler) PerformResearch(ctx context.Context) ([]agent.AnalysisR
 func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([]agent.AnalysisResult, string, error) {
 	log.Printf("[%s] Executing Task: %s", HandlerName, task.NaturalInstruction)
 
-	// 1. Scraping / Web Search
-	targetURL := task.ExecutionPlan.EntryURL
+	// 1. Generate Optimized Search Query
+	queryModel := h.Config.Models["researcher"]
+	queryPrompt := fmt.Sprintf("Generate a highly specific, bot-friendly search query for the following task: %s. Output ONLY the query string, no quotes or explanations.", task.NaturalInstruction)
+
+	// Quick one-off chat for query optimization
+	queryResp, err := h.OllamaClient.Chat(ctx, queryModel, []ollama.Message{{Role: "user", Content: queryPrompt}})
 	searchQuery := task.NaturalInstruction
-	if task.ExecutionPlan.SearchQuery != "" {
-		searchQuery = task.ExecutionPlan.SearchQuery
+	if err == nil {
+		searchQuery = strings.Trim(queryResp.Content, "\" \n\r")
+		log.Printf("[%s] Optimized Query: %s", HandlerName, searchQuery)
 	}
 
-	var webData string
+	// 2. Perform Web Search
+	targetURL := task.ExecutionPlan.EntryURL
+	var webData strings.Builder
+	var sourceLinks []string
+
 	if targetURL != "" {
 		scraped, _ := h.WebClient.PerformScrape(ctx, targetURL)
 		if scraped != nil {
-			webData = scraped.Content
+			webData.WriteString(fmt.Sprintf("# CONTENT FROM TARGET URL: %s\n\n%s\n\n", targetURL, scraped.Content))
+			sourceLinks = append(sourceLinks, targetURL)
 		}
 	} else {
 		results, _ := h.WebClient.PerformSearch(ctx, searchQuery, 5)
-		webData = fmt.Sprintf("Search Results for: %s\n\n", searchQuery)
-		for _, r := range results {
-			webData += fmt.Sprintf("Title: %s\nURL: %s\nSnippet: %s\n---\n", r.Title, r.URL, r.Snippet)
+		webData.WriteString(fmt.Sprintf("# SEARCH RESULTS FOR: %s\n\n", searchQuery))
+
+		for i, r := range results {
+			if i >= 5 {
+				break
+			} // Hard limit
+			log.Printf("[%s] Scraping result %d: %s", HandlerName, i+1, r.URL)
+
+			// Indicate progress in process state
+			utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, fmt.Sprintf("Scraping %d/5: %s", i+1, r.Title))
+
+			scraped, _ := h.WebClient.PerformScrape(ctx, r.URL)
+			if scraped != nil && len(scraped.Content) > 100 {
+				webData.WriteString(fmt.Sprintf("## SOURCE %d: %s (%s)\n\n%s\n\n---\n\n", i+1, r.Title, r.URL, scraped.Content))
+				sourceLinks = append(sourceLinks, r.URL)
+			} else {
+				// Fallback to snippet if scrape fails
+				webData.WriteString(fmt.Sprintf("## SOURCE %d (Snippet): %s (%s)\n\n%s\n\n---\n\n", i+1, r.Title, r.URL, r.Snippet))
+				sourceLinks = append(sourceLinks, r.URL)
+			}
 		}
 	}
 
-	// 2. Cognitive Loop
-	systemPrompt := "You are the Courier Agent's Researcher Protocol. Your goal is to analyze web data and provide a concise, high-fidelity report based on the user's instructions."
-	inputContext := fmt.Sprintf("## USER INSTRUCTION\n%s\n\n## RESEARCH DATA\n%s", task.NaturalInstruction, webData)
+	// 3. Final Synthesis Cognitive Loop
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Synthesizing Report")
+
+	sourcesBlock := "\n\n### SOURCES\n"
+	for _, link := range sourceLinks {
+		sourcesBlock += fmt.Sprintf("- %s\n", link)
+	}
+
+	systemPrompt := "You are the Courier Agent's Researcher Protocol. Your goal is to analyze the provided web data and sources to create a comprehensive, high-fidelity report. Always include a 'Sources' section at the end with the provided links."
+	inputContext := fmt.Sprintf("## USER INSTRUCTION\n%s\n\n## RESEARCH DATA\n%s%s", task.NaturalInstruction, webData.String(), sourcesBlock)
 	sessionID := fmt.Sprintf("research-%s-%d", task.ID, time.Now().Unix())
 
 	return h.RunCognitiveLoop(ctx, h, "researcher", h.Config.Models["researcher"], sessionID, systemPrompt, inputContext, 1)
@@ -287,7 +322,8 @@ func (h *CourierHandler) deliverToRecipient(ctx context.Context, recipient strin
 		return
 	}
 
-	msg := fmt.Sprintf("📦 **Research Task Completed**\n\n**Task:** %s\n\n%s", task.NaturalInstruction, res.Content)
+	body := res.Content
+	msg := fmt.Sprintf("📦 **Research Task Completed**\n\n**Task:** %s\n\n%s", task.NaturalInstruction, body)
 	_, _ = h.DiscordClient.PostMessage(recipient, msg)
 }
 
