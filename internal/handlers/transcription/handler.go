@@ -57,6 +57,14 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	log.Printf("transcription-handler processing for user %s: %s", userName, transcription)
 
+	// 0. Cooldown Check (Anti-Double-Response)
+	// If we just finished speaking, ignore inputs for a short window (2s) to prevent responding to self-echo or late fragments.
+	lastResponseKey := fmt.Sprintf("channel:voice_cooldown:%s", channelID)
+	if ttl, _ := deps.Redis.TTL(ctx, lastResponseKey).Result(); ttl > 0 {
+		log.Printf("Ignoring transcription due to voice cooldown (TTL: %v)", ttl)
+		return types.HandlerOutput{Success: true}, nil
+	}
+
 	deps.Discord.UpdateBotStatus("Thinking...", "online", 3)
 	defer deps.Discord.UpdateBotStatus("Listening for events...", "online", 2)
 
@@ -67,6 +75,11 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		log.Printf("Warning: Failed to fetch context from smartcontext: %v, falling back to legacy", err)
 		contextHistory, _ = deps.Discord.FetchContext(channelID, 25)
 	}
+
+	// VRAM Optimization: Immediately unload summary model to free space for response model
+	go func() {
+		_ = deps.Ollama.UnloadModel(ctx, summaryModel)
+	}()
 
 	// 1. Check Engagement
 	prompt := fmt.Sprintf("Analyze if Dexter should respond to this message (from voice transcription). Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", contextHistory, transcription)
@@ -311,6 +324,9 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			if err := emitEvent(deps.EventServiceURL, botResponseEventData); err != nil {
 				log.Printf("Failed to emit bot response event: %v", err)
 			}
+
+			// Set cooldown to prevent immediate re-triggering
+			deps.Redis.Set(ctx, fmt.Sprintf("channel:voice_cooldown:%s", channelID), "1", 2*time.Second)
 		}
 	}
 
