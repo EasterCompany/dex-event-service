@@ -84,8 +84,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		log.Printf("Failed to get voice channel user count: %v", err)
 	} else {
 		log.Printf("Voice channel user count: %d", userCount)
-		// Increased threshold from 2 to 3 to engage more often in small groups
-		if userCount <= 3 {
+		// Increased threshold from 3 to 4 to engage more often in small groups
+		if userCount <= 4 {
 			if !shouldEngage {
 				log.Printf("Forcing engagement because user count is low (count: %d)", userCount)
 				shouldEngage = true
