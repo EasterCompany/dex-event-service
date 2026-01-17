@@ -121,6 +121,21 @@ func (h *CourierHandler) checkAndResearch() {
 		return
 	}
 
+	// 2.5 Check System Idle Time
+	sysState, _ := h.RedisClient.Get(ctx, "system:state").Result()
+	if sysState == "busy" {
+		// If system is busy, we respect that (even if IsActuallyBusy returns false due to race/lag)
+		return
+	}
+
+	lastTransition, _ := h.RedisClient.Get(ctx, "system:last_transition_ts").Int64()
+	if now-lastTransition < int64(h.Config.IdleRequirement) {
+		return
+	}
+
+	// 2.6 Busy Count Cleanup (Safety Net)
+	h.CleanupBusyCount(ctx)
+
 	// 3. Protocol Cooldown
 	lastRun, _ := h.RedisClient.Get(ctx, "courier:last_run:researcher").Int64()
 	if now-lastRun < int64(h.Config.Cooldowns["researcher"]) {
