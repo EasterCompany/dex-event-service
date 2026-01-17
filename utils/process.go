@@ -130,7 +130,12 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 	// Single Serving AI Rule: Check if we should be queued
 	holder, _ := redisClient.Get(ctx, CognitiveLockKey).Result()
 
-	isLockHolder := holder == processID || strings.Contains(processID, holder)
+	isLockHolder := false
+	if holder != "" {
+		hLower := strings.ToLower(holder)
+		pLower := strings.ToLower(processID)
+		isLockHolder = hLower == pLower || strings.Contains(pLower, hLower) || strings.Contains(hLower, pLower)
+	}
 
 	key := fmt.Sprintf("process:info:%s", processID)
 	queueKey := fmt.Sprintf("process:queued:%s", processID)
@@ -150,12 +155,13 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 	// 1. Check if process already exists
 	exists, _ := redisClient.Exists(ctx, key).Result()
 
-	// 2. Increment Ref Count ONLY if it's a new process
+	// 2. Increment Ref Count ONLY if it's a NEW process (not already in info or queued)
+	// Note: We check exists on the specific key (info or queued)
 	if exists == 0 {
 		_, _ = redisClient.Incr(ctx, "system:busy_ref_count").Result()
 	}
 
-	// Always ensure we transition to busy if a process is active
+	// Always ensure we transition to busy if a process is active or queued
 	TransitionToBusy(ctx, redisClient)
 
 	data := map[string]interface{}{
