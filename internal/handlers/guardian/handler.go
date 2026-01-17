@@ -55,7 +55,7 @@ func NewGuardianHandler(redis *redis.Client, ollama *ollama.Client, discord *dis
 				"sentry": "Sentry",
 			},
 			Cooldowns: map[string]int{
-				"sentry": 1800,
+				"sentry": 3600,
 			},
 			IdleRequirement: 300,
 			DateTimeAware:   true,

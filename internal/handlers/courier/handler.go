@@ -52,7 +52,7 @@ func NewCourierHandler(redis *redis.Client, ollama *ollama.Client, discord *disc
 			Cooldowns: map[string]int{
 				"researcher": 300, // 5 minutes protocol cooldown
 			},
-			IdleRequirement: 60, // Courier is more aggressive
+			IdleRequirement: 300,
 			DateTimeAware:   true,
 			EnforceMarkdown: true,
 			RequiredSections: []string{

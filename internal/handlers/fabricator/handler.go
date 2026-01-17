@@ -49,9 +49,9 @@ func NewFabricatorHandler(redis *redis.Client, ollama *ollama.Client, discord *d
 				"construction": "Construction",
 			},
 			Cooldowns: map[string]int{
-				"construction": 60,
+				"construction": 86400,
 			},
-			IdleRequirement: 0,
+			IdleRequirement: 300,
 		},
 		DiscordClient: discord,
 		ctx:           ctx,

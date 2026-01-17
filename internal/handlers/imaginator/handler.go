@@ -50,9 +50,9 @@ func NewImaginatorHandler(redis *redis.Client, ollama *ollama.Client, discord *d
 				"alert_review": "AlertReview",
 			},
 			Cooldowns: map[string]int{
-				"alert_review": 60, // Check frequently for new alerts
+				"alert_review": 3600,
 			},
-			IdleRequirement: 0, // Reacts to alerts, doesn't need system idle
+			IdleRequirement: 300,
 			DateTimeAware:   true,
 			EnforceMarkdown: true,
 			RequiredSections: []string{
