@@ -197,7 +197,7 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 	redisClient.Set(ctx, key, jsonBytes, DefaultTTL)
 
 	// Synchronize with Discord
-	if discordClient != nil {
+	if discordClient != nil && state != "Queued" {
 		// Activity Type 3 = "Watching"
 		discordClient.UpdateBotStatus(state, "online", 3)
 	}
@@ -304,9 +304,20 @@ func SyncDiscordStatus(ctx context.Context, redisClient *redis.Client, discordCl
 			var p map[string]interface{}
 			if err := json.Unmarshal([]byte(data), &p); err == nil {
 				updatedAt, _ := p["updated_at"].(float64)
-				if int64(updatedAt) > latestUpdateTime {
+				currentState, _ := p["state"].(string)
+
+				// Priority Logic:
+				// 1. If we have no state yet, take this one.
+				// 2. If current best is Queued and this one is NOT Queued, take this one (upgrade).
+				// 3. If both are Queued or both are NOT Queued, take the newer one.
+
+				isUpgrade := latestProcessState == "Queued" && currentState != "Queued"
+				isSameTier := (latestProcessState == "Queued") == (currentState == "Queued")
+				isNewer := int64(updatedAt) > latestUpdateTime
+
+				if latestProcessState == "" || isUpgrade || (isSameTier && isNewer) {
 					latestUpdateTime = int64(updatedAt)
-					latestProcessState, _ = p["state"].(string)
+					latestProcessState = currentState
 				}
 			}
 		}
