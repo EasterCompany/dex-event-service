@@ -343,9 +343,16 @@ func (h *CourierHandler) deliverToRecipient(ctx context.Context, recipient strin
 		return
 	}
 
-	body := res.Content
-	msg := fmt.Sprintf("📦 **Research Task Completed**\n\n**Task:** %s\n\n%s", task.NaturalInstruction, body)
-	if _, err := h.DiscordClient.PostMessage(recipient, msg); err != nil {
+	embed := &discord.Embed{
+		Title:       task.NaturalInstruction,
+		Description: res.Content,
+		Color:       0x00b0f4, // Research Teal
+		Footer: &discord.EmbedFooter{
+			Text: fmt.Sprintf("Courier Protocol • %s", time.Now().Format("2006-01-02 15:04")),
+		},
+	}
+
+	if _, err := h.DiscordClient.PostMessageComplex(recipient, "", embed); err != nil {
 		log.Printf("[%s] Failed to send research results to %s: %v", HandlerName, recipient, err)
 	}
 }

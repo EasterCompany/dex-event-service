@@ -159,6 +159,104 @@ func (c *Client) PostMessage(targetID, content string) (string, error) {
 	return lastMessageID, nil
 }
 
+func (c *Client) PostMessageComplex(targetID, content string, embed *Embed) (string, error) {
+	// Discord message limit is 2000 characters.
+	const maxLen = 1900
+
+	if len(content) <= maxLen {
+		return c.postSingleMessageComplex(targetID, content, embed)
+	}
+
+	// Split content into chunks
+	var lastMessageID string
+	var chunks []string
+
+	lines := strings.Split(content, "\n")
+	var currentChunk strings.Builder
+
+	for _, line := range lines {
+		if currentChunk.Len()+len(line)+1 > maxLen {
+			chunks = append(chunks, currentChunk.String())
+			currentChunk.Reset()
+		}
+		if currentChunk.Len() > 0 {
+			currentChunk.WriteString("\n")
+		}
+		currentChunk.WriteString(line)
+	}
+	if currentChunk.Len() > 0 {
+		chunks = append(chunks, currentChunk.String())
+	}
+
+	if len(chunks) == 0 {
+		runes := []rune(content)
+		for i := 0; i < len(runes); i += maxLen {
+			end := i + maxLen
+			if end > len(runes) {
+				end = len(runes)
+			}
+			chunks = append(chunks, string(runes[i:end]))
+		}
+	}
+
+	// Send chunks
+	for i, chunk := range chunks {
+		var currentEmbed *Embed
+		// Attach embed ONLY to the last chunk
+		if i == len(chunks)-1 {
+			currentEmbed = embed
+		}
+
+		id, err := c.postSingleMessageComplex(targetID, chunk, currentEmbed)
+		if err != nil {
+			return "", fmt.Errorf("failed to send chunk %d: %w", i+1, err)
+		}
+		lastMessageID = id
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	return lastMessageID, nil
+}
+
+func (c *Client) postSingleMessageComplex(targetID, content string, embed *Embed) (string, error) {
+	type PostRequest struct {
+		ChannelID string `json:"channel_id"`
+		UserID    string `json:"user_id"`
+		Content   string `json:"content"`
+		Embed     *Embed `json:"embed"`
+	}
+
+	reqBody := PostRequest{
+		Content: content,
+		Embed:   embed,
+	}
+
+	if strings.HasPrefix(targetID, "channel:") {
+		reqBody.ChannelID = strings.TrimPrefix(targetID, "channel:")
+	} else {
+		reqBody.UserID = targetID
+	}
+
+	jsonData, _ := json.Marshal(reqBody)
+
+	resp, err := c.httpClient.Post(c.BaseURL+"/post", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("post message complex failed: status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	return result["message_id"], nil
+}
+
 func (c *Client) postSingleMessage(targetID, content string) (string, error) {
 	reqBody := map[string]string{
 		"content": content,
