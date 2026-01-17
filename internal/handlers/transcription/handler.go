@@ -70,7 +70,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	// 1. Check Engagement
 	prompt := fmt.Sprintf("Analyze if Dexter should respond to this message (from voice transcription). Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", contextHistory, transcription)
-	engagementRaw, _, err := deps.Ollama.Generate("dex-engagement-model", prompt, nil)
+	engagementRaw, _, err := deps.Ollama.Generate("dex-fast-engagement-model", prompt, nil)
 	if err != nil {
 		log.Printf("Engagement check failed: %v", err)
 		return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
@@ -78,7 +78,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	shouldEngage := strings.Contains(engagementRaw, "<ENGAGE/>")
 
-	engagementReason := "Evaluated by dex-engagement-model"
+	engagementReason := "Evaluated by dex-fast-engagement-model"
 
 	userCount, err := deps.Discord.GetVoiceChannelUserCount(channelID)
 	if err != nil {
@@ -112,7 +112,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		"user_id":          userID,
 		"message_content":  transcription,
 		"timestamp":        time.Now().Unix(),
-		"engagement_model": "dex-engagement-model",
+		"engagement_model": "dex-fast-engagement-model",
 		"context_history":  contextHistory,
 		"engagement_raw":   engagementRaw,
 		"user_count":       userCount,
