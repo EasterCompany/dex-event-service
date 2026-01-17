@@ -347,19 +347,26 @@ func HandlePauseSystem(redisClient *redis.Client) http.HandlerFunc {
 		ctx := context.Background()
 		now := time.Now().Unix()
 
-		// 1. Capture current state to restore it later
-		prevState, _ := redisClient.Get(ctx, "system:state").Result()
-		if prevState == "" || prevState == "paused" {
-			prevState = "idle"
+		// 1. Verify current state is idle
+		state, _ := redisClient.Get(ctx, "system:state").Result()
+		if state != "idle" {
+			http.Error(w, "System can only be paused when in 'idle' state", http.StatusForbidden)
+			return
 		}
 
-		// 2. Set Pause Metadata
-		redisClient.Set(ctx, "system:pre_pause_state", prevState, 0)
-		redisClient.Set(ctx, "system:pause_start_ts", now, 0)
+		// 2. Add current idle duration to total metrics
+		lastTransition, _ := redisClient.Get(ctx, "system:last_transition_ts").Int64()
+		if lastTransition > 0 {
+			idleDuration := now - lastTransition
+			if idleDuration > 0 {
+				redisClient.IncrBy(ctx, "system:metrics:total_idle_seconds", idleDuration)
+			}
+		}
 
-		// 3. Set System Paused
+		// 3. Set System to Paused and Reset Timer (to track pause duration)
 		redisClient.Set(ctx, "system:is_paused", "true", 0)
 		redisClient.Set(ctx, "system:state", "paused", 0)
+		redisClient.Set(ctx, "system:last_transition_ts", now, 0)
 
 		// 4. Set Cognitive Lock to PAUSED (forcibly)
 		redisClient.Set(ctx, "system:cognitive_lock", "PAUSED", 0)
@@ -375,32 +382,14 @@ func HandleResumeSystem(redisClient *redis.Client) http.HandlerFunc {
 		ctx := context.Background()
 		now := time.Now().Unix()
 
-		// 1. Calculate Pause Duration
-		pauseStart, _ := redisClient.Get(ctx, "system:pause_start_ts").Int64()
-		if pauseStart > 0 {
-			pauseDuration := now - pauseStart
+		// 1. Reset State to Idle and Reset Timer (start new idle period)
+		redisClient.Set(ctx, "system:state", "idle", 0)
+		redisClient.Set(ctx, "system:last_transition_ts", now, 0)
 
-			// 2. Shift the last transition timestamp forward by the pause duration
-			// This "freezes" the timer in the eyes of the duration calculator.
-			lastTransition, _ := redisClient.Get(ctx, "system:last_transition_ts").Int64()
-			if lastTransition > 0 {
-				redisClient.Set(ctx, "system:last_transition_ts", lastTransition+pauseDuration, 0)
-			}
-		}
-
-		// 3. Restore previous state
-		prevState, _ := redisClient.Get(ctx, "system:pre_pause_state").Result()
-		if prevState == "" {
-			prevState = "idle"
-		}
-		redisClient.Set(ctx, "system:state", prevState, 0)
-
-		// 4. Cleanup
+		// 2. Cleanup Pause Flags
 		redisClient.Del(ctx, "system:is_paused")
-		redisClient.Del(ctx, "system:pause_start_ts")
-		redisClient.Del(ctx, "system:pre_pause_state")
 
-		// 5. Del Cognitive Lock if it is "PAUSED"
+		// 3. Del Cognitive Lock if it is "PAUSED"
 		val, _ := redisClient.Get(ctx, "system:cognitive_lock").Result()
 		if val == "PAUSED" {
 			redisClient.Del(ctx, "system:cognitive_lock")
