@@ -66,7 +66,6 @@ func NewAnalyzerAgent(redis *redis.Client, ollama *ollama.Client, discord *disco
 
 func (h *AnalyzerAgent) Init(ctx context.Context) error {
 	h.stopChan = make(chan struct{})
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Standby")
 	go h.runWorker()
 	log.Printf("[%s] Background worker started.", AnalyzerHandlerName)
 	return nil
@@ -116,7 +115,7 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 
 	log.Printf("[%s] Starting Synthesis Protocol...", h.Config.Name)
 
-	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 
 	// 1. Identify candidates (Users active in last 24h, not synthesized in 12h)
@@ -144,7 +143,7 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 
 	// Enforce global sequential execution for the ENTIRE batch
 	// This prevents Guardian or other agents from interleaving between user updates
-	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Synthesis Batch")

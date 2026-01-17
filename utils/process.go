@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/internal/discord"
@@ -32,10 +33,12 @@ func IsSystemPaused(ctx context.Context, redisClient *redis.Client) bool {
 
 // AcquireCognitiveLock attempts to take the global cognitive lock.
 // If the lock is held, it will wait (poll) until it becomes available.
-func AcquireCognitiveLock(ctx context.Context, redisClient *redis.Client, agentName string) {
+func AcquireCognitiveLock(ctx context.Context, redisClient *redis.Client, agentName string, processID string, discordClient *discord.Client) {
 	if redisClient == nil {
 		return
 	}
+
+	isQueued := false
 
 	for {
 		select {
@@ -56,7 +59,16 @@ func AcquireCognitiveLock(ctx context.Context, redisClient *redis.Client, agentN
 				return
 			}
 
-			// Lock is held, wait and retry
+			// Lock is held, report as queued if not already
+			if !isQueued {
+				log.Printf("[%s] Cognitive Lock busy, waiting in queue...", agentName)
+				if processID != "" {
+					ReportProcess(ctx, redisClient, discordClient, processID, "Queued")
+				}
+				isQueued = true
+			}
+
+			// wait and retry
 			time.Sleep(5 * time.Second)
 		}
 	}
@@ -115,7 +127,25 @@ func TransitionToIdle(ctx context.Context, redisClient *redis.Client) {
 
 // ReportProcess updates a process's state in Redis and synchronizes the Discord status.
 func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient *discord.Client, processID string, state string) {
+	// Single Serving AI Rule: Check if we should be queued
+	holder, _ := redisClient.Get(ctx, CognitiveLockKey).Result()
+
+	isLockHolder := holder == processID || strings.Contains(processID, holder)
+
 	key := fmt.Sprintf("process:info:%s", processID)
+	queueKey := fmt.Sprintf("process:queued:%s", processID)
+
+	// If someone else holds the lock, we go to queue
+	if holder != "" && !isLockHolder {
+		log.Printf("[%s] System busy (Lock Holder: %s), moving process to queue.", processID, holder)
+		state = "Queued"
+		key = queueKey
+		// Ensure it's removed from active if it was there
+		redisClient.Del(ctx, fmt.Sprintf("process:info:%s", processID))
+	} else {
+		// We are allowed to be active, ensure it's removed from queue
+		redisClient.Del(ctx, queueKey)
+	}
 
 	// 1. Check if process already exists
 	exists, _ := redisClient.Exists(ctx, key).Result()

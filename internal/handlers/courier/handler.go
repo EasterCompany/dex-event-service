@@ -68,7 +68,6 @@ func NewCourierHandler(redis *redis.Client, ollama *ollama.Client, discord *disc
 
 func (h *CourierHandler) Init(ctx context.Context) error {
 	h.stopChan = make(chan struct{})
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Standby")
 	go h.runWorker()
 	log.Printf("[%s] Background worker started.", HandlerName)
 	return nil
@@ -198,7 +197,7 @@ func (h *CourierHandler) PerformResearch(ctx context.Context) ([]agent.AnalysisR
 	log.Printf("[%s] Starting Courier Research (%d tasks due)", HandlerName, len(dueTasks))
 
 	// Enforce global sequential execution
-	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 
 	h.RedisClient.Set(ctx, "courier:active_tier", "researcher", utils.DefaultTTL)

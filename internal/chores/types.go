@@ -47,4 +47,5 @@ type UpdateChoreRequest struct {
 	NaturalInstruction *string      `json:"natural_instruction,omitempty"`
 	Recipients         []string     `json:"recipients,omitempty"`
 	Memory             []string     `json:"memory,omitempty"` // Replaces memory if provided
+	LastRun            *int64       `json:"last_run,omitempty"`
 }

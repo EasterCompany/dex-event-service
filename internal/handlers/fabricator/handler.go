@@ -119,13 +119,14 @@ func (h *FabricatorHandler) checkAndFabricate() {
 	}
 
 	// 3. Perform Fabrication
-	h.PerformFabrication(ctx, *blueprint)
+	_, _, _ = h.PerformFabrication(ctx, *blueprint)
 }
 
-func (h *FabricatorHandler) PerformFabrication(ctx context.Context, blueprint types.Event) {
-	log.Printf("[%s] Starting Fabrication on Blueprint: %s", HandlerName, blueprint.ID)
+func (h *FabricatorHandler) PerformFabrication(ctx context.Context, blueprint types.Event) ([]agent.AnalysisResult, string, error) {
+	log.Printf("[%s] Starting Fabricator Construction", HandlerName)
 
-	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+	// Enforce global sequential execution
+	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Construction Protocol")
@@ -142,7 +143,7 @@ func (h *FabricatorHandler) PerformFabrication(ctx context.Context, blueprint ty
 	if err != nil {
 		log.Printf("[%s] Error: 'gemini' binary not found in PATH.", HandlerName)
 		utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
-		return
+		return nil, "", err
 	}
 
 	// Use --yolo for autonomous execution
@@ -158,13 +159,15 @@ func (h *FabricatorHandler) PerformFabrication(ctx context.Context, blueprint ty
 		utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
 		// Mark as processed to prevent infinite loop on same blueprint
 		h.markBlueprintAsProcessed(ctx, blueprint.ID)
-		return
+		return nil, "", err
 	}
 
 	log.Printf("[%s] Fabrication complete.\nOutput: %s", HandlerName, output)
 	utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
 	h.markBlueprintAsProcessed(ctx, blueprint.ID)
 	h.RedisClient.Set(ctx, "fabricator:last_run:construction", time.Now().Unix(), 0)
+
+	return nil, "", nil
 }
 
 func (h *FabricatorHandler) fetchApprovedBlueprint(ctx context.Context) (*types.Event, error) {

@@ -121,6 +121,9 @@ func (s *Store) Update(ctx context.Context, id string, req UpdateChoreRequest) (
 	if req.Memory != nil {
 		chore.Memory = req.Memory
 	}
+	if req.LastRun != nil {
+		chore.LastRun = *req.LastRun
+	}
 
 	chore.UpdatedAt = time.Now().Unix()
 

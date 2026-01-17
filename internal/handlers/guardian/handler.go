@@ -73,7 +73,6 @@ func NewGuardianHandler(redis *redis.Client, ollama *ollama.Client, discord *dis
 
 func (h *GuardianHandler) Init(ctx context.Context) error {
 	h.stopChan = make(chan struct{})
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Standby")
 	go h.runWorker()
 	log.Printf("[%s] Background worker started.", HandlerName)
 	return nil
@@ -160,7 +159,7 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 	log.Printf("[%s] Starting Guardian Analysis (Tier: %d)", HandlerName, tier)
 
 	// Enforce global sequential execution
-	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 
 	defer h.RedisClient.Del(ctx, "guardian:active_tier")
