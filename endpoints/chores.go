@@ -60,16 +60,7 @@ func ChoresHandler(redisClient *redis.Client) http.HandlerFunc {
 
 func handleListChores(w http.ResponseWriter, r *http.Request, store *chores.Store) {
 	ctx := r.Context()
-	ownerID := r.URL.Query().Get("owner_id")
-
-	var list []*chores.Chore
-	var err error
-
-	if ownerID != "" {
-		list, err = store.GetByOwner(ctx, ownerID)
-	} else {
-		list, err = store.GetAll(ctx)
-	}
+	list, err := store.GetAll(ctx)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -87,8 +78,8 @@ func handleCreateChore(w http.ResponseWriter, r *http.Request, store *chores.Sto
 		return
 	}
 
-	if req.OwnerID == "" || req.NaturalInstruction == "" {
-		http.Error(w, "owner_id and natural_instruction are required", http.StatusBadRequest)
+	if len(req.Recipients) == 0 || req.NaturalInstruction == "" {
+		http.Error(w, "recipients and natural_instruction are required", http.StatusBadRequest)
 		return
 	}
 

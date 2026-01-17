@@ -259,12 +259,7 @@ func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([
 
 func (h *CourierHandler) deliverResults(ctx context.Context, task *chores.Chore, res agent.AnalysisResult) {
 	// Deliver to all recipients
-	recipients := task.Recipients
-	if len(recipients) == 0 && task.OwnerID != "" {
-		recipients = []string{task.OwnerID}
-	}
-
-	for _, recipient := range recipients {
+	for _, recipient := range task.Recipients {
 		h.deliverToRecipient(ctx, recipient, task, res)
 	}
 }

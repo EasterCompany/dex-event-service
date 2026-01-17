@@ -18,7 +18,6 @@ type ChoreExecutionPlan struct {
 // Chore represents a recurring task for the Courier Protocol
 type Chore struct {
 	ID                 string             `json:"id"`
-	OwnerID            string             `json:"owner_id"` // Legacy field for backwards compatibility or primary owner
 	Recipients         []string           `json:"recipients"`
 	Status             ChoreStatus        `json:"status"`
 	Schedule           string             `json:"schedule"` // e.g., "every_6h", "daily"
@@ -32,7 +31,6 @@ type Chore struct {
 
 // CreateChoreRequest is the payload for creating a new chore
 type CreateChoreRequest struct {
-	OwnerID            string   `json:"owner_id"` // Legacy / Primary
 	Recipients         []string `json:"recipients"`
 	NaturalInstruction string   `json:"natural_instruction"`
 	Schedule           string   `json:"schedule"` // Defaults to "every_6h" if empty

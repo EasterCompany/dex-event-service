@@ -11,9 +11,8 @@ import (
 )
 
 const (
-	KeyPrefix        = "chores:data:"
-	IndexAll         = "chores:index:all"
-	IndexOwnerPrefix = "chores:index:owner:"
+	KeyPrefix = "chores:data:"
+	IndexAll  = "chores:index:all"
 )
 
 type Store struct {
@@ -33,16 +32,9 @@ func (s *Store) Create(ctx context.Context, req CreateChoreRequest) (*Chore, err
 		req.Schedule = "every_6h"
 	}
 
-	// Ensure recipients includes owner if empty
-	recipients := req.Recipients
-	if len(recipients) == 0 && req.OwnerID != "" {
-		recipients = []string{req.OwnerID}
-	}
-
 	chore := &Chore{
 		ID:                 id,
-		OwnerID:            req.OwnerID,
-		Recipients:         recipients,
+		Recipients:         req.Recipients,
 		Status:             ChoreStatusActive,
 		Schedule:           req.Schedule,
 		LastRun:            0,
@@ -65,9 +57,6 @@ func (s *Store) Create(ctx context.Context, req CreateChoreRequest) (*Chore, err
 	pipe := s.client.Pipeline()
 	pipe.Set(ctx, KeyPrefix+id, data, 0)
 	pipe.SAdd(ctx, IndexAll, id)
-	if req.OwnerID != "" {
-		pipe.SAdd(ctx, IndexOwnerPrefix+req.OwnerID, id)
-	}
 
 	if _, err := pipe.Exec(ctx); err != nil {
 		return nil, err
@@ -96,23 +85,6 @@ func (s *Store) Get(ctx context.Context, id string) (*Chore, error) {
 // GetAll retrieves all chores
 func (s *Store) GetAll(ctx context.Context) ([]*Chore, error) {
 	ids, err := s.client.SMembers(ctx, IndexAll).Result()
-	if err != nil {
-		return nil, err
-	}
-
-	var chores []*Chore
-	for _, id := range ids {
-		c, err := s.Get(ctx, id)
-		if err == nil {
-			chores = append(chores, c)
-		}
-	}
-	return chores, nil
-}
-
-// GetByOwner retrieves all chores for a specific owner
-func (s *Store) GetByOwner(ctx context.Context, ownerID string) ([]*Chore, error) {
-	ids, err := s.client.SMembers(ctx, IndexOwnerPrefix+ownerID).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -186,18 +158,10 @@ func (s *Store) MarkRun(ctx context.Context, id string, newMemory []string) erro
 
 // Delete removes a chore
 func (s *Store) Delete(ctx context.Context, id string) error {
-	chore, err := s.Get(ctx, id)
-	if err != nil {
-		return err
-	}
-
 	pipe := s.client.Pipeline()
 	pipe.Del(ctx, KeyPrefix+id)
 	pipe.SRem(ctx, IndexAll, id)
-	if chore.OwnerID != "" {
-		pipe.SRem(ctx, IndexOwnerPrefix+chore.OwnerID, id)
-	}
 
-	_, err = pipe.Exec(ctx)
+	_, err := pipe.Exec(ctx)
 	return err
 }
