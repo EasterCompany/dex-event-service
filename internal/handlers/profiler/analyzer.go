@@ -113,6 +113,17 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 		return
 	}
 
+	// Strict Protocol Cooldown Check
+	lastRun, _ := h.RedisClient.Get(ctx, "analyzer:last_run:synthesis").Int64()
+	if time.Now().Unix()-lastRun < int64(h.Config.Cooldowns["synthesis"]) {
+		return
+	}
+
+	// Busy Check (Prevent Queueing)
+	if h.IsActuallyBusy(ctx, h.Config.ProcessID) {
+		return
+	}
+
 	log.Printf("[%s] Starting Synthesis Protocol...", h.Config.Name)
 
 	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
