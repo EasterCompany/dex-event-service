@@ -44,7 +44,7 @@ func NewCourierHandler(redis *redis.Client, ollama *ollama.Client, discord *disc
 			Name:      "Courier",
 			ProcessID: "system-courier",
 			Models: map[string]string{
-				"researcher": "dex-scraper-model",
+				"researcher": "dex-researcher-model",
 			},
 			ProtocolAliases: map[string]string{
 				"researcher": "Researcher",
@@ -56,7 +56,7 @@ func NewCourierHandler(redis *redis.Client, ollama *ollama.Client, discord *disc
 			DateTimeAware:   true,
 			EnforceMarkdown: true,
 			RequiredSections: []string{
-				"Summary", "Content",
+				"Summary", "Content", "Status", "Sources",
 			},
 		},
 		DiscordClient: discord,
@@ -230,7 +230,7 @@ func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([
 
 	// 1. Generate Optimized Search Query
 	queryModel := h.Config.Models["researcher"]
-	queryPrompt := fmt.Sprintf("Generate a highly specific, bot-friendly search query for the following task: %s. Output ONLY the query string, no quotes or explanations.", task.NaturalInstruction)
+	queryPrompt := fmt.Sprintf("You are an intelligence officer. Generate a highly specific, bot-friendly search query for the following research task: %s. Output ONLY the query string, no quotes or explanations.", task.NaturalInstruction)
 
 	// Quick one-off chat for query optimization
 	queryResp, err := h.OllamaClient.Chat(ctx, queryModel, []ollama.Message{{Role: "user", Content: queryPrompt}})
@@ -277,15 +277,21 @@ func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([
 	}
 
 	// 3. Final Synthesis Cognitive Loop
+
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Synthesizing Report")
 
 	sourcesBlock := "\n\n### SOURCES\n"
+
 	for _, link := range sourceLinks {
+
 		sourcesBlock += fmt.Sprintf("- %s\n", link)
+
 	}
 
-	systemPrompt := "You are the Courier Agent's Researcher Protocol. Your goal is to analyze the provided web data and sources to create a comprehensive, high-fidelity report. Always include a 'Sources' section at the end with the provided links."
+	systemPrompt := "You are the Courier Agent's Researcher Protocol. Your goal is to act as a high-fidelity intelligence analyst. Analyze the provided web data and sources to create a comprehensive, factual, and surgically accurate report. Always include a 'Sources' section at the end with the provided links."
+
 	inputContext := fmt.Sprintf("## USER INSTRUCTION\n%s\n\n## RESEARCH DATA\n%s%s", task.NaturalInstruction, webData.String(), sourcesBlock)
+
 	sessionID := fmt.Sprintf("research-%s-%d", task.ID, time.Now().Unix())
 
 	return h.RunCognitiveLoop(ctx, h, "researcher", h.Config.Models["researcher"], sessionID, systemPrompt, inputContext, 1)
