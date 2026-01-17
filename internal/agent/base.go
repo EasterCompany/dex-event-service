@@ -303,7 +303,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 			allCorrections = append(allCorrections, currentAttemptCorrections...)
 			b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":failures")
 
-			feedback := b.BuildFeedbackPrompt(currentAttemptCorrections)
+			feedback := b.BuildFeedbackPrompt(currentAttemptCorrections, agentConfig)
 			feedbackMsg := ollama.Message{
 				Role:    "user",
 				Content: feedback,
@@ -325,7 +325,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 }
 
 // BuildFeedbackPrompt constructs a high-fidelity rejection report for the model.
-func (b *BaseAgent) BuildFeedbackPrompt(corrections []Correction) string {
+func (b *BaseAgent) BuildFeedbackPrompt(corrections []Correction, config AgentConfig) string {
 	var sb strings.Builder
 	sb.WriteString("# REPORT REJECTED\n")
 	sb.WriteString("**Reason:** Your previous response contained structural or logical errors. You MUST fix these issues in your next attempt.\n\n")
@@ -353,6 +353,32 @@ func (b *BaseAgent) BuildFeedbackPrompt(corrections []Correction) string {
 			}
 			sb.WriteString(fmt.Sprintf("> **Guidance:** %s\n\n", c.Guidance))
 		}
+	}
+
+	// Dynamic Template Generation
+	if len(config.RequiredSections) > 0 {
+		sb.WriteString("### REFERENCE: EXPECTED FORMAT STRUCTURE\n")
+		sb.WriteString("Ensure your response strictly follows this markdown skeleton:\n\n")
+		sb.WriteString("```markdown\n")
+		sb.WriteString("# [Report Title]\n\n")
+
+		// 1. Metadata Fields
+		for _, section := range config.RequiredSections {
+			lower := strings.ToLower(section)
+			if lower == "priority" || lower == "category" || lower == "related" || lower == "related services" {
+				sb.WriteString(fmt.Sprintf("**%s**: [Value]\n", section))
+			}
+		}
+		sb.WriteString("\n")
+
+		// 2. Content Sections
+		for _, section := range config.RequiredSections {
+			lower := strings.ToLower(section)
+			if lower != "priority" && lower != "category" && lower != "related" && lower != "related services" {
+				sb.WriteString(fmt.Sprintf("## %s\n(Your content here...)\n\n", section))
+			}
+		}
+		sb.WriteString("```\n\n")
 	}
 
 	sb.WriteString("Please resubmit your complete, corrected report now.")
