@@ -17,7 +17,7 @@ const (
 	// CognitiveLockKey is the global key used to ensure only one heavy agent protocol runs at a time.
 	CognitiveLockKey = "system:cognitive_lock"
 	// CognitiveLockTTL is the maximum time an agent can hold the lock (safety timeout).
-	CognitiveLockTTL = 10 * time.Minute
+	CognitiveLockTTL = 60 * time.Minute
 	// SystemPausedKey is the key used to indicate the system is paused.
 	SystemPausedKey = "system:is_paused"
 )
