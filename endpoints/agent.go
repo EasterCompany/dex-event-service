@@ -345,10 +345,23 @@ func RunFabricatorHandler(redisClient *redis.Client, triggerFunc func() error) h
 func HandlePauseSystem(redisClient *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
-		// 1. Set System Paused
+		now := time.Now().Unix()
+
+		// 1. Capture current state to restore it later
+		prevState, _ := redisClient.Get(ctx, "system:state").Result()
+		if prevState == "" || prevState == "paused" {
+			prevState = "idle"
+		}
+
+		// 2. Set Pause Metadata
+		redisClient.Set(ctx, "system:pre_pause_state", prevState, 0)
+		redisClient.Set(ctx, "system:pause_start_ts", now, 0)
+
+		// 3. Set System Paused
 		redisClient.Set(ctx, "system:is_paused", "true", 0)
 		redisClient.Set(ctx, "system:state", "paused", 0)
-		// 2. Set Cognitive Lock to PAUSED (forcibly)
+
+		// 4. Set Cognitive Lock to PAUSED (forcibly)
 		redisClient.Set(ctx, "system:cognitive_lock", "PAUSED", 0)
 
 		w.WriteHeader(http.StatusOK)
@@ -360,10 +373,34 @@ func HandlePauseSystem(redisClient *redis.Client) http.HandlerFunc {
 func HandleResumeSystem(redisClient *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
-		// 1. Del System Paused
+		now := time.Now().Unix()
+
+		// 1. Calculate Pause Duration
+		pauseStart, _ := redisClient.Get(ctx, "system:pause_start_ts").Int64()
+		if pauseStart > 0 {
+			pauseDuration := now - pauseStart
+
+			// 2. Shift the last transition timestamp forward by the pause duration
+			// This "freezes" the timer in the eyes of the duration calculator.
+			lastTransition, _ := redisClient.Get(ctx, "system:last_transition_ts").Int64()
+			if lastTransition > 0 {
+				redisClient.Set(ctx, "system:last_transition_ts", lastTransition+pauseDuration, 0)
+			}
+		}
+
+		// 3. Restore previous state
+		prevState, _ := redisClient.Get(ctx, "system:pre_pause_state").Result()
+		if prevState == "" {
+			prevState = "idle"
+		}
+		redisClient.Set(ctx, "system:state", prevState, 0)
+
+		// 4. Cleanup
 		redisClient.Del(ctx, "system:is_paused")
-		redisClient.Set(ctx, "system:state", "idle", 0)
-		// 2. Del Cognitive Lock if it is "PAUSED"
+		redisClient.Del(ctx, "system:pause_start_ts")
+		redisClient.Del(ctx, "system:pre_pause_state")
+
+		// 5. Del Cognitive Lock if it is "PAUSED"
 		val, _ := redisClient.Get(ctx, "system:cognitive_lock").Result()
 		if val == "PAUSED" {
 			redisClient.Del(ctx, "system:cognitive_lock")
