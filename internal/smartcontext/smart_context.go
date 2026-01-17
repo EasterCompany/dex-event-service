@@ -71,6 +71,11 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 		if err := json.Unmarshal(evt.Event, &eventData); err == nil {
 			eventType, _ := eventData["type"].(string)
 
+			// Filter out engagement decisions as they are internal logs and shouldn't be in context
+			if eventType == "engagement.decision" {
+				continue
+			}
+
 			role := "system"
 			content, _ := eventData["content"].(string)
 			name := ""
@@ -86,8 +91,9 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 				content = cleanEventText(eventType, eventData, evt.Timestamp)
 			}
 
-			// If it's a message, we prefix with name for LLM clarity
-			if role == "user" || role == "assistant" {
+			// Prefix user messages with their name for clarity,
+			// but avoid prefixing assistant messages so Dexter doesn't mimic it.
+			if role == "user" {
 				content = fmt.Sprintf("[%s] %s", name, content)
 			}
 
@@ -103,6 +109,10 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 
 // cleanEventText provides a human-friendly version of the event log
 func cleanEventText(eventType string, data map[string]interface{}, ts int64) string {
+	if eventType == "engagement.decision" {
+		return ""
+	}
+
 	t := ""
 	if ts > 0 {
 		t = time.Unix(ts, 0).UTC().Format("15:04:05") + " | "
@@ -113,9 +123,9 @@ func cleanEventText(eventType string, data map[string]interface{}, ts int64) str
 		user, _ := data["user_name"].(string)
 		content, _ := data["content"].(string)
 		return fmt.Sprintf("%s%s: %s", t, user, content)
-	case string(types.EventTypeMessagingBotSentMessage):
+	case string(types.EventTypeMessagingBotSentMessage), "messaging.bot.voice_response":
 		content, _ := data["content"].(string)
-		return fmt.Sprintf("%sDexter: %s", t, content)
+		return fmt.Sprintf("%s%s", t, content)
 	default:
 		// Fallback to standard but cleaner
 		line := templates.FormatEventAsText(eventType, data, "", ts, 0, "UTC", "en")
@@ -201,6 +211,11 @@ func FormatEventsBlock(events []types.Event) string {
 		// We explicitly ignore errors here as we want to skip malformed events
 		if err := json.Unmarshal(evt.Event, &eventData); err == nil {
 			eventType, _ := eventData["type"].(string)
+
+			if eventType == "engagement.decision" {
+				continue
+			}
+
 			// Use templates to format
 			line := templates.FormatEventAsText(eventType, eventData, evt.Service, evt.Timestamp, 0, "UTC", "en")
 			sb.WriteString(line + "\n")
