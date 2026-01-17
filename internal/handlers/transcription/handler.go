@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/internal/handlers"
+	"github.com/EasterCompany/dex-event-service/internal/handlers/profiler"
+	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/smartcontext"
 	"github.com/EasterCompany/dex-event-service/types"
 )
 
@@ -57,13 +60,15 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	defer deps.Discord.UpdateBotStatus("Listening for events...", "online", 2)
 
 	// Fetch context
-	contextHistory, err := deps.Discord.FetchContext(channelID, 25)
+	summaryModel := "dex-summary-model"
+	contextHistory, err := smartcontext.Get(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
 	if err != nil {
-		log.Printf("Warning: Failed to fetch context: %v", err)
+		log.Printf("Warning: Failed to fetch context from smartcontext: %v, falling back to legacy", err)
+		contextHistory, _ = deps.Discord.FetchContext(channelID, 25)
 	}
 
 	// 1. Check Engagement
-	prompt := fmt.Sprintf("Analyze if Dexter should respond to this voice transcription. Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nCurrent Transcription:\n%s", contextHistory, transcription)
+	prompt := fmt.Sprintf("Analyze if Dexter should respond to this message (from voice transcription). Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", contextHistory, transcription)
 	engagementRaw, _, err := deps.Ollama.Generate("dex-engagement-model", prompt, nil)
 	if err != nil {
 		log.Printf("Engagement check failed: %v", err)
@@ -79,11 +84,12 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		log.Printf("Failed to get voice channel user count: %v", err)
 	} else {
 		log.Printf("Voice channel user count: %d", userCount)
-		if userCount <= 2 {
+		// Increased threshold from 2 to 3 to engage more often in small groups
+		if userCount <= 3 {
 			if !shouldEngage {
-				log.Printf("Forcing engagement because user is alone with Dexter (count: %d)", userCount)
+				log.Printf("Forcing engagement because user count is low (count: %d)", userCount)
 				shouldEngage = true
-				engagementReason = fmt.Sprintf("Forced engagement: User count is %d (Alone with Dexter)", userCount)
+				engagementReason = fmt.Sprintf("Forced engagement: User count is %d (Low population)", userCount)
 			}
 		}
 	}
@@ -119,14 +125,60 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	if shouldEngage {
 		deps.Discord.UpdateBotStatus("Thinking of response...", "online", 0)
 
-		prompt := fmt.Sprintf("Context:\n%s\n\nUser (%s) Said: %s", contextHistory, userName, transcription)
+		// Fetch messages for Chat API
+		messages, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
+		if err != nil {
+			log.Printf("Warning: Failed to fetch messages context: %v", err)
+		}
+
+		// Load Profile for Personalization
+		userProfile, _ := profiler.LoadProfile(ctx, deps.Redis, userID)
+		dossierPrompt := ""
+		if userProfile != nil {
+			dossierPrompt = fmt.Sprintf("\n\n### USER DOSSIER (Clinical Analysis):\n- Technical Level: %.1f/10\n- Comm Style: %s\n- Current Vibe: %s\n- Key Facts: ",
+				userProfile.CognitiveModel.TechnicalLevel,
+				userProfile.CognitiveModel.CommunicationStyle,
+				userProfile.CognitiveModel.Vibe)
+
+			facts := []string{}
+			for _, attr := range userProfile.Attributes {
+				facts = append(facts, fmt.Sprintf("%s: %s", attr.Key, attr.Value))
+			}
+			if len(facts) > 0 {
+				dossierPrompt += strings.Join(facts, ", ")
+			} else {
+				dossierPrompt += "None observed yet."
+			}
+			dossierPrompt += "\nUse this dossier to personalize your tone, technical depth, and overall engagement strategy for this specific user."
+		}
+
+		systemPrompt := "You are Dexter, an advanced AI assistant. You are currently responding to a voice transcription in a Discord voice channel. Keep your responses concise and natural for voice synthesis."
+		if dossierPrompt != "" {
+			systemPrompt += dossierPrompt
+		}
+
+		finalMessages := []ollama.Message{
+			{Role: "system", Content: systemPrompt},
+		}
+		finalMessages = append(finalMessages, messages...)
+		// Add the current transcription if it's not already in messages (it likely isn't as the event was just created)
+		finalMessages = append(finalMessages, ollama.Message{Role: "user", Content: transcription, Name: userName})
+
 		responseModel := "dex-transcription-model"
-		response, _, err := deps.Ollama.Generate(responseModel, prompt, nil)
+
+		fullResponse := ""
+		options := map[string]interface{}{
+			"repeat_penalty": 1.3,
+		}
+
+		// Use Chat instead of Generate for better multi-turn awareness
+		respMessage, err := deps.Ollama.ChatWithOptions(ctx, responseModel, finalMessages, options)
 
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
 		} else {
-			log.Printf("Generated response: %s", response)
+			fullResponse = respMessage.Content
+			log.Printf("Generated response: %s", fullResponse)
 
 			botResponseEventData := map[string]interface{}{
 				"type":           "messaging.bot.voice_response",
@@ -137,11 +189,11 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				"channel_name":   channelName,
 				"server_id":      serverID,
 				"server_name":    serverName,
-				"content":        response,
+				"content":        fullResponse,
 				"timestamp":      time.Now().Format(time.RFC3339),
 				"response_model": responseModel,
-				"response_raw":   response,
-				"raw_input":      prompt,
+				"response_raw":   fullResponse,
+				"raw_input":      fmt.Sprintf("%v", finalMessages),
 			}
 
 			if err := emitEvent(deps.EventServiceURL, botResponseEventData); err != nil {
@@ -150,7 +202,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 			deps.Discord.UpdateBotStatus("Generating speech...", "online", 0)
 
-			ttsPayload := map[string]string{"text": response, "language": "en"}
+			ttsPayload := map[string]string{"text": fullResponse, "language": "en"}
 			ttsJson, _ := json.Marshal(ttsPayload)
 
 			ttsResp, ttsErr := http.Post(deps.TTSServiceURL+"/generate", "application/json", bytes.NewBuffer(ttsJson))

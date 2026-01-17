@@ -81,10 +81,15 @@ type GenerationStats struct {
 }
 
 func (c *Client) Chat(ctx context.Context, model string, messages []Message) (Message, error) {
+	return c.ChatWithOptions(ctx, model, messages, nil)
+}
+
+func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []Message, options map[string]interface{}) (Message, error) {
 	reqBody := ChatRequest{
 		Model:    model,
 		Messages: messages,
 		Stream:   false,
+		Options:  options,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
