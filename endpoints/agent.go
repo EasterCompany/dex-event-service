@@ -171,6 +171,20 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 		Protocols:      fabricatorProtocols,
 	}
 
+	// --- Courier Agent ---
+	courierActive, _ := rdb.Get(ctx, "courier:active_tier").Result()
+	courierProtocols := make(map[string]ProtocolStatus)
+
+	// Researcher (5 min cooldown handled by calculateProtocolStatus)
+	courierProtocols["researcher"] = calculateProtocolStatus(
+		ctx, rdb, courierActive, "researcher", 300, "dex-scraper-model", "courier",
+	)
+
+	resp.Agents["courier"] = AgentState{
+		ActiveProtocol: courierActive,
+		Protocols:      courierProtocols,
+	}
+
 	// --- System State ---
 	lastTransition, _ := rdb.Get(ctx, "system:last_transition_ts").Int64()
 	state, _ := rdb.Get(ctx, "system:state").Result()
