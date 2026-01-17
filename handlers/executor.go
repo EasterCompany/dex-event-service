@@ -15,6 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	internalHandlers "github.com/EasterCompany/dex-event-service/internal/handlers"
+	"github.com/EasterCompany/dex-event-service/internal/handlers/courier"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/fabricator"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/greeting"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/guardian"
@@ -151,6 +152,14 @@ func initBackgroundHandlers() {
 					return nil
 				}
 
+				log.Printf("Background handler '%s' started.", handlerConfig.Name)
+			case courier.HandlerName:
+				courierHandler := courier.NewCourierHandler(dependencies.Redis, dependencies.Ollama, dependencies.Discord, dependencies.Web, dependencies.Options)
+				if err := courierHandler.Init(context.Background()); err != nil {
+					log.Printf("ERROR: Failed to initialize courier handler: %v", err)
+					continue
+				}
+				runningBackgroundHandlers[handlerConfig.Name] = courierHandler
 				log.Printf("Background handler '%s' started.", handlerConfig.Name)
 			default:
 				log.Printf("WARNING: Unknown background handler '%s'. Not started.", handlerConfig.Name)

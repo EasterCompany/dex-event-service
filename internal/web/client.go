@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -88,4 +89,63 @@ func (c *Client) FetchWebView(linkURL string) (*WebViewResponse, error) {
 	}
 
 	return &webViewResp, nil
+}
+
+// PerformScrape calls the /scrape endpoint of dex-web-service to get high-fidelity markdown content.
+func (c *Client) PerformScrape(ctx context.Context, linkURL string) (*MetadataResponse, error) {
+	reqURL := fmt.Sprintf("%s/scrape?url=%s", c.BaseURL, url.QueryEscape(linkURL))
+
+	req, _ := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call scrape service: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("scrape service returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var metaResp MetadataResponse
+	if err := json.NewDecoder(resp.Body).Decode(&metaResp); err != nil {
+		return nil, fmt.Errorf("failed to decode scrape service response: %w", err)
+	}
+
+	return &metaResp, nil
+}
+
+type SearchResult struct {
+	Title   string `json:"title"`
+	URL     string `json:"url"`
+	Snippet string `json:"snippet"`
+}
+
+// PerformSearch calls the /search endpoint of dex-web-service.
+func (c *Client) PerformSearch(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	reqURL := fmt.Sprintf("%s/search?q=%s&limit=%d", c.BaseURL, url.QueryEscape(query), limit)
+
+	req, _ := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call search service: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("search service returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var results []SearchResult
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		return nil, fmt.Errorf("failed to decode search service response: %w", err)
+	}
+
+	return results, nil
 }

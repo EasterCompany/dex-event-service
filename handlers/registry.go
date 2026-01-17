@@ -70,6 +70,11 @@ var handlerConfigs = map[string]types.HandlerConfig{
 		IsBackgroundWorker: true,
 		Timeout:            0,
 	},
+	"courier-handler": {
+		Name:               "courier-handler",
+		IsBackgroundWorker: true,
+		Timeout:            0,
+	},
 }
 
 // Initialize performs any startup tasks for handlers (now mostly a no-op or just logging)
