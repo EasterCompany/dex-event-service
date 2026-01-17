@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/internal/agent"
@@ -257,7 +258,19 @@ func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([
 }
 
 func (h *CourierHandler) deliverResults(ctx context.Context, task *chores.Chore, res agent.AnalysisResult) {
-	if task.OwnerID == "dexter" {
+	// Deliver to all recipients
+	recipients := task.Recipients
+	if len(recipients) == 0 && task.OwnerID != "" {
+		recipients = []string{task.OwnerID}
+	}
+
+	for _, recipient := range recipients {
+		h.deliverToRecipient(ctx, recipient, task, res)
+	}
+}
+
+func (h *CourierHandler) deliverToRecipient(ctx context.Context, recipient string, task *chores.Chore, res agent.AnalysisResult) {
+	if recipient == "dexter" {
 		// Deliver to Event Timeline
 		payload := map[string]interface{}{
 			"title":    fmt.Sprintf("Research Result: %s", res.Title),
@@ -268,12 +281,22 @@ func (h *CourierHandler) deliverResults(ctx context.Context, task *chores.Chore,
 			"type":     "system.research.result",
 		}
 		_, _ = utils.SendEvent(ctx, h.RedisClient, HandlerName, "system.research.result", payload)
+		return
+	}
+
+	if h.DiscordClient == nil {
+		return
+	}
+
+	msg := fmt.Sprintf("📦 **Research Task Completed**\n\n**Task:** %s\n\n%s", task.NaturalInstruction, res.Content)
+
+	if strings.HasPrefix(recipient, "channel:") {
+		// Deliver to Channel
+		channelID := strings.TrimPrefix(recipient, "channel:")
+		_, _ = h.DiscordClient.PostMessage(channelID, msg)
 	} else {
-		// Deliver to Discord
-		msg := fmt.Sprintf("📦 **Research Task Completed**\n\n**Task:** %s\n\n%s", task.NaturalInstruction, res.Content)
-		if h.DiscordClient != nil {
-			_, _ = h.DiscordClient.PostMessage(task.OwnerID, msg)
-		}
+		// Deliver to User (DM)
+		_, _ = h.DiscordClient.PostMessage(recipient, msg)
 	}
 }
 

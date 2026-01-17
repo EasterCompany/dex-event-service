@@ -33,9 +33,16 @@ func (s *Store) Create(ctx context.Context, req CreateChoreRequest) (*Chore, err
 		req.Schedule = "every_6h"
 	}
 
+	// Ensure recipients includes owner if empty
+	recipients := req.Recipients
+	if len(recipients) == 0 && req.OwnerID != "" {
+		recipients = []string{req.OwnerID}
+	}
+
 	chore := &Chore{
 		ID:                 id,
 		OwnerID:            req.OwnerID,
+		Recipients:         recipients,
 		Status:             ChoreStatusActive,
 		Schedule:           req.Schedule,
 		LastRun:            0,
@@ -135,6 +142,9 @@ func (s *Store) Update(ctx context.Context, id string, req UpdateChoreRequest) (
 	}
 	if req.NaturalInstruction != nil {
 		chore.NaturalInstruction = *req.NaturalInstruction
+	}
+	if req.Recipients != nil {
+		chore.Recipients = req.Recipients
 	}
 	if req.Memory != nil {
 		chore.Memory = req.Memory
