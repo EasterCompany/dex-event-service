@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/internal/handlers"
@@ -171,14 +172,125 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			"repeat_penalty": 1.3,
 		}
 
-		// Use Chat instead of Generate for better multi-turn awareness
-		respMessage, err := deps.Ollama.ChatWithOptions(ctx, responseModel, finalMessages, options)
+		// Use ChatStream for lower latency voice response
+		sentenceChan := make(chan string, 10)
+		audioChan := make(chan []byte, 10)
+		var wg sync.WaitGroup
+
+		// 1. Player Worker (Consumes Audio -> Plays to Discord)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for audioData := range audioChan {
+				deps.Discord.UpdateBotStatus("Speaking...", "online", 0)
+				if playErr := deps.Discord.PlayAudio(audioData); playErr != nil {
+					log.Printf("Failed to play audio in Discord: %v", playErr)
+				}
+			}
+		}()
+
+		// 2. TTS Worker (Consumes Sentences -> Generates Audio)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for text := range sentenceChan {
+				log.Printf("Generating TTS for: %s", text)
+				deps.Discord.UpdateBotStatus("Generating speech...", "online", 0)
+
+				ttsPayload := map[string]string{"text": text, "language": "en"}
+				ttsJson, _ := json.Marshal(ttsPayload)
+
+				ttsResp, ttsErr := http.Post(deps.TTSServiceURL+"/generate", "application/json", bytes.NewBuffer(ttsJson))
+				if ttsErr != nil {
+					log.Printf("TTS generation failed: %v", ttsErr)
+					continue
+				}
+
+				if ttsResp.StatusCode == 200 {
+					audioBytes, _ := io.ReadAll(ttsResp.Body)
+					_ = ttsResp.Body.Close()
+					audioChan <- audioBytes
+				} else {
+					_ = ttsResp.Body.Close()
+					log.Printf("TTS service error: %d", ttsResp.StatusCode)
+				}
+			}
+			close(audioChan)
+		}()
+
+		// 3. LLM Streamer
+		fullResponseBuilder := strings.Builder{}
+		currentBuffer := strings.Builder{}
+
+		_, err = deps.Ollama.ChatStream(ctx, responseModel, finalMessages, options, func(token string) {
+			fullResponseBuilder.WriteString(token)
+
+			currentBuffer.WriteString(token)
+
+			// Check for sentence delimiters
+			// Simple heuristic: . ? ! followed by space or newline, or just newline
+			// We optimize for speed, so splitting on simple punctuation is key.
+			buff := currentBuffer.String()
+
+			// If buffer is too short, keep accumulating (avoid splitting "Mr." or "A.I.")
+			if len(buff) < 10 {
+				return
+			}
+
+			// Check for delimiter
+			hasDelimiter := false
+			if strings.ContainsAny(buff, ".?!") {
+				// Only split if we have a delimiter AND it's at the end or followed by space
+				// Actually, since we receive token by token, the current token might be the delimiter.
+				// We look for the *last* delimiter index.
+				lastIdx := strings.LastIndexAny(buff, ".?!")
+				if lastIdx != -1 && lastIdx < len(buff) {
+					// We have a potential sentence end.
+					// To be safe, we check if it looks like an abbreviation or we should wait for more context?
+					// For v1, aggressive splitting is better for latency.
+					// We take everything up to the delimiter as the sentence.
+
+					sentence := buff[:lastIdx+1]
+					remainder := buff[lastIdx+1:]
+
+					sentenceChan <- strings.TrimSpace(sentence)
+					currentBuffer.Reset()
+					currentBuffer.WriteString(remainder)
+					hasDelimiter = true
+				}
+			}
+
+			// Also split on newlines
+			if !hasDelimiter && strings.Contains(buff, "\n") {
+				parts := strings.Split(buff, "\n")
+				// Send all complete parts
+				for i := 0; i < len(parts)-1; i++ {
+					if trimmed := strings.TrimSpace(parts[i]); trimmed != "" {
+						sentenceChan <- trimmed
+					}
+				}
+				// Keep the last part
+				currentBuffer.Reset()
+				currentBuffer.WriteString(parts[len(parts)-1])
+			}
+		})
+
+		// Flush remaining buffer
+		if currentBuffer.Len() > 0 {
+			if trimmed := strings.TrimSpace(currentBuffer.String()); trimmed != "" {
+				sentenceChan <- trimmed
+			}
+		}
+
+		close(sentenceChan) // Signal TTS worker to finish
+		wg.Wait()           // Wait for TTS and Player to finish
+
+		fullResponse = fullResponseBuilder.String()
 
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
 		} else {
-			fullResponse = respMessage.Content
-			log.Printf("Generated response: %s", fullResponse)
+			log.Printf("Generated full response: %s", fullResponse)
 
 			botResponseEventData := map[string]interface{}{
 				"type":           "messaging.bot.voice_response",
@@ -198,28 +310,6 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 			if err := emitEvent(deps.EventServiceURL, botResponseEventData); err != nil {
 				log.Printf("Failed to emit bot response event: %v", err)
-			}
-
-			deps.Discord.UpdateBotStatus("Generating speech...", "online", 0)
-
-			ttsPayload := map[string]string{"text": fullResponse, "language": "en"}
-			ttsJson, _ := json.Marshal(ttsPayload)
-
-			ttsResp, ttsErr := http.Post(deps.TTSServiceURL+"/generate", "application/json", bytes.NewBuffer(ttsJson))
-			if ttsErr != nil {
-				log.Printf("TTS generation failed: %v", ttsErr)
-			} else {
-				defer func() { _ = ttsResp.Body.Close() }()
-				if ttsResp.StatusCode == 200 {
-					audioBytes, _ := io.ReadAll(ttsResp.Body)
-
-					deps.Discord.UpdateBotStatus("Speaking...", "online", 0)
-					if playErr := deps.Discord.PlayAudio(audioBytes); playErr != nil {
-						log.Printf("Failed to play audio in Discord: %v", playErr)
-					}
-				} else {
-					log.Printf("TTS service error: %d", ttsResp.StatusCode)
-				}
 			}
 		}
 	}
