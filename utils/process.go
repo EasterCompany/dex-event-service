@@ -38,6 +38,12 @@ func AcquireCognitiveLock(ctx context.Context, redisClient *redis.Client, agentN
 		return
 	}
 
+	// 1. Check if we already hold the lock (Re-entrancy)
+	currentHolder, _ := redisClient.Get(ctx, CognitiveLockKey).Result()
+	if currentHolder == agentName {
+		return
+	}
+
 	isQueued := false
 
 	for {
@@ -45,7 +51,7 @@ func AcquireCognitiveLock(ctx context.Context, redisClient *redis.Client, agentN
 		case <-ctx.Done():
 			return
 		default:
-			// 1. Check if system is paused
+			// 1.5 Check if system is paused
 			if IsSystemPaused(ctx, redisClient) {
 				// If paused, we wait. We do not try to acquire.
 				time.Sleep(5 * time.Second)

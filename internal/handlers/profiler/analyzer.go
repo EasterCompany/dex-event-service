@@ -141,11 +141,6 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 		return
 	}
 
-	// Enforce global sequential execution for the ENTIRE batch
-	// This prevents Guardian or other agents from interleaving between user updates
-	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
-	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
-
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Synthesis Batch")
 	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
 

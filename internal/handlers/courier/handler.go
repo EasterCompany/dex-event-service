@@ -213,7 +213,7 @@ func (h *CourierHandler) PerformResearch(ctx context.Context) ([]agent.AnalysisR
 		lastAuditID = auditID
 		if err == nil && len(res) > 0 {
 			totalResults = append(totalResults, res...)
-			h.deliverResults(ctx, task, res[0])
+			h.deliverResults(ctx, task, res[0], auditID)
 			_ = h.ChoreStore.MarkRun(ctx, task.ID, nil) // Update last run
 		}
 	}
@@ -256,25 +256,30 @@ func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([
 	return h.RunCognitiveLoop(ctx, h, "researcher", h.Config.Models["researcher"], sessionID, systemPrompt, inputContext, 1)
 }
 
-func (h *CourierHandler) deliverResults(ctx context.Context, task *chores.Chore, res agent.AnalysisResult) {
+func (h *CourierHandler) deliverResults(ctx context.Context, task *chores.Chore, res agent.AnalysisResult, auditID string) {
 	// Deliver to all recipients
 	for _, recipient := range task.Recipients {
-		h.deliverToRecipient(ctx, recipient, task, res)
+		h.deliverToRecipient(ctx, recipient, task, res, auditID)
 	}
 }
 
-func (h *CourierHandler) deliverToRecipient(ctx context.Context, recipient string, task *chores.Chore, res agent.AnalysisResult) {
+func (h *CourierHandler) deliverToRecipient(ctx context.Context, recipient string, task *chores.Chore, res agent.AnalysisResult, auditID string) {
 	if recipient == "dexter" {
-		// Deliver to Event Timeline
+		// Deliver to Event Timeline as a High-Visibility Notification
 		payload := map[string]interface{}{
-			"title":    fmt.Sprintf("Research Result: %s", res.Title),
-			"body":     res.Content,
-			"summary":  res.Summary,
-			"category": "research",
-			"priority": "normal",
-			"type":     "system.research.result",
+			"title":             fmt.Sprintf("Research Result: %s", res.Title),
+			"body":              res.Content,
+			"summary":           res.Summary,
+			"content":           res.Content,
+			"category":          "research",
+			"priority":          "normal",
+			"type":              "system.notification.generated",
+			"protocol":          "researcher",
+			"audit_event_id":    auditID,
+			"read":              false,
+			"related_event_ids": []string{},
 		}
-		_, _ = utils.SendEvent(ctx, h.RedisClient, HandlerName, "system.research.result", payload)
+		_, _ = utils.SendEvent(ctx, h.RedisClient, HandlerName, "system.notification.generated", payload)
 		return
 	}
 
