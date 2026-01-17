@@ -95,6 +95,71 @@ func (c *Client) CompleteStream(channelID, messageID, content string) (string, e
 }
 
 func (c *Client) PostMessage(targetID, content string) (string, error) {
+	// Discord message limit is 2000 characters.
+	// We'll split comfortably at 1900 to leave room for any overhead/formatting.
+	const maxLen = 1900
+
+	if len(content) <= maxLen {
+		return c.postSingleMessage(targetID, content)
+	}
+
+	// Split content into chunks
+	var lastMessageID string
+	var chunks []string
+
+	// Helper to split by lines first to preserve formatting
+	lines := strings.Split(content, "\n")
+	var currentChunk strings.Builder
+
+	for _, line := range lines {
+		if currentChunk.Len()+len(line)+1 > maxLen {
+			// Current chunk is full, push it
+			chunks = append(chunks, currentChunk.String())
+			currentChunk.Reset()
+		}
+		if currentChunk.Len() > 0 {
+			currentChunk.WriteString("\n")
+		}
+		currentChunk.WriteString(line)
+	}
+	if currentChunk.Len() > 0 {
+		chunks = append(chunks, currentChunk.String())
+	}
+
+	// If chunks is empty (e.g. one huge line), fallback to rune splitting
+	if len(chunks) == 0 {
+		runes := []rune(content)
+		for i := 0; i < len(runes); i += maxLen {
+			end := i + maxLen
+			if end > len(runes) {
+				end = len(runes)
+			}
+			chunks = append(chunks, string(runes[i:end]))
+		}
+	}
+
+	// Send chunks sequentially
+
+	for i, chunk := range chunks {
+
+		// Add pagination context if multiple chunks
+
+		msgContent := chunk
+
+		id, err := c.postSingleMessage(targetID, msgContent)
+
+		if err != nil {
+			return "", fmt.Errorf("failed to send chunk %d: %w", i+1, err)
+		}
+		lastMessageID = id
+		// Slight delay to ensure order
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	return lastMessageID, nil
+}
+
+func (c *Client) postSingleMessage(targetID, content string) (string, error) {
 	reqBody := map[string]string{
 		"content": content,
 	}

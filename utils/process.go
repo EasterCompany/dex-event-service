@@ -206,10 +206,14 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 // ClearProcess removes a process from Redis and attempts to restore an idle Discord status if appropriate.
 func ClearProcess(ctx context.Context, redisClient *redis.Client, discordClient *discord.Client, processID string) {
 	key := fmt.Sprintf("process:info:%s", processID)
+	queueKey := fmt.Sprintf("process:queued:%s", processID)
 
 	// 1. Check if process exists before trying to clear it
-	exists, _ := redisClient.Exists(ctx, key).Result()
-	if exists == 0 {
+	// We check BOTH active and queued keys
+	existsActive, _ := redisClient.Exists(ctx, key).Result()
+	existsQueued, _ := redisClient.Exists(ctx, queueKey).Result()
+
+	if existsActive == 0 && existsQueued == 0 {
 		return
 	}
 
@@ -242,6 +246,7 @@ func ClearProcess(ctx context.Context, redisClient *redis.Client, discordClient 
 	}
 
 	redisClient.Del(ctx, key)
+	redisClient.Del(ctx, queueKey) // Ensure queued state is also removed
 
 	// 2. Decrement Ref Count
 	newCount, _ := redisClient.Decr(ctx, "system:busy_ref_count").Result()

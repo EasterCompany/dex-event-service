@@ -330,7 +330,9 @@ func (h *CourierHandler) deliverToRecipient(ctx context.Context, recipient strin
 
 	body := res.Content
 	msg := fmt.Sprintf("📦 **Research Task Completed**\n\n**Task:** %s\n\n%s", task.NaturalInstruction, body)
-	_, _ = h.DiscordClient.PostMessage(recipient, msg)
+	if _, err := h.DiscordClient.PostMessage(recipient, msg); err != nil {
+		log.Printf("[%s] Failed to send research results to %s: %v", HandlerName, recipient, err)
+	}
 }
 
 func (h *CourierHandler) ValidateLogic(res agent.AnalysisResult) []agent.Correction {
