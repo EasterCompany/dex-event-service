@@ -249,7 +249,8 @@ func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([
 	// Inject current date context specifically for query generation
 	now := time.Now().Format("2006-01-02")
 	queryModel := h.Config.Models["researcher"]
-	queryPrompt := fmt.Sprintf("Current Date: %s. You are an intelligence officer. Generate a highly specific, bot-friendly search query for the following research task: %s. Ensure the query targets RECENT events (last 48 hours) if the task implies 'daily' news. Output ONLY the query string, no quotes or explanations.", now, task.NaturalInstruction)
+	// Relaxed query instructions to avoid over-constrained DDG searches
+	queryPrompt := fmt.Sprintf("Current Date: %s. You are an intelligence officer. Generate a search query for: %s.\n\nRULES:\n1. Use natural language keywords + date ranges if needed.\n2. AVOID complex 'site:' operators or long boolean strings as they often break the search engine.\n3. Target RECENT events (last 48h) for daily news.\n4. Output ONLY the query string.", now, task.NaturalInstruction)
 
 	// Quick one-off chat for query optimization
 	queryResp, err := h.OllamaClient.Chat(ctx, queryModel, []ollama.Message{{Role: "user", Content: queryPrompt}})
@@ -300,6 +301,20 @@ func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([
 				sourceLinks = append(sourceLinks, r.URL)
 			}
 		}
+	}
+
+	// 2.5 Circuit Breaker: Zero Data Check
+	if len(sourceLinks) == 0 {
+		log.Printf("[%s] Research Aborted: No valid sources found for query '%s'", HandlerName, searchQuery)
+		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Failed: No Data Found")
+
+		// Optional: Send failure notification?
+		// For now, just return empty to stop the loop.
+		// We could update the chore last run to avoid immediate retry loop?
+		// Yes, otherwise it will loop forever.
+		_ = h.ChoreStore.MarkRun(ctx, task.ID, nil)
+
+		return nil, "", fmt.Errorf("no data found for query: %s", searchQuery)
 	}
 
 	// 3. Final Synthesis Cognitive Loop
