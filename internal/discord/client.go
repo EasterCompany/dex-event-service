@@ -607,10 +607,11 @@ func (c *Client) PlayMusic(url string) error {
 	return nil
 }
 
-func (c *Client) SetVoiceState(mute, deaf bool) {
-	reqBody := map[string]bool{
-		"mute": mute,
-		"deaf": deaf,
+func (c *Client) SetVoiceState(mute, deaf bool, reason string) {
+	reqBody := map[string]interface{}{
+		"mute":   mute,
+		"deaf":   deaf,
+		"reason": reason,
 	}
 	jsonData, _ := json.Marshal(reqBody)
 
