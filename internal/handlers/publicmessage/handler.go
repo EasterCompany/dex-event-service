@@ -295,6 +295,12 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		content += linkContext
 	}
 
+	// 0.5. Busy Check (Single Serving AI)
+	if utils.IsSystemBusy(ctx, deps.Redis) {
+		log.Printf("System is busy with background tasks. Dexter is dipping out of this group chat.")
+		return types.HandlerOutput{Success: true}, nil
+	}
+
 	// Music Logic: Check for YouTube links in music channel or if bot is mentioned
 	if channelID == "1437617331529580614" || mentionedBot {
 		for _, foundURL := range foundURLs {
@@ -672,6 +678,9 @@ Output ONLY the token.`, evalHistory, content)
 
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Typing response...")
 		deps.Discord.TriggerTyping(channelID)
+
+		// VRAM Optimization
+		_ = deps.Ollama.UnloadAllModelsExcept(ctx, responseModel)
 
 		if deps.Redis != nil {
 			deps.Redis.Expire(context.Background(), lockKey, 60*time.Second)

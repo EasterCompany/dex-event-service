@@ -321,6 +321,12 @@ Rules:
 		content += visualContext
 	}
 
+	// 0.5. Busy Check (Single Serving AI)
+	if utils.IsSystemBusy(ctx, deps.Redis) {
+		log.Printf("System is busy with background tasks. Dexter is dipping out of this DM.")
+		return types.HandlerOutput{Success: true}, nil
+	}
+
 	lockKey := fmt.Sprintf("engagement:processing:%s", channelID)
 	if deps.Redis != nil {
 		locked, err := deps.Redis.SetNX(context.Background(), lockKey, "1", 60*time.Second).Result()
@@ -445,6 +451,9 @@ Output ONLY the token.`, evalHistory, content)
 
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Thinking...")
 		deps.Discord.TriggerTyping(channelID)
+
+		// VRAM Optimization
+		_ = deps.Ollama.UnloadAllModelsExcept(ctx, responseModel)
 
 		if deps.Redis != nil {
 			deps.Redis.Expire(context.Background(), lockKey, 60*time.Second)

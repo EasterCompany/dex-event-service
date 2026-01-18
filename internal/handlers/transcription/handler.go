@@ -17,6 +17,7 @@ import (
 	"github.com/EasterCompany/dex-event-service/internal/ollama"
 	"github.com/EasterCompany/dex-event-service/internal/smartcontext"
 	"github.com/EasterCompany/dex-event-service/types"
+	"github.com/EasterCompany/dex-event-service/utils"
 )
 
 func emitEvent(serviceURL string, eventData map[string]interface{}) error {
@@ -72,6 +73,12 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		return types.HandlerOutput{Success: true}, nil
 	}
 
+	// 0.6 Busy Check (Single Serving AI)
+	if utils.IsSystemBusy(ctx, deps.Redis) {
+		log.Printf("System is busy with background tasks. Dexter is dipping out of this voice conversation.")
+		return types.HandlerOutput{Success: true}, nil
+	}
+
 	deps.Discord.UpdateBotStatus("Thinking...", "online", 3)
 	defer deps.Discord.UpdateBotStatus("Listening for events...", "online", 2)
 
@@ -83,10 +90,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		contextHistory, _ = deps.Discord.FetchContext(channelID, 25)
 	}
 
-	// VRAM Optimization: Immediately unload summary model to free space for response model
-	go func() {
-		_ = deps.Ollama.UnloadModel(ctx, summaryModel)
-	}()
+	// VRAM Optimization
+	_ = deps.Ollama.UnloadAllModelsExcept(ctx, "dex-fast-engagement-model")
 
 	// 1. Check Engagement
 	prompt := fmt.Sprintf("Analyze if Dexter should respond to this message (from voice transcription). Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", contextHistory, transcription)
@@ -194,6 +199,9 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		finalMessages = append(finalMessages, ollama.Message{Role: "user", Content: transcription, Name: userName})
 
 		responseModel := "dex-transcription-model"
+
+		// VRAM Optimization
+		_ = deps.Ollama.UnloadAllModelsExcept(ctx, responseModel)
 
 		fullResponse := ""
 		options := map[string]interface{}{

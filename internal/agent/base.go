@@ -25,10 +25,13 @@ type BaseAgent struct {
 func (b *BaseAgent) isHeavyModel(model string) bool {
 	// Explicit heavy models
 	heavyModels := map[string]bool{
-		"dex-researcher-model": true,
-		"dex-guardian-sentry":  true,
-		"dex-imaginator-model": true,
-		"dex-master-model":     true,
+		"dex-researcher-model":      true,
+		"dex-guardian-sentry":       true,
+		"dex-imaginator-model":      true,
+		"dex-master-model":          true,
+		"dex-private-message-model": true,
+		"dex-public-message-model":  true,
+		"dex-transcription-model":   true,
 	}
 	if heavyModels[model] {
 		return true

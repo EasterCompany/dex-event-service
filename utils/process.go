@@ -31,6 +31,22 @@ func IsSystemPaused(ctx context.Context, redisClient *redis.Client) bool {
 	return val == "true"
 }
 
+// IsSystemBusy checks if the system is currently running a heavy agent protocol.
+func IsSystemBusy(ctx context.Context, redisClient *redis.Client) bool {
+	if redisClient == nil {
+		return false
+	}
+	// 1. Check for global cognitive lock
+	holder, _ := redisClient.Get(ctx, CognitiveLockKey).Result()
+	if holder != "" {
+		return true
+	}
+
+	// 2. Check for system-level background processes
+	keys, _ := redisClient.Keys(ctx, "process:info:system-*").Result()
+	return len(keys) > 0
+}
+
 // AcquireCognitiveLock attempts to take the global cognitive lock.
 // If the lock is held, it will wait (poll) until it becomes available.
 func AcquireCognitiveLock(ctx context.Context, redisClient *redis.Client, agentName string, processID string, discordClient *discord.Client) {
