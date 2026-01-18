@@ -271,6 +271,7 @@ type DashboardSnapshot struct {
 	Contacts         *ContactsResponse      `json:"contacts"`
 	Profiles         map[string]interface{} `json:"profiles"`
 	AgentStatus      map[string]interface{} `json:"agent_status"`
+	Options          map[string]interface{} `json:"options"`
 	WebHistory       []utils.WebHistoryItem `json:"web_history"`
 	Chores           []*chores.Chore        `json:"chores"`
 	Timestamp        int64                  `json:"timestamp"`
@@ -374,6 +375,9 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 
 	// 6. Agent Status
 	agentStatus := GetAgentStatusSnapshot(redisClient)
+
+	// 6b. System Options
+	options := GetSystemOptionsSnapshot()
 
 	// 7. Web History
 	webHistory, _ := utils.GetWebHistory(redisClient)
@@ -520,6 +524,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 		Contacts:         contacts,
 		Profiles:         profiles,
 		AgentStatus:      agentStatus,
+		Options:          options,
 		WebHistory:       webHistory,
 		Chores:           allChores,
 		Timestamp:        time.Now().Unix(),
@@ -1360,4 +1365,29 @@ func getCategoryFromType(eventType string) string {
 		}
 	}
 	return "system"
+}
+
+// GetSystemOptionsSnapshot reads the current system options for public mirroring
+func GetSystemOptionsSnapshot() map[string]interface{} {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	optionsPath := filepath.Join(home, "Dexter", "config", "options.json")
+	data, err := os.ReadFile(optionsPath)
+	if err != nil {
+		return nil
+	}
+	var opts struct {
+		Services map[string]map[string]interface{} `json:"services"`
+	}
+	if err := json.Unmarshal(data, &opts); err != nil {
+		return nil
+	}
+
+	res := make(map[string]interface{})
+	for k, v := range opts.Services {
+		res[k] = v
+	}
+	return res
 }
