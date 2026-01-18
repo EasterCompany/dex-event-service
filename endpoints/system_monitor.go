@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/config"
+	"github.com/EasterCompany/dex-event-service/internal/chores"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/redis/go-redis/v9"
@@ -271,6 +272,7 @@ type DashboardSnapshot struct {
 	Profiles         map[string]interface{} `json:"profiles"`
 	AgentStatus      map[string]interface{} `json:"agent_status"`
 	WebHistory       []utils.WebHistoryItem `json:"web_history"`
+	Chores           []*chores.Chore        `json:"chores"`
 	Timestamp        int64                  `json:"timestamp"`
 }
 
@@ -375,6 +377,15 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 
 	// 7. Web History
 	webHistory, _ := utils.GetWebHistory(redisClient)
+
+	// 8. Chores
+	allChores := []*chores.Chore{}
+	if redisClient != nil {
+		choreStore := chores.NewStore(redisClient)
+		if list, err := choreStore.GetAll(ctx); err == nil {
+			allChores = list
+		}
+	}
 
 	// Try to find Dexter's ID from the contacts cache if it exists
 	if redisClient != nil {
@@ -510,6 +521,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 		Profiles:         profiles,
 		AgentStatus:      agentStatus,
 		WebHistory:       webHistory,
+		Chores:           allChores,
 		Timestamp:        time.Now().Unix(),
 	}
 }
