@@ -391,9 +391,15 @@ func (c *Client) UnloadAllModelsExcept(ctx context.Context, keepModel string) er
 
 	for _, m := range models {
 		if m.Name != keepModel && m.Model != keepModel {
-			log.Printf("Optimizing VRAM: Unloading idle model %s...", m.Name)
-			if err := c.UnloadModel(ctx, m.Name); err != nil {
-				log.Printf("Failed to unload %s: %v", m.Name, err)
+			// ONLY unload if it's using VRAM.
+			// Models on CPU (SizeVRAM == 0) don't cause thrashing and should be preserved for speed.
+			if m.SizeVRAM > 0 {
+				log.Printf("Optimizing VRAM: Unloading idle model %s (%d bytes VRAM)...", m.Name, m.SizeVRAM)
+				if err := c.UnloadModel(ctx, m.Name); err != nil {
+					log.Printf("Failed to unload %s: %v", m.Name, err)
+				}
+			} else {
+				log.Printf("VRAM Optimization: Preserving CPU-resident model %s", m.Name)
 			}
 		}
 	}
