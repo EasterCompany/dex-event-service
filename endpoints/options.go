@@ -108,11 +108,10 @@ func handleGetSystemOptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// We only want to return the "services" part for now, or maybe the whole thing?
-	// The frontend specifically wants service configurations.
-	// Let's parse and return just the Services map to be safe/focused.
+	// We parse both services and ollama
 	var opts struct {
 		Services map[string]map[string]interface{} `json:"services"`
+		Ollama   map[string]interface{}            `json:"ollama"`
 	}
 	if err := json.Unmarshal(data, &opts); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to parse options.json: %v", err), http.StatusInternalServerError)
@@ -120,11 +119,19 @@ func handleGetSystemOptions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if opts.Services == nil {
-		_, _ = w.Write([]byte(`{}`))
+	response := make(map[string]interface{})
+	if opts.Services != nil {
+		response["services"] = opts.Services
 	} else {
-		_ = json.NewEncoder(w).Encode(opts.Services)
+		response["services"] = make(map[string]interface{})
 	}
+	if opts.Ollama != nil {
+		response["ollama"] = opts.Ollama
+	} else {
+		response["ollama"] = make(map[string]interface{})
+	}
+
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func handleSetSystemOptions(w http.ResponseWriter, r *http.Request) {
