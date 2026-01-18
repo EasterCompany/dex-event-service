@@ -156,6 +156,7 @@ func (h *ImaginatorHandler) PerformAnalysis(ctx context.Context, alert types.Eve
 
 	if err == nil {
 		utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
+		h.RedisClient.Set(ctx, "imaginator:last_run:alert_review", time.Now().Unix(), 0)
 		for _, res := range results {
 			// Process decision
 			if res.Title == "IGNORE" || strings.Contains(res.Summary, "IGNORE") {
