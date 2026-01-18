@@ -49,6 +49,14 @@ func emitEvent(serviceURL string, eventData map[string]interface{}) error {
 }
 
 func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Dependencies) (types.HandlerOutput, error) {
+	// 0. Claim Check (Anti-Race-Condition)
+	if deps.Redis != nil {
+		if claimed, _ := deps.Redis.Get(ctx, "handled:event:"+input.EventID).Result(); claimed == "1" {
+			log.Printf("Event %s already handled by previous cycle. Skipping.", input.EventID)
+			return types.HandlerOutput{Success: true}, nil
+		}
+	}
+
 	// 1. Check for interruption immediately
 	if deps.CheckInterruption != nil && deps.CheckInterruption() {
 		return types.HandlerOutput{Success: true}, nil
@@ -330,7 +338,7 @@ Rules:
 	shouldEngage := true
 
 	// 1. Fetch structured context history
-	messages, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
+	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch messages context: %v", err)
 	}
@@ -371,6 +379,15 @@ Rules:
 	}
 
 	if shouldEngage {
+		// Race Condition Protection: Claim all events in the current context
+		if deps.Redis != nil {
+			for _, id := range contextEventIDs {
+				deps.Redis.Set(ctx, "handled:event:"+id, "1", 2*time.Minute)
+			}
+			// Also claim the current triggering event
+			deps.Redis.Set(ctx, "handled:event:"+input.EventID, "1", 2*time.Minute)
+		}
+
 		// 4. Final interruption check before generation
 		if deps.CheckInterruption != nil && deps.CheckInterruption() {
 			return types.HandlerOutput{Success: true}, nil

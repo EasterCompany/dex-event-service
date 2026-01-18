@@ -17,7 +17,6 @@ import (
 	"github.com/EasterCompany/dex-event-service/internal/ollama"
 	"github.com/EasterCompany/dex-event-service/internal/smartcontext"
 	"github.com/EasterCompany/dex-event-service/types"
-	"github.com/redis/go-redis/v9"
 )
 
 func emitEvent(serviceURL string, eventData map[string]interface{}) error {
@@ -45,14 +44,6 @@ func emitEvent(serviceURL string, eventData map[string]interface{}) error {
 		return fmt.Errorf("event service error %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
-}
-
-func getLastChannelEventID(ctx context.Context, redisClient *redis.Client, channelID string) string {
-	res, err := redisClient.ZRevRange(ctx, "events:channel:"+channelID, 0, 0).Result()
-	if err == nil && len(res) > 0 {
-		return res[0]
-	}
-	return ""
 }
 
 func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Dependencies) (types.HandlerOutput, error) {
@@ -151,24 +142,23 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		log.Printf("Failed to emit engagement decision event: %v", err)
 	}
 
-	// 2. Engage if needed
 	if shouldEngage {
-		// Race Condition Protection: Claim the latest event (which is likely what we are responding to)
-		// This prevents a pending handler for 'latestID' from firing if we've already included it in our context.
-		latestID := getLastChannelEventID(ctx, deps.Redis, channelID)
-		if latestID != "" {
-			deps.Redis.Set(ctx, "handled:event:"+latestID, "1", 1*time.Minute)
-		}
-		// Also claim ourselves
-		deps.Redis.Set(ctx, "handled:event:"+input.EventID, "1", 1*time.Minute)
-
-		deps.Discord.UpdateBotStatus("Thinking of response...", "online", 0)
-
 		// Fetch messages for Chat API
-		messages, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
+		messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
 		if err != nil {
 			log.Printf("Warning: Failed to fetch messages context: %v", err)
 		}
+
+		// Race Condition Protection: Claim all events in the current context
+		if deps.Redis != nil {
+			for _, id := range contextEventIDs {
+				deps.Redis.Set(ctx, "handled:event:"+id, "1", 2*time.Minute)
+			}
+			// Also claim the current triggering event
+			deps.Redis.Set(ctx, "handled:event:"+input.EventID, "1", 2*time.Minute)
+		}
+
+		deps.Discord.UpdateBotStatus("Thinking of response...", "online", 0)
 
 		// Load Profile for Personalization
 		userProfile, _ := profiler.LoadProfile(ctx, deps.Redis, userID)

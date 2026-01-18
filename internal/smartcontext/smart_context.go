@@ -13,16 +13,16 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// GetMessages fetches history and returns it as a slice of ollama.Message for the /chat endpoint.
-func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Client, channelID string, summaryModel string) ([]ollama.Message, error) {
+// GetMessages fetches history and returns it as a slice of ollama.Message and their source EventIDs.
+func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Client, channelID string, summaryModel string) ([]ollama.Message, []string, error) {
 	// 1. Fetch last 25 events
 	eventIDs, err := redisClient.ZRevRange(ctx, "events:channel:"+channelID, 0, 24).Result()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if len(eventIDs) == 0 {
-		return []ollama.Message{}, nil
+		return []ollama.Message{}, []string{}, nil
 	}
 
 	// 2. Fetch event data
@@ -44,6 +44,12 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 
 	total := len(events)
 	var messages []ollama.Message
+	var contextEventIDs []string
+
+	// Track all event IDs that are being included in this context window
+	for _, e := range events {
+		contextEventIDs = append(contextEventIDs, e.ID)
+	}
 
 	if total > 5 {
 		// Summarize older 20
@@ -60,7 +66,7 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 				Role:    "system",
 				Content: "Previous conversation summary: " + strings.TrimSpace(summary),
 			})
-			// Only process recent ones
+			// Only process recent ones for raw message injection
 			events = events[total-5:]
 		}
 	}
@@ -104,7 +110,7 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 			})
 		}
 	}
-	return messages, nil
+	return messages, contextEventIDs, nil
 }
 
 // cleanEventText provides a human-friendly version of the event log

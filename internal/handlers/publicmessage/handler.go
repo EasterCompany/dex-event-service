@@ -56,6 +56,15 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	userID, _ := input.EventData["user_id"].(string)
 	mentionedBot, _ := input.EventData["mentioned_bot"].(bool)
 
+	// 0. Claim Check (Anti-Race-Condition)
+	// If this event was already included in a previous response's context window, skip it.
+	if deps.Redis != nil {
+		if claimed, _ := deps.Redis.Get(ctx, "handled:event:"+input.EventID).Result(); claimed == "1" {
+			log.Printf("Event %s already handled by previous cycle. Skipping.", input.EventID)
+			return types.HandlerOutput{Success: true}, nil
+		}
+	}
+
 	// Ensure we always clear the process status when we're done
 	defer utils.ClearProcess(context.Background(), deps.Redis, deps.Discord, channelID)
 
@@ -568,7 +577,7 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 	systemPrompt := utils.GetBaseSystemPrompt()
 	summaryModel := "dex-summary-model"
 
-	messages, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
+	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch messages context: %v", err)
 	}
@@ -616,6 +625,15 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 	}
 
 	if shouldEngage {
+		// Race Condition Protection: Claim all events in the current context
+		if deps.Redis != nil {
+			for _, id := range contextEventIDs {
+				deps.Redis.Set(ctx, "handled:event:"+id, "1", 2*time.Minute)
+			}
+			// Also claim the current triggering event
+			deps.Redis.Set(ctx, "handled:event:"+input.EventID, "1", 2*time.Minute)
+		}
+
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Typing response...")
 		deps.Discord.TriggerTyping(channelID)
 
