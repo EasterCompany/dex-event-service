@@ -248,6 +248,8 @@ func main() {
 	router.HandleFunc("/chores/{path:.*}", endpoints.ChoresHandler(redisClient)).Methods("GET", "PATCH", "DELETE", "POST")
 	router.HandleFunc("/system_monitor", endpoints.SystemMonitorHandler).Methods("GET")
 	router.HandleFunc("/system/hardware", endpoints.SystemHardwareHandler).Methods("GET")
+	router.HandleFunc("/system/options", endpoints.SystemOptionsHandler).Methods("GET", "POST")
+	router.HandleFunc("/system/service/{action}", endpoints.SystemServiceControlHandler).Methods("POST")
 	router.HandleFunc("/processes", endpoints.ListProcessesHandler).Methods("GET")
 	router.HandleFunc("/processes", endpoints.HandleProcessRegistration).Methods("POST")
 	router.HandleFunc("/processes/{id}", endpoints.HandleProcessUnregistration).Methods("DELETE")
