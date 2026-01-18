@@ -79,6 +79,15 @@ func (s *Store) Get(ctx context.Context, id string) (*Chore, error) {
 	if err := json.Unmarshal(data, &chore); err != nil {
 		return nil, err
 	}
+
+	// Ensure slices are never nil for JSON serialization
+	if chore.Memory == nil {
+		chore.Memory = []string{}
+	}
+	if chore.Recipients == nil {
+		chore.Recipients = []string{}
+	}
+
 	return &chore, nil
 }
 
@@ -125,6 +134,14 @@ func (s *Store) Update(ctx context.Context, id string, req UpdateChoreRequest) (
 		chore.LastRun = *req.LastRun
 	}
 
+	// Safety check: ensure no nil slices are saved
+	if chore.Memory == nil {
+		chore.Memory = []string{}
+	}
+	if chore.Recipients == nil {
+		chore.Recipients = []string{}
+	}
+
 	chore.UpdatedAt = time.Now().Unix()
 
 	data, err := json.Marshal(chore)
@@ -149,6 +166,14 @@ func (s *Store) MarkRun(ctx context.Context, id string, newMemory []string) erro
 	chore.LastRun = time.Now().Unix()
 	if newMemory != nil {
 		chore.Memory = newMemory
+	}
+
+	// Safety check: ensure no nil slices are saved
+	if chore.Memory == nil {
+		chore.Memory = []string{}
+	}
+	if chore.Recipients == nil {
+		chore.Recipients = []string{}
 	}
 
 	data, err := json.Marshal(chore)
