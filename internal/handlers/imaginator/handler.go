@@ -149,7 +149,7 @@ func (h *ImaginatorHandler) PerformAnalysis(ctx context.Context, alert types.Eve
 	defer h.RedisClient.Del(ctx, "imaginator:active_tier")
 
 	// Gather context from the alert
-	input := h.formatAlertContext(alert)
+	input := h.formatAlertContext(ctx, alert)
 	sessionID := fmt.Sprintf("imaginator-%s-%d", alert.ID, time.Now().Unix())
 
 	results, auditEventID, err := h.RunCognitiveLoop(ctx, h, "alert_review", h.Config.Models["alert_review"], sessionID, "", input, 1)
@@ -232,7 +232,31 @@ func (h *ImaginatorHandler) markAlertAsProcessed(ctx context.Context, alertID, s
 	// Optional: Store status metadata if needed
 }
 
-func (h *ImaginatorHandler) formatAlertContext(alert types.Event) string {
+func (h *ImaginatorHandler) fetchRecentBlueprints(ctx context.Context) string {
+	ids, err := h.RedisClient.ZRevRange(ctx, "events:type:system.blueprint.generated", 0, 9).Result()
+	if err != nil || len(ids) == 0 {
+		return "None."
+	}
+
+	var blueprints []string
+	for _, id := range ids {
+		val, err := h.RedisClient.Get(ctx, "event:"+id).Result()
+		if err == nil {
+			var e types.Event
+			if json.Unmarshal([]byte(val), &e) == nil {
+				var ed map[string]interface{}
+				if json.Unmarshal(e.Event, &ed) == nil {
+					title, _ := ed["title"].(string)
+					summary, _ := ed["summary"].(string)
+					blueprints = append(blueprints, fmt.Sprintf("- **%s**: %s", title, summary))
+				}
+			}
+		}
+	}
+	return strings.Join(blueprints, "\n")
+}
+
+func (h *ImaginatorHandler) formatAlertContext(ctx context.Context, alert types.Event) string {
 	var ed map[string]interface{}
 	if err := json.Unmarshal(alert.Event, &ed); err != nil {
 		log.Printf("[%s] Failed to unmarshal alert event for context: %v", HandlerName, err)
@@ -245,6 +269,9 @@ func (h *ImaginatorHandler) formatAlertContext(alert types.Event) string {
 	context += fmt.Sprintf("**Title**: %v\n", ed["title"])
 	context += fmt.Sprintf("**Body**: %v\n", ed["body"])
 	context += fmt.Sprintf("**Category**: %v\n", ed["category"])
+
+	existingBlueprints := h.fetchRecentBlueprints(ctx)
+	context += fmt.Sprintf("\n## EXISTING BLUEPRINTS (Check for Duplicates)\n%s\n", existingBlueprints)
 
 	return context
 }

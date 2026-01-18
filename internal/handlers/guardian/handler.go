@@ -213,29 +213,57 @@ func (h *GuardianHandler) gatherContext(ctx context.Context, tier string, previo
 	status, _ := h.fetchSystemStatus(ctx)
 	logs, _ := h.fetchRecentLogs(ctx)
 
-	var cliHelp, tests, events, systemInfo string
+	var cliHelp, tests, events, systemInfo, knownIssues string
 	switch tier {
 	case "sentry":
 		tests, _ = h.fetchTestResults(ctx)
 		events, _ = h.fetchEventsForAnalysis(ctx)
 		systemInfo, _ = h.fetchSystemHardware(ctx)
+		knownIssues = h.fetchRecentAlerts(ctx)
 	}
 
-	return h.formatContext(tier, status, logs, cliHelp, tests, events, systemInfo, previousResults)
+	return h.formatContext(tier, status, logs, cliHelp, tests, events, systemInfo, knownIssues, previousResults)
 }
 
-func (h *GuardianHandler) formatContext(tier, status, logs, cliHelp, tests, events, systemInfo string, previousResults []agent.AnalysisResult) string {
+func (h *GuardianHandler) formatContext(tier, status, logs, cliHelp, tests, events, systemInfo, knownIssues string, previousResults []agent.AnalysisResult) string {
 	// Base context with common components (these all start and end with \n)
 	context := fmt.Sprintf("## SYSTEM STATUS\n%s\n## LOGS\n%s",
 		status, logs)
 
 	switch tier {
 	case "sentry":
-		context += fmt.Sprintf("\n## TEST\n%s\n## SYSTEM\n%s\n## EVENTS\n%s",
-			tests, systemInfo, events)
+		context += fmt.Sprintf("\n## TEST\n%s\n## SYSTEM\n%s\n## KNOWN ISSUES (Do not re-report)\n%s\n## EVENTS\n%s",
+			tests, systemInfo, knownIssues, events)
 	}
 
 	return context
+}
+
+func (h *GuardianHandler) fetchRecentAlerts(ctx context.Context) string {
+	ids, err := h.RedisClient.ZRevRange(ctx, "events:type:system.notification.generated", 0, 9).Result()
+	if err != nil || len(ids) == 0 {
+		return "None."
+	}
+
+	var alerts []string
+	for _, id := range ids {
+		val, err := h.RedisClient.Get(ctx, "event:"+id).Result()
+		if err == nil {
+			var e types.Event
+			if json.Unmarshal([]byte(val), &e) == nil {
+				var ed map[string]interface{}
+				if json.Unmarshal(e.Event, &ed) == nil {
+					// Check if it was an alert
+					if isAlert, ok := ed["alert"].(bool); ok && isAlert {
+						title, _ := ed["title"].(string)
+						summary, _ := ed["summary"].(string)
+						alerts = append(alerts, fmt.Sprintf("- **%s**: %s", title, summary))
+					}
+				}
+			}
+		}
+	}
+	return strings.Join(alerts, "\n")
 }
 
 // ... Context fetching methods remain largely similar but return strings for cleaner injection ...
