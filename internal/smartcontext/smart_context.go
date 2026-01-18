@@ -51,12 +51,13 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 		contextEventIDs = append(contextEventIDs, e.ID)
 	}
 
-	if total > 5 {
-		// Summarize older 20
+	if total > 6 {
+		// Summarize older messages
+		// We keep the last 5 fresh, so we summarize everything before that.
 		olderEvents := events[:total-5]
 		olderText := FormatEventsBlock(olderEvents)
 		if summaryModel == "" {
-			summaryModel = "dex-summary-model"
+			summaryModel = "dex-fast-summary-model" // Default to fast model for lower latency
 		}
 
 		summaryPrompt := fmt.Sprintf("Summarize this conversation log concisely, retaining key details and user intent:\n\n%s", olderText)
@@ -178,7 +179,7 @@ func Get(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Cl
 
 	// 4. Split logic
 	total := len(events)
-	if total <= 5 {
+	if total <= 6 {
 		// Not enough history to summarize, just return raw text
 		return FormatEventsBlock(events), nil
 	}
@@ -190,7 +191,7 @@ func Get(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Cl
 	// 5. Summarize older events
 	olderText := FormatEventsBlock(olderEvents)
 	if summaryModel == "" {
-		summaryModel = "dex-summary-model"
+		summaryModel = "dex-fast-summary-model"
 	}
 
 	summaryPrompt := fmt.Sprintf("Summarize this conversation log concisely, retaining key details and user intent:\n\n%s", olderText)
