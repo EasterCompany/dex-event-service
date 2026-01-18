@@ -558,15 +558,51 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 			}
 		}
 	} else {
-		// --- OTHER CHANNELS: Binary Engagement ---
+		// --- OTHER CHANNELS: Binary Engagement + Reaction Support ---
 		evalHistory, _ := deps.Discord.FetchContext(channelID, 10)
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Vibe Check")
-		prompt := fmt.Sprintf("Analyze if Dexter should respond to this message. Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", evalHistory, content)
+		prompt := fmt.Sprintf(`Context:
+%s
+
+Current Message:
+%s
+
+Analyze if Dexter should respond to this message. 
+Output EXACTLY one of the following tokens:
+- "IGNORE": No action.
+- "REACTION:<emoji>": React with a single emoji.
+- "<ENGAGE/>": Generate a full text response.
+
+Output ONLY the token.`, evalHistory, content)
+
 		engagementRaw, _, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
-		if err == nil && strings.Contains(engagementRaw, "<ENGAGE/>") {
-			shouldEngage = true
-			decisionStr = "ENGAGE_FAST"
-			responseModel = "dex-public-message-model"
+		if err == nil {
+			engagementRaw = strings.TrimSpace(engagementRaw)
+			upperRaw := strings.ToUpper(engagementRaw)
+
+			if strings.Contains(upperRaw, "<ENGAGE/>") {
+				shouldEngage = true
+				decisionStr = "ENGAGE_FAST"
+				responseModel = "dex-public-message-model"
+			} else if strings.Contains(upperRaw, "REACTION:") {
+				shouldEngage = false
+				decisionStr = "REACTION"
+				parts := strings.SplitN(engagementRaw, ":", 2)
+				if len(parts) == 2 {
+					emoji := strings.TrimSpace(parts[1])
+					if emoji != "" {
+						messageID, _ := input.EventData["message_id"].(string)
+						if messageID != "" {
+							log.Printf("Reacting with emoji in channel %s: %s", channelID, emoji)
+							_ = deps.Discord.AddReaction(channelID, messageID, emoji)
+							decisionStr = "REACTION:" + emoji
+						}
+					}
+				}
+			} else {
+				shouldEngage = false
+				decisionStr = "IGNORE"
+			}
 		} else {
 			shouldEngage = false
 			decisionStr = "IGNORE"
