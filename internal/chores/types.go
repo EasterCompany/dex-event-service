@@ -22,6 +22,7 @@ type Chore struct {
 	Status             ChoreStatus        `json:"status"`
 	Schedule           string             `json:"schedule"` // e.g., "every_6h", "daily"
 	RunAt              string             `json:"run_at"`   // e.g., "08:00"
+	Timezone           string             `json:"timezone"` // e.g., "Europe/London"
 	LastRun            int64              `json:"last_run"`
 	NaturalInstruction string             `json:"natural_instruction"`
 	ExecutionPlan      ChoreExecutionPlan `json:"execution_plan"`
@@ -36,6 +37,7 @@ type CreateChoreRequest struct {
 	NaturalInstruction string   `json:"natural_instruction"`
 	Schedule           string   `json:"schedule"` // Defaults to "every_6h" if empty
 	RunAt              string   `json:"run_at"`   // Optional: "HH:MM"
+	Timezone           string   `json:"timezone"` // Optional: "Europe/London"
 	// Optional: Users/AI can provide pre-filled plan
 	EntryURL        string `json:"entry_url,omitempty"`
 	SearchQuery     string `json:"search_query,omitempty"`
@@ -47,6 +49,7 @@ type UpdateChoreRequest struct {
 	Status             *ChoreStatus `json:"status,omitempty"`
 	Schedule           *string      `json:"schedule,omitempty"`
 	RunAt              *string      `json:"run_at,omitempty"`
+	Timezone           *string      `json:"timezone,omitempty"`
 	NaturalInstruction *string      `json:"natural_instruction,omitempty"`
 	Recipients         []string     `json:"recipients,omitempty"`
 	Memory             []string     `json:"memory,omitempty"` // Replaces memory if provided

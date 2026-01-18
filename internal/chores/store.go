@@ -38,6 +38,7 @@ func (s *Store) Create(ctx context.Context, req CreateChoreRequest) (*Chore, err
 		Status:             ChoreStatusActive,
 		Schedule:           req.Schedule,
 		RunAt:              req.RunAt,
+		Timezone:           req.Timezone,
 		LastRun:            0,
 		NaturalInstruction: req.NaturalInstruction,
 		ExecutionPlan: ChoreExecutionPlan{
@@ -124,6 +125,9 @@ func (s *Store) Update(ctx context.Context, id string, req UpdateChoreRequest) (
 	}
 	if req.RunAt != nil {
 		chore.RunAt = *req.RunAt
+	}
+	if req.Timezone != nil {
+		chore.Timezone = *req.Timezone
 	}
 	if req.NaturalInstruction != nil {
 		chore.NaturalInstruction = *req.NaturalInstruction
