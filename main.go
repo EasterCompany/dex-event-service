@@ -255,22 +255,23 @@ func main() {
 	router.HandleFunc("/agent/status", endpoints.GetAgentStatusHandler(redisClient)).Methods("GET")
 	router.HandleFunc("/agent/pause", endpoints.HandlePauseSystem(redisClient)).Methods("POST")
 	router.HandleFunc("/agent/resume", endpoints.HandleResumeSystem(redisClient)).Methods("POST")
+	router.HandleFunc("/agent/reset", endpoints.ResetAgentHandler(redisClient)).Methods("POST", "GET")
 	router.HandleFunc("/guardian/status", endpoints.GetAgentStatusHandler(redisClient)).Methods("GET") // Keep legacy for fallback during transition
-	router.HandleFunc("/guardian/reset", endpoints.ResetGuardianHandler(redisClient)).Methods("POST", "GET")
+	router.HandleFunc("/guardian/reset", endpoints.ResetAgentHandler(redisClient)).Methods("POST", "GET")
 	router.HandleFunc("/guardian/run", endpoints.RunGuardianHandler(redisClient, func(tier int) ([]interface{}, error) {
 		if handlers.GuardianTrigger == nil {
 			return nil, fmt.Errorf("guardian handler not initialized")
 		}
 		return handlers.GuardianTrigger(tier)
 	})).Methods("POST")
-	router.HandleFunc("/analyzer/reset", endpoints.ResetAnalyzerHandler(redisClient)).Methods("POST", "GET")
+	router.HandleFunc("/analyzer/reset", endpoints.ResetAgentHandler(redisClient)).Methods("POST", "GET")
 	router.HandleFunc("/analyzer/run", endpoints.RunAnalyzerHandler(redisClient, func() error {
 		if handlers.AnalyzerTrigger == nil {
 			return fmt.Errorf("analyzer handler not initialized")
 		}
 		return handlers.AnalyzerTrigger()
 	})).Methods("POST")
-	router.HandleFunc("/fabricator/reset", endpoints.ResetGuardianHandler(redisClient)).Methods("POST", "GET") // Reusing reset handler logic for simplicity or create specific one
+	router.HandleFunc("/fabricator/reset", endpoints.ResetAgentHandler(redisClient)).Methods("POST", "GET") // Reusing reset handler logic for simplicity or create specific one
 	router.HandleFunc("/fabricator/run", endpoints.RunFabricatorHandler(redisClient, func() error {
 		if handlers.FabricatorTrigger == nil {
 			return fmt.Errorf("fabricator handler not initialized")

@@ -309,8 +309,8 @@ func RunGuardianHandler(redisClient *redis.Client, triggerFunc func(int) ([]inte
 	}
 }
 
-// ResetGuardianHandler resets the timers for protocols.
-func ResetGuardianHandler(redisClient *redis.Client) http.HandlerFunc {
+// ResetAgentHandler resets the timers for any specific protocol.
+func ResetAgentHandler(redisClient *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if redisClient == nil {
 			http.Error(w, "Redis not connected", http.StatusServiceUnavailable)
@@ -319,26 +319,57 @@ func ResetGuardianHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		ctx := context.Background()
 		query := r.URL.Query()
-		tier := query.Get("tier")
-		if tier == "" {
-			tier = query.Get("protocol")
+		protocol := query.Get("protocol")
+		if protocol == "" {
+			protocol = query.Get("tier")
 		}
 
-		// Reset logic
-		if tier == "alert_review" || tier == "all" {
-			redisClient.Set(ctx, "imaginator:last_run:alert_review", 0, utils.DefaultTTL)
-		}
-		if tier == "sentry" || tier == "all" {
+		// 1. Map protocols to their Redis keys
+		// researcher -> courier:last_run:researcher
+		// sentry -> guardian:last_run:sentry
+		// alert_review -> imaginator:last_run:alert_review
+		// construction -> fabricator:last_run:construction
+		// synthesis -> analyzer:last_run:synthesis
+
+		switch protocol {
+		case "researcher":
+			redisClient.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
+			// Reset the cognitive idle timer as well, so it triggers immediately if conditions met
+			redisClient.Set(ctx, "system:last_cognitive_event", 0, 0)
+		case "sentry":
 			redisClient.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
-		}
-		// TODO: Add Synthesis reset if needed, though usually handled by analyzer endpoints
-
-		if tier == "construction" || tier == "all" {
+		case "alert_review":
+			redisClient.Set(ctx, "imaginator:last_run:alert_review", 0, utils.DefaultTTL)
+		case "construction":
 			redisClient.Set(ctx, "fabricator:last_run:construction", 0, utils.DefaultTTL)
+		case "synthesis":
+			redisClient.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
+			// Clear per-user cooldowns
+			iter := redisClient.Scan(ctx, 0, "agent:Analyzer:cooldown:*", 0).Iterator()
+			for iter.Next(ctx) {
+				redisClient.Del(ctx, iter.Val())
+			}
+		case "all":
+			// Reset everything
+			redisClient.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
+			redisClient.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
+			redisClient.Set(ctx, "imaginator:last_run:alert_review", 0, utils.DefaultTTL)
+			redisClient.Set(ctx, "fabricator:last_run:construction", 0, utils.DefaultTTL)
+			redisClient.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
+			redisClient.Set(ctx, "system:last_cognitive_event", 0, 0)
+
+			// Clear per-user cooldowns
+			iter := redisClient.Scan(ctx, 0, "agent:Analyzer:cooldown:*", 0).Iterator()
+			for iter.Next(ctx) {
+				redisClient.Del(ctx, iter.Val())
+			}
+		default:
+			http.Error(w, fmt.Sprintf("Unknown protocol: %s", protocol), http.StatusBadRequest)
+			return
 		}
 
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("Protocols reset successfully"))
+		_, _ = fmt.Fprintf(w, "Protocol '%s' reset successfully", protocol)
 	}
 }
 
