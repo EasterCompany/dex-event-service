@@ -331,11 +331,61 @@ Rules:
 		defer deps.Redis.Del(context.Background(), lockKey)
 	}
 
+	shouldEngage := false
+	engagementReason := "Evaluated by dex-engagement-model"
+	var engagementRaw string
+	var err error
+
+	// --- 1. Determine Engagement Decision ---
+	evalHistory, _ := deps.Discord.FetchContext(channelID, 10)
+	utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Vibe Check")
+	prompt := fmt.Sprintf(`Context:
+%s
+
+Current Message:
+%s
+
+Your task is to decide how Dexter should engage with the current Private Message (DM).
+Output EXACTLY one of the following tokens:
+- "IGNORE": No action.
+- "REACTION:<emoji>": React with a single emoji.
+- "<ENGAGE/>": Generate a full text response.
+
+Output ONLY the token.`, evalHistory, content)
+
+	engagementRaw, _, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
+	decisionStr := "IGNORE"
+
+	if err == nil {
+		engagementRaw = strings.TrimSpace(engagementRaw)
+		upperRaw := strings.ToUpper(engagementRaw)
+
+		if strings.Contains(upperRaw, "<ENGAGE/>") {
+			shouldEngage = true
+			decisionStr = "REPLY_REGULAR"
+		} else if strings.Contains(upperRaw, "REACTION:") {
+			shouldEngage = false
+			decisionStr = "REACTION"
+			parts := strings.SplitN(engagementRaw, ":", 2)
+			if len(parts) == 2 {
+				emoji := strings.TrimSpace(parts[1])
+				if emoji != "" {
+					messageID, _ := input.EventData["message_id"].(string)
+					if messageID != "" {
+						log.Printf("Reacting with emoji in DM %s: %s", channelID, emoji)
+						_ = deps.Discord.AddReaction(channelID, messageID, emoji)
+						decisionStr = "REACTION:" + emoji
+					}
+				}
+			}
+		} else {
+			shouldEngage = false
+			decisionStr = "IGNORE"
+		}
+	}
+
 	responseModel := "dex-private-message-model"
 	summaryModel := "dex-summary-model"
-	decisionStr := "REPLY_REGULAR"
-	engagementReason := "Automatic engagement for Private Message"
-	shouldEngage := true
 
 	// 1. Fetch structured context history
 	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
@@ -369,9 +419,9 @@ Rules:
 		"user_id":          userID,
 		"message_content":  content,
 		"timestamp":        time.Now().Unix(),
-		"engagement_model": "hardcoded",
+		"engagement_model": "dex-engagement-model",
 		"message_count":    len(messages),
-		"engagement_raw":   "automatic",
+		"engagement_raw":   engagementRaw,
 	}
 
 	if err := emitEvent(deps.EventServiceURL, engagementEventData); err != nil {
