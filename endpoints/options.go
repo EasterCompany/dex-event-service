@@ -42,6 +42,12 @@ func SystemServiceControlHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Support "all" keyword to map to empty string for CLI (global action)
+	targetService := req.Service
+	if targetService == "all" {
+		targetService = ""
+	}
+
 	validActions := map[string]bool{"start": true, "stop": true, "restart": true}
 	if !validActions[action] {
 		http.Error(w, "Invalid action", http.StatusBadRequest)
@@ -55,8 +61,13 @@ func SystemServiceControlHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	dexPath := filepath.Join(home, "Dexter", "bin", "dex")
 
-	// Execute dex <action> <service>
-	cmd := exec.Command(dexPath, action, req.Service)
+	// Execute dex <action> [service]
+	args := []string{action}
+	if targetService != "" {
+		args = append(args, targetService)
+	}
+
+	cmd := exec.Command(dexPath, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(output))
@@ -69,7 +80,11 @@ func SystemServiceControlHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintf(w, "Service %s %sed", req.Service, action)
+	targetDisplay := targetService
+	if targetDisplay == "" {
+		targetDisplay = "all services"
+	}
+	_, _ = fmt.Fprintf(w, "Service %s %sed", targetDisplay, action)
 }
 
 func handleGetSystemOptions(w http.ResponseWriter, r *http.Request) {
