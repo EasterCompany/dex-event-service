@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"runtime"
 	"time"
 )
 
@@ -81,7 +82,9 @@ type GenerationStats struct {
 }
 
 func (c *Client) Chat(ctx context.Context, model string, messages []Message) (Message, error) {
-	return c.ChatWithOptions(ctx, model, messages, nil)
+	return c.ChatWithOptions(ctx, model, messages, map[string]interface{}{
+		"num_thread": runtime.NumCPU(),
+	})
 }
 
 func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []Message, options map[string]interface{}) (Message, error) {
@@ -192,7 +195,9 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []Messag
 }
 
 func (c *Client) Generate(model, prompt string, images []string) (string, GenerationStats, error) {
-	return c.GenerateWithContext(context.Background(), model, prompt, images, nil)
+	return c.GenerateWithContext(context.Background(), model, prompt, images, map[string]interface{}{
+		"num_thread": runtime.NumCPU(),
+	})
 }
 
 func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, images []string, options map[string]interface{}) (string, GenerationStats, error) {
