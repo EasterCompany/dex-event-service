@@ -235,7 +235,7 @@ func main() {
 	// Initialize dependencies
 	deps := &internalHandlers.Dependencies{
 		Redis:           redisClient,
-		Ollama:          ollama.NewClient(ollamaURL),
+		Ollama:          ollama.NewClient(ollamaURL, redisClient),
 		Discord:         discord.NewClient(discordURL, eventURL),
 		Web:             web.NewClient(webURL),
 		Config:          serviceMap,
@@ -541,7 +541,7 @@ func performCognitiveWarmup(ctx context.Context, opts *config.OptionsConfig) {
 	}
 
 	ollamaURL := "http://127.0.0.1:11434"
-	client := ollama.NewClient(ollamaURL)
+	client := ollama.NewClient(ollamaURL, RedisClient)
 
 	// Trigger background load sequentially to avoid overwhelming Ollama
 	go func() {

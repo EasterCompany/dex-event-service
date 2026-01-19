@@ -11,20 +11,23 @@ import (
 	"net/http"
 	"runtime"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 const DefaultURL = "http://127.0.0.1:11434"
 
 type Client struct {
 	BaseURL       string
+	Redis         *redis.Client
 	EventCallback func(eventType string, data map[string]interface{})
 }
 
-func NewClient(url string) *Client {
+func NewClient(url string, rdb *redis.Client) *Client {
 	if url == "" {
 		url = DefaultURL
 	}
-	return &Client{BaseURL: url}
+	return &Client{BaseURL: url, Redis: rdb}
 }
 
 func getKeepAlive(options map[string]interface{}) interface{} {
@@ -445,8 +448,26 @@ func (c *Client) UnloadAllModelsExcept(ctx context.Context, keepModel string) er
 		return err
 	}
 
+	// Check if we are in Voice Mode
+	isVoiceMode := false
+	if c.Redis != nil {
+		val, _ := c.Redis.Get(ctx, "system:cognitive_lock").Result()
+		if val == "Voice Mode" {
+			isVoiceMode = true
+		}
+	}
+
 	for _, m := range models {
 		if m.Name != keepModel && m.Model != keepModel {
+			// PROTECTION: Never unload voice-critical models during Voice Mode
+			if isVoiceMode {
+				if m.Name == "dex-transcription" || m.Name == "dex-engagement-fast" ||
+					m.Model == "dex-transcription" || m.Model == "dex-engagement-fast" {
+					log.Printf("VRAM Optimization: Preserving protected voice model %s", m.Name)
+					continue
+				}
+			}
+
 			// ONLY unload if it's using VRAM.
 			// Models on CPU (SizeVRAM == 0) don't cause thrashing and should be preserved for speed.
 			if m.SizeVRAM > 0 {
