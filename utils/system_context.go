@@ -77,8 +77,10 @@ func ResolveModel(baseName string, utilityDevice string, utilitySpeed string) st
 		suffix = "-fast"
 	}
 
-	// Determine Device Variant (Default to CPU if empty)
-	if utilityDevice == "" || utilityDevice == "cpu" {
+	// Determine Device Variant.
+	// We only append -cpu if explicitly requested OR if empty (backward compatibility for utilities).
+	// If device is "gpu", we assume the base singleton model is desired unless suffix is already set.
+	if utilityDevice == "cpu" || utilityDevice == "" {
 		if suffix == "" {
 			suffix = "-cpu"
 		} else {
@@ -86,5 +88,7 @@ func ResolveModel(baseName string, utilityDevice string, utilitySpeed string) st
 		}
 	}
 
+	// If speed is "smart" (default) and device is "gpu", suffix remains empty,
+	// correctly resolving to the base singleton (e.g., dex-commit, dex-public-message).
 	return "dex-" + baseName + suffix
 }
