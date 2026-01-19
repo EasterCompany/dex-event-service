@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -349,6 +350,14 @@ Rules:
 	modelSummary := utils.ResolveModel("summary", uDevice, uSpeed)
 	modelResponse := utils.ResolveModel("private-message", "gpu", "smart")
 
+	// Model Options (Keep-Alive for fast-cpu utilities)
+	utilityOptions := map[string]interface{}{
+		"num_thread": runtime.NumCPU(),
+	}
+	if strings.HasSuffix(modelEngagement, "-fast-cpu") || strings.HasSuffix(modelSummary, "-fast-cpu") {
+		utilityOptions["keep_alive"] = -1
+	}
+
 	shouldEngage := false
 	engagementReason := "Evaluated by " + modelEngagement
 	var engagementRaw string
@@ -371,7 +380,7 @@ Output EXACTLY one of the following tokens:
 
 Output ONLY the token.`, evalHistory, content)
 
-	engagementRaw, _, err = deps.Ollama.Generate(modelEngagement, prompt, nil)
+	engagementRaw, _, err = deps.Ollama.GenerateWithContext(ctx, modelEngagement, prompt, nil, utilityOptions)
 	decisionStr := "IGNORE"
 
 	if err == nil {
@@ -407,7 +416,7 @@ Output ONLY the token.`, evalHistory, content)
 	resolvedSummaryModel := modelSummary
 
 	// 1. Fetch structured context history
-	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, resolvedSummaryModel)
+	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, resolvedSummaryModel, utilityOptions)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch messages context: %v", err)
 	}
@@ -579,7 +588,7 @@ Output ONLY the token.`, evalHistory, content)
 			for _, m := range messages {
 				historyText += fmt.Sprintf("%s: %s\n", m.Role, m.Content)
 			}
-			signals, raw, err := analysis.Extract(context.Background(), deps.Ollama, analysisModel, content, historyText)
+			signals, raw, err := analysis.ExtractWithContext(context.Background(), deps.Ollama, analysisModel, content, historyText, utilityOptions)
 			if err != nil {
 				log.Printf("Signal extraction failed: %v", err)
 				return

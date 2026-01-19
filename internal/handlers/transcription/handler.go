@@ -149,7 +149,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	if shouldEngage {
 		// Fetch messages for Chat API
-		messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
+		messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel, nil)
 		if err != nil {
 			log.Printf("Warning: Failed to fetch messages context: %v", err)
 		}

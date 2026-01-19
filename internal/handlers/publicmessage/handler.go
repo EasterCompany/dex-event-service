@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -469,6 +470,19 @@ Rules:
 	modelSummary := utils.ResolveModel("summary", uDevice, uSpeed)
 	modelResponse := utils.ResolveModel("public-message", "gpu", "smart") // Response always smart/gpu by default
 
+	// Model Options (Keep-Alive for fast-cpu utilities)
+	utilityOptions := map[string]interface{}{
+		"num_thread": runtime.NumCPU(),
+	}
+	if strings.HasSuffix(modelEngagement, "-fast-cpu") || strings.HasSuffix(modelSummary, "-fast-cpu") {
+		utilityOptions["keep_alive"] = -1
+	}
+
+	var decisionStr string
+	responseModel := modelResponse
+	var prompt string
+	var evalHistory string
+
 	shouldEngage := false
 	engagementReason := "Evaluated by " + modelEngagement
 	var engagementRaw string
@@ -481,11 +495,6 @@ Rules:
 		"1437617331529580614": true, // Music
 		"1381915374181810236": true, // Memes
 	}
-
-	var decisionStr string
-	responseModel := modelResponse
-	var prompt string
-	var evalHistory string
 
 	// --- 0. Check for Quiet Mode (Reload options dynamically) ---
 	quietMode := false
@@ -530,7 +539,7 @@ Output EXACTLY one of the following tokens:
 
 Output ONLY the token.`, evalHistory, content)
 
-		engagementRaw, _, err = deps.Ollama.Generate(modelEngagement, prompt, nil)
+		engagementRaw, _, err = deps.Ollama.GenerateWithContext(ctx, modelEngagement, prompt, nil, utilityOptions)
 		if err != nil {
 			log.Printf("Regular engagement check failed: %v, defaulting to IGNORE", err)
 			decisionStr = "NONE"
@@ -584,7 +593,7 @@ Output EXACTLY one of the following tokens:
 
 Output ONLY the token.`, evalHistory, content)
 
-		engagementRaw, _, err = deps.Ollama.Generate(modelEngagement, prompt, nil)
+		engagementRaw, _, err = deps.Ollama.GenerateWithContext(ctx, modelEngagement, prompt, nil, utilityOptions)
 		if err == nil {
 			engagementRaw = strings.TrimSpace(engagementRaw)
 			upperRaw := strings.ToUpper(engagementRaw)
@@ -622,7 +631,7 @@ Output ONLY the token.`, evalHistory, content)
 	systemPrompt := utils.GetBaseSystemPrompt()
 	summaryModel := modelSummary
 
-	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
+	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel, utilityOptions)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch messages context: %v", err)
 	}
@@ -803,7 +812,7 @@ Output ONLY the token.`, evalHistory, content)
 			for _, m := range messages {
 				historyText += fmt.Sprintf("%s: %s\n", m.Role, m.Content)
 			}
-			signals, raw, err := analysis.Extract(context.Background(), deps.Ollama, analysisModel, content, historyText)
+			signals, raw, err := analysis.ExtractWithContext(context.Background(), deps.Ollama, analysisModel, content, historyText, utilityOptions)
 			if err != nil {
 				log.Printf("Signal extraction failed: %v", err)
 				return

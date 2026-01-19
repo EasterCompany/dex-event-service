@@ -22,6 +22,11 @@ type MessageSignals struct {
 
 // Extract uses an LLM to analyze message content and return structured signals.
 func Extract(ctx context.Context, client *ollama.Client, model string, content string, history string) (*MessageSignals, string, error) {
+	return ExtractWithContext(ctx, client, model, content, history, nil)
+}
+
+// ExtractWithContext uses an LLM to analyze message content with additional model options.
+func ExtractWithContext(ctx context.Context, client *ollama.Client, model string, content string, history string, options map[string]interface{}) (*MessageSignals, string, error) {
 	prompt := fmt.Sprintf(`Analyze the following user message within the provided context.
 Provide a granular analytical breakdown in JSON format.
 
@@ -42,7 +47,7 @@ Output EXACTLY this JSON structure:
   "mood": string // descriptive word
 }`, history, content)
 
-	raw, _, err := client.Generate(model, prompt, nil)
+	raw, _, err := client.GenerateWithContext(ctx, model, prompt, nil, options)
 	if err != nil {
 		return nil, "", err
 	}

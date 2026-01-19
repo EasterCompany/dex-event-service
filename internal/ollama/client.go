@@ -27,16 +27,26 @@ func NewClient(url string) *Client {
 	return &Client{BaseURL: url}
 }
 
+func getKeepAlive(options map[string]interface{}) interface{} {
+	if options != nil {
+		if val, ok := options["keep_alive"]; ok {
+			return val
+		}
+	}
+	return nil
+}
+
 func (c *Client) SetEventCallback(callback func(eventType string, data map[string]interface{})) {
 	c.EventCallback = callback
 }
 
 type GenerateRequest struct {
-	Model   string                 `json:"model"`
-	Prompt  string                 `json:"prompt"`
-	Images  []string               `json:"images,omitempty"`
-	Stream  bool                   `json:"stream"`
-	Options map[string]interface{} `json:"options,omitempty"`
+	Model     string                 `json:"model"`
+	Prompt    string                 `json:"prompt"`
+	Images    []string               `json:"images,omitempty"`
+	Stream    bool                   `json:"stream"`
+	Options   map[string]interface{} `json:"options,omitempty"`
+	KeepAlive interface{}            `json:"keep_alive,omitempty"`
 }
 
 type GenerateResponse struct {
@@ -58,11 +68,12 @@ type Message struct {
 }
 
 type ChatRequest struct {
-	Model    string                 `json:"model"`
-	Messages []Message              `json:"messages"`
-	Stream   bool                   `json:"stream"`
-	Format   string                 `json:"format,omitempty"` // json or empty
-	Options  map[string]interface{} `json:"options,omitempty"`
+	Model     string                 `json:"model"`
+	Messages  []Message              `json:"messages"`
+	Stream    bool                   `json:"stream"`
+	Format    string                 `json:"format,omitempty"` // json or empty
+	Options   map[string]interface{} `json:"options,omitempty"`
+	KeepAlive interface{}            `json:"keep_alive,omitempty"`
 }
 
 type ChatResponse struct {
@@ -104,11 +115,14 @@ func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []M
 		"method": "chat",
 	})
 
+	keepAlive := getKeepAlive(options)
+
 	reqBody := ChatRequest{
-		Model:    model,
-		Messages: messages,
-		Stream:   false,
-		Options:  options,
+		Model:     model,
+		Messages:  messages,
+		Stream:    false,
+		Options:   options,
+		KeepAlive: keepAlive,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -147,10 +161,11 @@ func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []M
 
 func (c *Client) ChatStream(ctx context.Context, model string, messages []Message, options map[string]interface{}, callback func(string)) (GenerationStats, error) {
 	reqBody := ChatRequest{
-		Model:    model,
-		Messages: messages,
-		Stream:   true,
-		Options:  options,
+		Model:     model,
+		Messages:  messages,
+		Stream:    true,
+		Options:   options,
+		KeepAlive: getKeepAlive(options),
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -222,12 +237,15 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 		"method": "generate",
 	})
 
+	keepAlive := getKeepAlive(options)
+
 	reqBody := GenerateRequest{
-		Model:   model,
-		Prompt:  prompt,
-		Images:  images,
-		Stream:  false,
-		Options: options,
+		Model:     model,
+		Prompt:    prompt,
+		Images:    images,
+		Stream:    false,
+		Options:   options,
+		KeepAlive: keepAlive,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -274,12 +292,20 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 }
 
 func (c *Client) GenerateStream(model, prompt string, images []string, options map[string]interface{}, callback func(string)) (GenerationStats, error) {
+
 	reqBody := GenerateRequest{
-		Model:   model,
-		Prompt:  prompt,
-		Images:  images,
-		Stream:  true,
+
+		Model: model,
+
+		Prompt: prompt,
+
+		Images: images,
+
+		Stream: true,
+
 		Options: options,
+
+		KeepAlive: getKeepAlive(options),
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {

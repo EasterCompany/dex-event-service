@@ -28,7 +28,7 @@ type CachedSummary struct {
 // GetMessages fetches history using a hybrid "Lazy Summary" approach.
 // It combines a cached long-term summary with recent raw messages.
 // If the raw buffer grows too large, it triggers a background summarization.
-func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Client, channelID string, summaryModel string) ([]ollama.Message, []string, error) {
+func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Client, channelID string, summaryModel string, options map[string]interface{}) ([]ollama.Message, []string, error) {
 	// 1. Fetch Cached Summary
 	var summary CachedSummary
 	summaryKey := "context:summary:" + channelID
@@ -114,7 +114,7 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 	if rawBufferTextLen > SummaryContextLimitChars {
 		// Trigger background update using the raw events we have
 		go func() {
-			updateSummaryBackground(context.Background(), redisClient, ollamaClient, channelID, summaryModel, summary, events)
+			updateSummaryBackground(context.Background(), redisClient, ollamaClient, channelID, summaryModel, summary, events, options)
 		}()
 	}
 
@@ -172,7 +172,7 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 
 // Get fetches context for non-chat scenarios (returns string)
 func Get(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Client, channelID string, summaryModel string) (string, error) {
-	msgs, _, err := GetMessages(ctx, redisClient, ollamaClient, channelID, summaryModel)
+	msgs, _, err := GetMessages(ctx, redisClient, ollamaClient, channelID, summaryModel, nil)
 	if err != nil {
 		return "", err
 	}
@@ -189,7 +189,7 @@ func Get(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Cl
 }
 
 // updateSummaryBackground performs the summarization task
-func updateSummaryBackground(ctx context.Context, rdb *redis.Client, client *ollama.Client, channelID string, model string, currentSummary CachedSummary, newEvents []types.Event) {
+func updateSummaryBackground(ctx context.Context, rdb *redis.Client, client *ollama.Client, channelID string, model string, currentSummary CachedSummary, newEvents []types.Event, options map[string]interface{}) {
 	// 1. Acquire Lock (debounce)
 	lockKey := "context:summary:lock:" + channelID
 	locked, err := rdb.SetNX(ctx, lockKey, "1", 30*time.Second).Result()
@@ -227,7 +227,7 @@ func updateSummaryBackground(ctx context.Context, rdb *redis.Client, client *oll
 	}
 
 	// 3. Generate
-	newText, _, err := client.Generate(model, prompt, nil)
+	newText, _, err := client.GenerateWithContext(ctx, model, prompt, nil, options)
 	if err != nil {
 		log.Printf("Failed to update context summary for %s: %v", channelID, err)
 		return
