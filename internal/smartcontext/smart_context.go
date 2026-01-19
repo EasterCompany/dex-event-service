@@ -150,9 +150,13 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 			if eventType == string(types.EventTypeMessagingBotSentMessage) || eventType == "messaging.bot.voice_response" {
 				role = "assistant"
 				name = "Dexter"
-			} else if eventType == string(types.EventTypeMessagingUserSentMessage) {
+			} else if eventType == string(types.EventTypeMessagingUserSentMessage) || eventType == "messaging.user.transcribed" {
 				role = "user"
 				name, _ = eventData["user_name"].(string)
+				// Transcription events might use 'transcription' field instead of 'content'
+				if content == "" {
+					content, _ = eventData["transcription"].(string)
+				}
 			} else {
 				content = cleanEventText(eventType, eventData, evt.Timestamp)
 			}

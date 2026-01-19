@@ -201,8 +201,6 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			{Role: "system", Content: systemPrompt},
 		}
 		finalMessages = append(finalMessages, messages...)
-		// Add the current transcription if it's not already in messages (it likely isn't as the event was just created)
-		finalMessages = append(finalMessages, ollama.Message{Role: "user", Content: transcription, Name: userName})
 
 		responseModel := "dex-transcription"
 
