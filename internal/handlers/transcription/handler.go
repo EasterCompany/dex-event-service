@@ -92,7 +92,11 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	}
 
 	// VRAM Optimization
-	_ = deps.Ollama.UnloadAllModelsExcept(ctx, "dex-engagement-fast")
+	// Skip unloading if we hold the Voice Mode lock, as we want both models loaded.
+	holder, _ := deps.Redis.Get(ctx, "system:cognitive_lock").Result()
+	if holder != "Voice Mode" {
+		_ = deps.Ollama.UnloadAllModelsExcept(ctx, "dex-engagement-fast")
+	}
 
 	// 1. Check Engagement
 	prompt := fmt.Sprintf("Analyze if Dexter should respond to this message (from voice transcription). Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", contextHistory, transcription)
@@ -202,7 +206,9 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		responseModel := "dex-transcription"
 
 		// VRAM Optimization
-		_ = deps.Ollama.UnloadAllModelsExcept(ctx, responseModel)
+		if holder != "Voice Mode" {
+			_ = deps.Ollama.UnloadAllModelsExcept(ctx, responseModel)
+		}
 
 		fullResponse := ""
 		options := map[string]interface{}{
