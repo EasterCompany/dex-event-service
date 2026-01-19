@@ -8,6 +8,65 @@ import (
 // All templates are hardcoded and versioned with the application
 func GetTemplates() map[string]EventTemplate {
 	return map[string]EventTemplate{
+		"system.cognitive.model_load": {
+			Description: "A cognitive model was loaded into memory",
+			Format:      "Loaded model: {model} ({method})",
+			Fields: map[string]FieldSpec{
+				"model": {
+					Type:        "string",
+					Required:    true,
+					Description: "Name of the model",
+				},
+				"method": {
+					Type:        "string",
+					Required:    true,
+					Description: "Method used to load (generate, chat, etc.)",
+				},
+				"duration": {
+					Type:        "string",
+					Required:    false,
+					Description: "Duration of the load operation",
+				},
+				"success": {
+					Type:        "boolean",
+					Required:    false,
+					Description: "Whether the load was successful",
+				},
+				"error": {
+					Type:        "string",
+					Required:    false,
+					Description: "Error message if failed",
+				},
+			},
+		},
+
+		"system.cognitive.model_unload": {
+			Description: "A cognitive model was unloaded from memory",
+			Format:      "Unloaded model: {model}",
+			Fields: map[string]FieldSpec{
+				"model": {
+					Type:        "string",
+					Required:    true,
+					Description: "Name of the model",
+				},
+				"reason": {
+					Type:        "string",
+					Required:    false,
+					Description: "Reason for unload (timeout, replacement, manual)",
+				},
+				"duration": {
+					Type:        "string",
+					Required:    false,
+					Description: "Duration of the unload operation",
+				},
+				"success": {
+					Type:        "boolean",
+					Required:    false,
+					Description: "Whether the unload was successful",
+				},
+			},
+		},
+
 		"message_received": {
 			Description: "A message received from a chat platform (Discord, Slack, etc.)",
 			Format:      "{user} posted in {channel}: {message}",
