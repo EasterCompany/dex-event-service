@@ -30,7 +30,7 @@ func (b *BaseAgent) isHeavyModel(model string) bool {
 		"dex-imaginator-model":      true,
 		"dex-master-model":          true,
 		"dex-private-message-model": true,
-		"dex-public-message-model":  true,
+		"dex-public-message":        true,
 		"dex-transcription-model":   true,
 	}
 	if heavyModels[model] {

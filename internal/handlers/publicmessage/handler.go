@@ -518,7 +518,7 @@ Rules:
 		shouldEngage = true
 		decisionStr = "REPLY"
 		engagementReason = "Direct mention"
-		responseModel = "dex-public-message-model"
+		responseModel = "dex-public-message"
 
 		// Still fetch context for telemetry and event completeness
 		evalHistory, _ = deps.Discord.FetchContext(channelID, 25)
@@ -641,7 +641,9 @@ Output ONLY the token.`, evalHistory, content)
 	systemPrompt := utils.GetBaseSystemPrompt()
 	summaryModel := modelSummary
 
-	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel, utilityOptions)
+	// Fetch Context (Hybrid Lazy Summary) - Limit to ~6k tokens (24000 chars) for 8k model
+	contextLimit := 24000
+	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel, contextLimit, utilityOptions)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch messages context: %v", err)
 	}

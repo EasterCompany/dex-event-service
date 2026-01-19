@@ -84,7 +84,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	// Fetch context
 	summaryModel := "dex-summary-model"
-	contextHistory, err := smartcontext.Get(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
+	contextLimit := 12000
+	contextHistory, err := smartcontext.Get(ctx, deps.Redis, deps.Ollama, channelID, summaryModel, contextLimit)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch context from smartcontext: %v, falling back to legacy", err)
 		contextHistory, _ = deps.Discord.FetchContext(channelID, 25)
@@ -149,7 +150,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	if shouldEngage {
 		// Fetch messages for Chat API
-		messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel, nil)
+		messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel, contextLimit, nil)
 		if err != nil {
 			log.Printf("Warning: Failed to fetch messages context: %v", err)
 		}

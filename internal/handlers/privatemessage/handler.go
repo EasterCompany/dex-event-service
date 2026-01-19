@@ -417,8 +417,9 @@ Output ONLY the token.`, evalHistory, content)
 	responseModel := modelResponse
 	resolvedSummaryModel := modelSummary
 
-	// 1. Fetch structured context history
-	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, resolvedSummaryModel, utilityOptions)
+	// Fetch Context (Hybrid Lazy Summary) - Limit to ~6k tokens (24000 chars) for 8k model
+	contextLimit := 24000
+	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, resolvedSummaryModel, contextLimit, utilityOptions)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch messages context: %v", err)
 	}

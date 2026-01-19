@@ -15,8 +15,7 @@ import (
 )
 
 const (
-	SummaryContextLimitChars = 6000 // Approx 1500 tokens - Trigger summary update
-	MaxRawEvents             = 50   // How many raw events to fetch to stitch with summary
+	MaxRawEvents = 50 // How many raw events to fetch to stitch with summary
 )
 
 type CachedSummary struct {
@@ -27,9 +26,12 @@ type CachedSummary struct {
 
 // GetMessages fetches history using a hybrid "Lazy Summary" approach.
 // It combines a cached long-term summary with recent raw messages.
-// If the raw buffer grows too large, it triggers a background summarization.
-func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Client, channelID string, summaryModel string, options map[string]interface{}) ([]ollama.Message, []string, error) {
-	// 1. Fetch Cached Summary
+// If the raw buffer grows too large (based on contextLimit), it triggers a background summarization.
+func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Client, channelID string, summaryModel string, contextLimit int, options map[string]interface{}) ([]ollama.Message, []string, error) {
+	// Default to 6000 chars (~1500 tokens) if limit is not provided
+	if contextLimit <= 0 {
+		contextLimit = 6000
+	}
 	var summary CachedSummary
 	summaryKey := "context:summary:" + channelID
 	val, err := redisClient.Get(ctx, summaryKey).Result()
@@ -111,7 +113,7 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 
 	// 6. Trigger Background Summarization if Buffer is Full
 	// We check if raw buffer is large AND we aren't already summarizing
-	if rawBufferTextLen > SummaryContextLimitChars {
+	if rawBufferTextLen > contextLimit {
 		// Trigger background update using the raw events we have
 		go func() {
 			updateSummaryBackground(context.Background(), redisClient, ollamaClient, channelID, summaryModel, summary, events, options)
@@ -171,8 +173,8 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 }
 
 // Get fetches context for non-chat scenarios (returns string)
-func Get(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Client, channelID string, summaryModel string) (string, error) {
-	msgs, _, err := GetMessages(ctx, redisClient, ollamaClient, channelID, summaryModel, nil)
+func Get(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Client, channelID string, summaryModel string, contextLimit int) (string, error) {
+	msgs, _, err := GetMessages(ctx, redisClient, ollamaClient, channelID, summaryModel, contextLimit, nil)
 	if err != nil {
 		return "", err
 	}

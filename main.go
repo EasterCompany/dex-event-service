@@ -144,7 +144,7 @@ func main() {
 		log.Fatalf("FATAL: Could not load service-map.json: %v", err)
 	}
 
-	// Load options for MasterUserID if not already loaded
+	// Load options if not already loaded
 	if options == nil {
 		options, err = config.LoadOptions()
 		if err != nil {
