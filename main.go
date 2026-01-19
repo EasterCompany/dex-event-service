@@ -273,6 +273,15 @@ func main() {
 	// API Endpoints
 	router.HandleFunc("/service", endpoints.ServiceHandler).Methods("GET")
 	router.HandleFunc("/debug/resolve-model", endpoints.DebugResolveModelHandler).Methods("GET")
+	router.HandleFunc("/debug/warmup", func(w http.ResponseWriter, r *http.Request) {
+		if options != nil {
+			go performCognitiveWarmup(ctx, options)
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte("Warmup triggered"))
+		} else {
+			http.Error(w, "Options not loaded", http.StatusInternalServerError)
+		}
+	}).Methods("POST")
 	router.HandleFunc("/events", endpoints.EventsHandler(redisClient)).Methods("POST", "GET", "DELETE")
 	router.HandleFunc("/events/{id}", endpoints.EventsHandler(redisClient)).Methods("GET", "PATCH", "DELETE")
 	router.HandleFunc("/chores", endpoints.ChoresHandler(redisClient)).Methods("GET", "POST")
