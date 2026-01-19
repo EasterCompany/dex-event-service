@@ -1380,14 +1380,18 @@ func GetSystemOptionsSnapshot() map[string]interface{} {
 	}
 	var opts struct {
 		Services map[string]map[string]interface{} `json:"services"`
+		Ollama   map[string]interface{}            `json:"ollama"`
 	}
 	if err := json.Unmarshal(data, &opts); err != nil {
 		return nil
 	}
 
 	res := make(map[string]interface{})
-	for k, v := range opts.Services {
-		res[k] = v
+	if opts.Services != nil {
+		res["services"] = opts.Services
+	}
+	if opts.Ollama != nil {
+		res["ollama"] = opts.Ollama
 	}
 	return res
 }
