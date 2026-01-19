@@ -23,6 +23,7 @@ import (
 	"github.com/EasterCompany/dex-event-service/internal/ollama"
 	"github.com/EasterCompany/dex-event-service/internal/web"
 	"github.com/EasterCompany/dex-event-service/middleware"
+	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/gorilla/mux"
 	redis "github.com/redis/go-redis/v9"
@@ -229,6 +230,22 @@ func main() {
 		EventServiceURL: eventURL,
 		TTSServiceURL:   ttsURL,
 	}
+
+	// Set EventCallback for Ollama to record model loads/unloads
+	deps.Ollama.SetEventCallback(func(eventType string, data map[string]interface{}) {
+		// Create an internal event
+		event := types.Event{
+			ID:        strconv.FormatInt(time.Now().UnixNano(), 10),
+			Service:   ServiceName,
+			Timestamp: time.Now().Unix(),
+		}
+		data["timestamp"] = event.Timestamp
+		data["type"] = eventType
+		event.Event, _ = json.Marshal(data)
+
+		// Save directly to Redis/Timeline
+		_ = handlers.SaveInternalEvent(event)
+	})
 
 	// Initialize Executor with dependencies
 	handlers.InitExecutor(deps)

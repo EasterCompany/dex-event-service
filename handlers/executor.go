@@ -336,3 +336,40 @@ func updateEvent(redisClient *redis.Client, event *types.Event) error {
 	eventJSON, _ := json.Marshal(event)
 	return redisClient.Set(ctx, eventKeyPrefix+event.ID, eventJSON, utils.DefaultTTL).Err()
 }
+
+// SaveInternalEvent saves an event directly to Redis and timelines.
+// Used for internal system tracking (e.g., model loads).
+func SaveInternalEvent(event types.Event) error {
+	if dependencies == nil || dependencies.Redis == nil {
+		return fmt.Errorf("executor or redis not initialized")
+	}
+
+	ctx := context.Background()
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+
+	// Extract type for indexing
+	var eventData map[string]interface{}
+	if err := json.Unmarshal(event.Event, &eventData); err != nil {
+		return err
+	}
+	eventType, _ := eventData["type"].(string)
+
+	score := float64(time.Now().UnixMicro()) / 1000000.0
+	pipe := dependencies.Redis.Pipeline()
+
+	// Store data
+	pipe.Set(ctx, eventKeyPrefix+event.ID, eventJSON, utils.DefaultTTL)
+
+	// Update Timelines
+	pipe.ZAdd(ctx, timelineKey, redis.Z{Score: score, Member: event.ID})
+	pipe.ZAdd(ctx, "events:service:"+event.Service, redis.Z{Score: score, Member: event.ID})
+	if eventType != "" {
+		pipe.ZAdd(ctx, "events:type:"+eventType, redis.Z{Score: score, Member: event.ID})
+	}
+
+	_, err = pipe.Exec(ctx)
+	return err
+}

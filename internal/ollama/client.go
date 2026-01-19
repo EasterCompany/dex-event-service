@@ -16,7 +16,8 @@ import (
 const DefaultURL = "http://127.0.0.1:11434"
 
 type Client struct {
-	BaseURL string
+	BaseURL       string
+	EventCallback func(eventType string, data map[string]interface{})
 }
 
 func NewClient(url string) *Client {
@@ -24,6 +25,10 @@ func NewClient(url string) *Client {
 		url = DefaultURL
 	}
 	return &Client{BaseURL: url}
+}
+
+func (c *Client) SetEventCallback(callback func(eventType string, data map[string]interface{})) {
+	c.EventCallback = callback
 }
 
 type GenerateRequest struct {
@@ -81,6 +86,12 @@ type GenerationStats struct {
 	EvalDuration       time.Duration
 }
 
+func (c *Client) emit(eventType string, data map[string]interface{}) {
+	if c.EventCallback != nil {
+		c.EventCallback(eventType, data)
+	}
+}
+
 func (c *Client) Chat(ctx context.Context, model string, messages []Message) (Message, error) {
 	return c.ChatWithOptions(ctx, model, messages, map[string]interface{}{
 		"num_thread": runtime.NumCPU(),
@@ -88,6 +99,11 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message) (Me
 }
 
 func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []Message, options map[string]interface{}) (Message, error) {
+	c.emit("system.cognitive.model_load", map[string]interface{}{
+		"model":  model,
+		"method": "chat",
+	})
+
 	reqBody := ChatRequest{
 		Model:    model,
 		Messages: messages,
@@ -201,6 +217,11 @@ func (c *Client) Generate(model, prompt string, images []string) (string, Genera
 }
 
 func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, images []string, options map[string]interface{}) (string, GenerationStats, error) {
+	c.emit("system.cognitive.model_load", map[string]interface{}{
+		"model":  model,
+		"method": "generate",
+	})
+
 	reqBody := GenerateRequest{
 		Model:   model,
 		Prompt:  prompt,
@@ -360,6 +381,10 @@ func (c *Client) ListRunningModels(ctx context.Context) ([]ProcessModel, error) 
 
 // UnloadModel forces a model to unload by sending a request with keep_alive: 0
 func (c *Client) UnloadModel(ctx context.Context, model string) error {
+	c.emit("system.cognitive.model_unload", map[string]interface{}{
+		"model": model,
+	})
+
 	payload := map[string]interface{}{
 		"model":      model,
 		"keep_alive": 0,
