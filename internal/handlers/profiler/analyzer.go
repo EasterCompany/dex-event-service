@@ -43,7 +43,7 @@ func NewAnalyzerAgent(redis *redis.Client, ollama *ollama.Client, discord *disco
 			Name:      "Analyzer",
 			ProcessID: AnalyzerProcessID,
 			Models: map[string]string{
-				"synthesis": "dex-master-model",
+				"synthesis": "dex-analyzer-synthesis",
 			},
 			ProtocolAliases: map[string]string{
 				"synthesis": "Synthesis",

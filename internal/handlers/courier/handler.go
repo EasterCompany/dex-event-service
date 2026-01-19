@@ -44,7 +44,7 @@ func NewCourierHandler(redis *redis.Client, ollama *ollama.Client, discord *disc
 			Name:      "Courier",
 			ProcessID: "system-courier",
 			Models: map[string]string{
-				"researcher": "dex-researcher-model",
+				"researcher": "dex-courier-researcher",
 			},
 			ProtocolAliases: map[string]string{
 				"researcher": "Researcher",

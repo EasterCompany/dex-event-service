@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -79,6 +80,9 @@ func main() {
 	// Set the version for the service.
 	utils.SetVersion(version, branch, commit, buildDate, buildYear, buildHash, arch)
 
+	// Declare options here so it's accessible in all scopes
+	var options *config.OptionsConfig
+
 	// Create a context for graceful shutdown for redis client
 	ctx, redisClientCancel := context.WithCancel(context.Background())
 	defer redisClientCancel()
@@ -97,6 +101,13 @@ func main() {
 
 		// Perform startup cleanup
 		performStartupCleanup(ctx, redisClient)
+
+		// Perform cognitive warmup (Pre-load CPU utilities)
+		// We reload here so we have the latest options.
+		if opt, err := config.LoadOptions(); err == nil {
+			options = opt
+			go performCognitiveWarmup(ctx, options)
+		}
 	}
 
 	// Handle delete mode
@@ -133,10 +144,12 @@ func main() {
 		log.Fatalf("FATAL: Could not load service-map.json: %v", err)
 	}
 
-	// Load options for MasterUserID
-	options, err := config.LoadOptions()
-	if err != nil {
-		log.Printf("Warning: Could not load options.json: %v. Master user features may be limited.", err)
+	// Load options for MasterUserID if not already loaded
+	if options == nil {
+		options, err = config.LoadOptions()
+		if err != nil {
+			log.Printf("Warning: Could not load options.json: %v. Master user features may be limited.", err)
+		}
 	}
 
 	var selfConfig *config.ServiceEntry
@@ -489,4 +502,50 @@ func performStartupCleanup(ctx context.Context, rdb *redis.Client) {
 		}
 	}
 	log.Println("Startup cleanup completed.")
+}
+
+func performCognitiveWarmup(ctx context.Context, opts *config.OptionsConfig) {
+	uDevice := opts.Ollama.UtilityDevice
+	uSpeed := opts.Ollama.UtilitySpeed
+
+	// We only pre-load if in CPU mode to ensure RAM residency (Warm RAM Strategy)
+	if uDevice != "" && uDevice != "cpu" {
+		return
+	}
+
+	log.Printf("Cognitive Warmup: Pre-loading CPU utility models (Speed: %s)...", uSpeed)
+
+	utilities := []string{
+		"engagement",
+		"summary",
+		"scraper",
+		"commit",
+		"moderation",
+		"router",
+		"vision",
+		"transcription",
+	}
+
+	ollamaURL := "http://127.0.0.1:11434"
+	client := ollama.NewClient(ollamaURL)
+
+	for _, base := range utilities {
+		model := utils.ResolveModel(base, "cpu", uSpeed)
+		log.Printf("  Warming %s...", model)
+
+		// Trigger background load with indefinite keep-alive
+		go func(m string) {
+			// We use Generate with empty prompt and keep_alive: -1 to force load
+			options := map[string]interface{}{
+				"keep_alive": -1,
+				"num_thread": runtime.NumCPU(),
+			}
+			_, _, err := client.GenerateWithContext(ctx, m, "", nil, options)
+			if err != nil {
+				log.Printf("Warning: Failed to warmup model %s: %v", m, err)
+			} else {
+				log.Printf("✓ Model %s is now resident in RAM.", m)
+			}
+		}(model)
+	}
 }

@@ -44,7 +44,7 @@ func NewImaginatorHandler(redis *redis.Client, ollama *ollama.Client, discord *d
 			Name:      "Imaginator",
 			ProcessID: ImaginatorProcessID,
 			Models: map[string]string{
-				"alert_review": "dex-imaginator-model", // Use a specialized model if available, or guardian/master
+				"alert_review": "dex-imaginator-alert-review", // Use a specialized model if available, or guardian/master
 			},
 			ProtocolAliases: map[string]string{
 				"alert_review": "AlertReview",
