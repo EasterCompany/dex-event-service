@@ -99,30 +99,31 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	}
 
 	// 1. Check Engagement
-	prompt := fmt.Sprintf("Analyze if Dexter should respond to this message (from voice transcription). Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", contextHistory, transcription)
-	engagementRaw, _, err := deps.Ollama.Generate("dex-engagement-fast", prompt, nil)
-	if err != nil {
-		log.Printf("Engagement check failed: %v", err)
-		return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
-	}
-
-	shouldEngage := strings.Contains(engagementRaw, "<ENGAGE/>")
-
-	engagementReason := "Evaluated by dex-engagement-fast"
+	shouldEngage := false
+	engagementRaw := "N/A (Skipped)"
+	engagementReason := ""
 
 	userCount, err := deps.Discord.GetVoiceChannelUserCount(channelID)
 	if err != nil {
 		log.Printf("Failed to get voice channel user count: %v", err)
+		userCount = 0 // Assume unknown
+	}
+
+	// Optimization: If it's a 1-on-1 (just user and Dexter), FORCE engagement without inference.
+	if userCount > 0 && userCount <= 2 {
+		log.Printf("Forcing engagement because user count is low (count: %d). Skipping inference.", userCount)
+		shouldEngage = true
+		engagementReason = fmt.Sprintf("Forced engagement: User count is %d (Low population)", userCount)
 	} else {
-		log.Printf("Voice channel user count: %d", userCount)
-		// Only force engagement if it's just the user and Dexter
-		if userCount <= 2 {
-			if !shouldEngage {
-				log.Printf("Forcing engagement because user count is low (count: %d)", userCount)
-				shouldEngage = true
-				engagementReason = fmt.Sprintf("Forced engagement: User count is %d (Low population)", userCount)
-			}
+		// More users present: Perform inference to see if Dexter was addressed.
+		prompt := fmt.Sprintf("Analyze if Dexter should respond to this message (from voice transcription). Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", contextHistory, transcription)
+		engagementRaw, _, err = deps.Ollama.Generate("dex-engagement-fast", prompt, nil)
+		if err != nil {
+			log.Printf("Engagement check failed: %v", err)
+			return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
 		}
+		shouldEngage = strings.Contains(engagementRaw, "<ENGAGE/>")
+		engagementReason = "Evaluated by dex-engagement-fast"
 	}
 
 	log.Printf("Engagement decision for transcription: %s (%v)", engagementRaw, shouldEngage)
