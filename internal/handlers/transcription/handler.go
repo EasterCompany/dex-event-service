@@ -74,7 +74,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	}
 
 	// 0.6 Busy Check (Single Serving AI)
-	if utils.IsSystemBusy(ctx, deps.Redis) {
+	if utils.IsSystemBusy(ctx, deps.Redis, true) {
 		log.Printf("System is busy with background tasks. Dexter is dipping out of this voice conversation.")
 		return types.HandlerOutput{Success: true}, nil
 	}
