@@ -155,7 +155,9 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	if shouldEngage {
 		// Fetch messages for Chat API
-		messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel, contextLimit, nil)
+		// LAZY SUMMARIZATION: Pass empty summaryModel to GetMessages to suppress background summarization
+		// during the latency-critical response phase. We will trigger it manually at the end.
+		messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, "", contextLimit, nil)
 		if err != nil {
 			log.Printf("Warning: Failed to fetch messages context: %v", err)
 		}
@@ -356,6 +358,12 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 			// Set cooldown to prevent immediate re-triggering
 			deps.Redis.Set(ctx, fmt.Sprintf("channel:voice_cooldown:%s", channelID), "1", 2*time.Second)
+
+			// ASYNC HOUSEKEEPING: Trigger background summarization after response is done
+			go func() {
+				log.Printf("Housekeeping: Triggering background context summary update for %s", channelID)
+				smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Ollama, channelID, summaryModel, smartcontext.CachedSummary{}, nil, nil)
+			}()
 		}
 	}
 
