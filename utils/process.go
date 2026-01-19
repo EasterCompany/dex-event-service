@@ -216,8 +216,21 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 	if discordClient != nil && state != "Queued" {
 		// Activity Type 3 = "Watching"
 		discordClient.UpdateBotStatus(state, "online", 3)
-		// Busy Mode: Mute and Deafen to enforce Single Serving AI
-		discordClient.SetVoiceState(true, true, fmt.Sprintf("Busy: %s", state))
+
+		// 3. Busy Mode Logic: Mute and Deafen to enforce Single Serving AI
+		// EXCEPTION: Do NOT mute/deafen if we are in Voice Mode (held by voice-mode process or global lock)
+		isVoice := processID == "voice-mode"
+		if !isVoice && holder == "Voice Mode" {
+			isVoice = true
+		}
+
+		if isVoice {
+			// Voice Mode: Must remain unmuted and undeafened to listen and speak
+			discordClient.SetVoiceState(false, false, "Voice Interaction Active")
+		} else {
+			// Regular Busy Mode: Mute and Deafen to prevent parallel interaction
+			discordClient.SetVoiceState(true, true, fmt.Sprintf("Busy: %s", state))
+		}
 	}
 }
 
@@ -368,9 +381,24 @@ func SyncDiscordStatus(ctx context.Context, redisClient *redis.Client, discordCl
 	} else if latestProcessState != "" {
 		// Update to the most recently updated process state
 		discordClient.UpdateBotStatus(latestProcessState, "online", 3)
+
 		// Ensure we remain muted if still active
 		if latestProcessState != "Queued" {
-			discordClient.SetVoiceState(true, true, fmt.Sprintf("System Active: %s", latestProcessState))
+			// EXCEPTION: Do NOT mute/deafen if we are in Voice Mode
+			holder, _ := redisClient.Get(ctx, CognitiveLockKey).Result()
+			isVoice := holder == "Voice Mode"
+
+			// Check if any active process is voice-mode
+			if !isVoice {
+				vExists, _ := redisClient.Exists(ctx, "process:info:voice-mode").Result()
+				isVoice = vExists > 0
+			}
+
+			if isVoice {
+				discordClient.SetVoiceState(false, false, "Voice Interaction Active")
+			} else {
+				discordClient.SetVoiceState(true, true, fmt.Sprintf("System Active: %s", latestProcessState))
+			}
 		}
 	}
 }
