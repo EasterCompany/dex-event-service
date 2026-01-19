@@ -457,8 +457,20 @@ Rules:
 		defer deps.Redis.Del(context.Background(), lockKey)
 	}
 
+	// Dynamic Model Resolution
+	uDevice := "cpu"
+	uSpeed := "smart"
+	if deps.Options != nil {
+		uDevice = deps.Options.Ollama.UtilityDevice
+		uSpeed = deps.Options.Ollama.UtilitySpeed
+	}
+
+	modelEngagement := utils.ResolveModel("engagement", uDevice, uSpeed)
+	modelSummary := utils.ResolveModel("summary", uDevice, uSpeed)
+	modelResponse := utils.ResolveModel("public-message", "gpu", "smart") // Response always smart/gpu by default
+
 	shouldEngage := false
-	engagementReason := "Evaluated by dex-engagement-model"
+	engagementReason := "Evaluated by " + modelEngagement
 	var engagementRaw string
 	var err error
 
@@ -471,7 +483,7 @@ Rules:
 	}
 
 	var decisionStr string
-	responseModel := "dex-public-message-model"
+	responseModel := modelResponse
 	var prompt string
 	var evalHistory string
 
@@ -518,7 +530,7 @@ Output EXACTLY one of the following tokens:
 
 Output ONLY the token.`, evalHistory, content)
 
-		engagementRaw, _, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
+		engagementRaw, _, err = deps.Ollama.Generate(modelEngagement, prompt, nil)
 		if err != nil {
 			log.Printf("Regular engagement check failed: %v, defaulting to IGNORE", err)
 			decisionStr = "NONE"
@@ -529,11 +541,11 @@ Output ONLY the token.`, evalHistory, content)
 			if strings.Contains(upperRaw, "ENGAGE_REGULAR") || strings.Contains(upperRaw, "ENGAGE") || strings.Contains(upperRaw, "<ENGAGE/>") {
 				shouldEngage = true
 				decisionStr = "ENGAGE_REGULAR"
-				responseModel = "dex-public-message-model"
+				responseModel = modelResponse
 			} else if strings.Contains(upperRaw, "ENGAGE_FAST") {
 				shouldEngage = true
 				decisionStr = "ENGAGE_FAST"
-				responseModel = "dex-public-message-model"
+				responseModel = modelResponse
 			} else if strings.Contains(upperRaw, "REACTION:") || strings.Contains(upperRaw, "REACT:") {
 				shouldEngage = false
 				decisionStr = "REACTION"
@@ -572,7 +584,7 @@ Output EXACTLY one of the following tokens:
 
 Output ONLY the token.`, evalHistory, content)
 
-		engagementRaw, _, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
+		engagementRaw, _, err = deps.Ollama.Generate(modelEngagement, prompt, nil)
 		if err == nil {
 			engagementRaw = strings.TrimSpace(engagementRaw)
 			upperRaw := strings.ToUpper(engagementRaw)
@@ -580,7 +592,7 @@ Output ONLY the token.`, evalHistory, content)
 			if strings.Contains(upperRaw, "ENGAGE") || strings.Contains(upperRaw, "<ENGAGE/>") {
 				shouldEngage = true
 				decisionStr = "ENGAGE_FAST"
-				responseModel = "dex-public-message-model"
+				responseModel = modelResponse
 			} else if strings.Contains(upperRaw, "REACTION:") || strings.Contains(upperRaw, "REACT:") {
 				shouldEngage = false
 				decisionStr = "REACTION"
@@ -608,7 +620,7 @@ Output ONLY the token.`, evalHistory, content)
 
 	// --- 2. Build Response Context based on Model Choice ---
 	systemPrompt := utils.GetBaseSystemPrompt()
-	summaryModel := "dex-summary-model"
+	summaryModel := modelSummary
 
 	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
 	if err != nil {
@@ -638,17 +650,19 @@ Output ONLY the token.`, evalHistory, content)
 		systemPrompt += "\n\n" + channelMembers
 	}
 
+	_ = engagementReason // Ensure variable is used
+
 	engagementEventData := map[string]interface{}{
 		"type":             "engagement.decision",
 		"decision":         decisionStr,
-		"reason":           engagementReason,
+		"reason":           "Evaluated by " + modelEngagement,
 		"handler":          "public-message-handler",
 		"event_id":         input.EventID,
 		"channel_id":       channelID,
 		"user_id":          userID,
 		"message_content":  content,
 		"timestamp":        time.Now().Unix(),
-		"engagement_model": "dex-engagement-model",
+		"engagement_model": modelEngagement,
 		"message_count":    len(messages),
 		"engagement_raw":   engagementRaw,
 		"input_prompt":     prompt,
@@ -783,7 +797,7 @@ Output ONLY the token.`, evalHistory, content)
 
 		// --- 3. Async Signal Extraction for User Profiling ---
 		go func() {
-			analysisModel := "dex-summary-model"
+			analysisModel := modelSummary
 			// For analysis we still use text block
 			historyText := ""
 			for _, m := range messages {

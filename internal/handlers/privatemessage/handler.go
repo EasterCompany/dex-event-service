@@ -337,8 +337,20 @@ Rules:
 		defer deps.Redis.Del(context.Background(), lockKey)
 	}
 
+	// Dynamic Model Resolution
+	uDevice := "cpu"
+	uSpeed := "smart"
+	if deps.Options != nil {
+		uDevice = deps.Options.Ollama.UtilityDevice
+		uSpeed = deps.Options.Ollama.UtilitySpeed
+	}
+
+	modelEngagement := utils.ResolveModel("engagement", uDevice, uSpeed)
+	modelSummary := utils.ResolveModel("summary", uDevice, uSpeed)
+	modelResponse := utils.ResolveModel("private-message", "gpu", "smart")
+
 	shouldEngage := false
-	engagementReason := "Evaluated by dex-engagement-model"
+	engagementReason := "Evaluated by " + modelEngagement
 	var engagementRaw string
 	var err error
 
@@ -359,7 +371,7 @@ Output EXACTLY one of the following tokens:
 
 Output ONLY the token.`, evalHistory, content)
 
-	engagementRaw, _, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
+	engagementRaw, _, err = deps.Ollama.Generate(modelEngagement, prompt, nil)
 	decisionStr := "IGNORE"
 
 	if err == nil {
@@ -391,11 +403,11 @@ Output ONLY the token.`, evalHistory, content)
 		}
 	}
 
-	responseModel := "dex-private-message-model"
-	summaryModel := "dex-summary-model"
+	responseModel := modelResponse
+	resolvedSummaryModel := modelSummary
 
 	// 1. Fetch structured context history
-	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel)
+	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, resolvedSummaryModel)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch messages context: %v", err)
 	}
@@ -426,7 +438,7 @@ Output ONLY the token.`, evalHistory, content)
 		"user_id":          userID,
 		"message_content":  content,
 		"timestamp":        time.Now().Unix(),
-		"engagement_model": "dex-engagement-model",
+		"engagement_model": modelEngagement,
 		"message_count":    len(messages),
 		"engagement_raw":   engagementRaw,
 		"input_prompt":     prompt,
@@ -561,7 +573,7 @@ Output ONLY the token.`, evalHistory, content)
 
 		// --- Async Signal Extraction ---
 		go func() {
-			analysisModel := "dex-summary-model"
+			analysisModel := resolvedSummaryModel
 			// For analysis we still use text block
 			historyText := ""
 			for _, m := range messages {

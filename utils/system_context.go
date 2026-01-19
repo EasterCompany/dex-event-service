@@ -66,3 +66,25 @@ Core: Event-driven Go system.
 Task: Provide a quick, witty, and helpful response.
 Rules: Be concise. No long explanations unless asked.`
 }
+
+// ResolveModel returns the full name of the model variant to use based on configuration.
+// baseName should be the core model name (e.g., "engagement", "summary", "public-message").
+func ResolveModel(baseName string, utilityDevice string, utilitySpeed string) string {
+	suffix := ""
+
+	// Determine Speed Variant
+	if utilitySpeed == "fast" {
+		suffix = "-fast"
+	}
+
+	// Determine Device Variant
+	if utilityDevice == "cpu" {
+		if suffix == "" {
+			suffix = "-cpu"
+		} else {
+			suffix += "-cpu"
+		}
+	}
+
+	return "dex-" + baseName + suffix
+}

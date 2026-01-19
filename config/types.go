@@ -46,6 +46,13 @@ type OptionsConfig struct {
 	Theme   string         `json:"theme"`
 	Logging bool           `json:"logging"`
 	Discord DiscordOptions `json:"discord"`
+	Ollama  OllamaOptions  `json:"ollama"`
+}
+
+// OllamaOptions holds configuration for model placement and optimization
+type OllamaOptions struct {
+	UtilityDevice string `json:"utility_device"` // "cpu" or "gpu"
+	UtilitySpeed  string `json:"utility_speed"`  // "fast" or "smart"
 }
 
 // DiscordOptions holds Discord-specific settings
