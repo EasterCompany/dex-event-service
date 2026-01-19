@@ -514,6 +514,11 @@ Rules:
 		decisionStr = "REPLY"
 		engagementReason = "Direct mention"
 		responseModel = "dex-public-message-model"
+
+		// Still fetch context for telemetry and event completeness
+		evalHistory, _ = deps.Discord.FetchContext(channelID, 25)
+		prompt = "FORCED_BY_MENTION"
+		engagementRaw = "<MENTION_DETECTED/>"
 	} else if restrictedChannels[channelID] {
 		log.Printf("Channel %s is restricted (analysis only). Skipping engagement check.", channelID)
 		shouldEngage = false

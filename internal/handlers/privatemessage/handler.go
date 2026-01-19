@@ -410,6 +410,10 @@ Output ONLY the token.`, evalHistory, content)
 			shouldEngage = false
 			decisionStr = "IGNORE"
 		}
+	} else {
+		// Even if model fails, populate telemetry for the event
+		evalHistory, _ = deps.Discord.FetchContext(channelID, 10)
+		engagementRaw = "ERROR: " + err.Error()
 	}
 
 	responseModel := modelResponse
