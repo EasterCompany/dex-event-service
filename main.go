@@ -259,6 +259,7 @@ func main() {
 
 	// API Endpoints
 	router.HandleFunc("/service", endpoints.ServiceHandler).Methods("GET")
+	router.HandleFunc("/debug/resolve-model", endpoints.DebugResolveModelHandler).Methods("GET")
 	router.HandleFunc("/events", endpoints.EventsHandler(redisClient)).Methods("POST", "GET", "DELETE")
 	router.HandleFunc("/events/{id}", endpoints.EventsHandler(redisClient)).Methods("GET", "PATCH", "DELETE")
 	router.HandleFunc("/chores", endpoints.ChoresHandler(redisClient)).Methods("GET", "POST")
