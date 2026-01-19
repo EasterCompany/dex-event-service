@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/internal/analysis"
 	"github.com/EasterCompany/dex-event-service/internal/handlers"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/profiler"
@@ -50,22 +51,19 @@ func emitEvent(serviceURL string, eventData map[string]interface{}) error {
 }
 
 func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Dependencies) (types.HandlerOutput, error) {
-	// 0. Claim Check (Anti-Race-Condition)
-	if deps.Redis != nil {
-		if claimed, _ := deps.Redis.Get(ctx, "handled:event:"+input.EventID).Result(); claimed == "1" {
-			log.Printf("Event %s already handled by previous cycle. Skipping.", input.EventID)
-			return types.HandlerOutput{Success: true}, nil
-		}
-	}
-
-	// 1. Check for interruption immediately
-	if deps.CheckInterruption != nil && deps.CheckInterruption() {
-		return types.HandlerOutput{Success: true}, nil
-	}
-
 	content, _ := input.EventData["content"].(string)
 	channelID, _ := input.EventData["channel_id"].(string)
 	userID, _ := input.EventData["user_id"].(string)
+
+	// --- 0. Reload Options Dynamically ---
+	if opt, err := config.LoadOptions(); err == nil {
+		deps.Options = opt
+	}
+
+	var prompt string
+	var evalHistory string
+
+	// 0. Claim Check (Anti-Race-Condition)
 
 	// Ensure we always clear the process status when we're done
 	defer utils.ClearProcess(context.Background(), deps.Redis, deps.Discord, channelID)
@@ -364,9 +362,9 @@ Rules:
 	var err error
 
 	// --- 1. Determine Engagement Decision ---
-	evalHistory, _ := deps.Discord.FetchContext(channelID, 10)
+	evalHistory, _ = deps.Discord.FetchContext(channelID, 10)
 	utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Vibe Check")
-	prompt := fmt.Sprintf(`Context:
+	prompt = fmt.Sprintf(`Context:
 %s
 
 Current Message:

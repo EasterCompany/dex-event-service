@@ -57,6 +57,12 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	userID, _ := input.EventData["user_id"].(string)
 	mentionedBot, _ := input.EventData["mentioned_bot"].(bool)
 
+	// --- 0. Reload Options Dynamically ---
+	// We reload here so that model resolution and quiet mode use the latest user settings.
+	if opt, err := config.LoadOptions(); err == nil {
+		deps.Options = opt
+	}
+
 	// 0. Claim Check (Anti-Race-Condition)
 	// If this event was already included in a previous response's context window, skip it.
 	if deps.Redis != nil {
@@ -496,11 +502,10 @@ Rules:
 		"1381915374181810236": true, // Memes
 	}
 
-	// --- 0. Check for Quiet Mode (Reload options dynamically) ---
+	// --- 0. Check for Quiet Mode ---
 	quietMode := false
-	if opt, err := config.LoadOptions(); err == nil {
-		deps.Options = opt
-		quietMode = opt.Discord.QuietMode
+	if deps.Options != nil {
+		quietMode = deps.Options.Discord.QuietMode
 	}
 
 	if quietMode && !mentionedBot {
@@ -526,7 +531,7 @@ Rules:
 		engagementReason = "Restricted Channel (Analysis Only)"
 	} else if channelID == MainChatChannelID {
 		// Fetch standard history for evaluating strategy
-		evalHistory, _ := deps.Discord.FetchContext(channelID, 25)
+		evalHistory, _ = deps.Discord.FetchContext(channelID, 25)
 
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Evaluating Strategy")
 		prompt = fmt.Sprintf(`Context:
@@ -582,7 +587,7 @@ Output ONLY the token.`, evalHistory, content)
 		}
 	} else {
 		// --- OTHER CHANNELS: Binary Engagement + Reaction Support ---
-		evalHistory, _ := deps.Discord.FetchContext(channelID, 10)
+		evalHistory, _ = deps.Discord.FetchContext(channelID, 10)
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Vibe Check")
 		prompt = fmt.Sprintf(`Context:
 %s

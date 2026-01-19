@@ -77,8 +77,8 @@ func ResolveModel(baseName string, utilityDevice string, utilitySpeed string) st
 		suffix = "-fast"
 	}
 
-	// Determine Device Variant
-	if utilityDevice == "cpu" {
+	// Determine Device Variant (Default to CPU if empty)
+	if utilityDevice == "" || utilityDevice == "cpu" {
 		if suffix == "" {
 			suffix = "-cpu"
 		} else {

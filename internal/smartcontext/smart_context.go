@@ -223,7 +223,7 @@ func updateSummaryBackground(ctx context.Context, rdb *redis.Client, client *oll
 	}
 
 	if model == "" {
-		model = "dex-fast-summary-model"
+		model = "dex-summary-fast-cpu"
 	}
 
 	// 3. Generate
