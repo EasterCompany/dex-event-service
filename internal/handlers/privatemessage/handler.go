@@ -355,7 +355,7 @@ Your task is to decide how Dexter should engage with the current Private Message
 Output EXACTLY one of the following tokens:
 - "IGNORE": No action.
 - "REACTION:<emoji>": React with a single emoji.
-- "<ENGAGE/>": Generate a full text response.
+- "ENGAGE": Generate a full text response.
 
 Output ONLY the token.`, evalHistory, content)
 
@@ -366,12 +366,13 @@ Output ONLY the token.`, evalHistory, content)
 		engagementRaw = strings.TrimSpace(engagementRaw)
 		upperRaw := strings.ToUpper(engagementRaw)
 
-		if strings.Contains(upperRaw, "<ENGAGE/>") {
+		if strings.Contains(upperRaw, "ENGAGE") || strings.Contains(upperRaw, "<ENGAGE/>") {
 			shouldEngage = true
 			decisionStr = "REPLY_REGULAR"
-		} else if strings.Contains(upperRaw, "REACTION:") {
+		} else if strings.Contains(upperRaw, "REACTION:") || strings.Contains(upperRaw, "REACT:") {
 			shouldEngage = false
 			decisionStr = "REACTION"
+			// Extract emoji from either REACTION: or REACT:
 			parts := strings.SplitN(engagementRaw, ":", 2)
 			if len(parts) == 2 {
 				emoji := strings.TrimSpace(parts[1])
@@ -428,6 +429,8 @@ Output ONLY the token.`, evalHistory, content)
 		"engagement_model": "dex-engagement-model",
 		"message_count":    len(messages),
 		"engagement_raw":   engagementRaw,
+		"input_prompt":     prompt,
+		"eval_history":     evalHistory,
 	}
 
 	if err := emitEvent(deps.EventServiceURL, engagementEventData); err != nil {

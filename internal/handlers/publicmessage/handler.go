@@ -464,10 +464,6 @@ Rules:
 
 	// --- 1. First Determine the Engagement Decision & Model ---
 	const MainChatChannelID = "1426957003108122656"
-	masterUserID := ""
-	if deps.Options != nil {
-		masterUserID = deps.Options.Discord.MasterUser
-	}
 
 	restrictedChannels := map[string]bool{
 		"1437617331529580614": true, // Music
@@ -476,6 +472,8 @@ Rules:
 
 	var decisionStr string
 	responseModel := "dex-public-message-model"
+	var prompt string
+	var evalHistory string
 
 	// --- 0. Check for Quiet Mode (Reload options dynamically) ---
 	quietMode := false
@@ -505,7 +503,7 @@ Rules:
 		evalHistory, _ := deps.Discord.FetchContext(channelID, 25)
 
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Evaluating Strategy")
-		prompt := fmt.Sprintf(`Context:
+		prompt = fmt.Sprintf(`Context:
 %s
 
 Current Message:
@@ -516,11 +514,9 @@ Output EXACTLY one of the following tokens:
 - "IGNORE": No action.
 - "REACTION:<emoji>": React with a single emoji.
 - "ENGAGE_FAST": Quick response for simple banter/social.
-- "ENGAGE_REGULAR": Full response for complex topics or if the user is Owen.
+- "ENGAGE": Full response for complex topics.
 
-User ID: %s (Master ID: %s)
-
-Output ONLY the token.`, evalHistory, content, userID, masterUserID)
+Output ONLY the token.`, evalHistory, content)
 
 		engagementRaw, _, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
 		if err != nil {
@@ -530,12 +526,7 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 			engagementRaw = strings.TrimSpace(engagementRaw)
 			upperRaw := strings.ToUpper(engagementRaw)
 
-			if userID == masterUserID {
-				log.Printf("Master user detected in Main Chat, forcing ENGAGE_REGULAR")
-				shouldEngage = true
-				decisionStr = "ENGAGE_REGULAR"
-				responseModel = "dex-public-message-model"
-			} else if strings.Contains(upperRaw, "ENGAGE_REGULAR") {
+			if strings.Contains(upperRaw, "ENGAGE_REGULAR") || strings.Contains(upperRaw, "ENGAGE") || strings.Contains(upperRaw, "<ENGAGE/>") {
 				shouldEngage = true
 				decisionStr = "ENGAGE_REGULAR"
 				responseModel = "dex-public-message-model"
@@ -543,7 +534,7 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 				shouldEngage = true
 				decisionStr = "ENGAGE_FAST"
 				responseModel = "dex-public-message-model"
-			} else if strings.Contains(upperRaw, "REACTION:") {
+			} else if strings.Contains(upperRaw, "REACTION:") || strings.Contains(upperRaw, "REACT:") {
 				shouldEngage = false
 				decisionStr = "REACTION"
 				parts := strings.SplitN(engagementRaw, ":", 2)
@@ -567,7 +558,7 @@ Output ONLY the token.`, evalHistory, content, userID, masterUserID)
 		// --- OTHER CHANNELS: Binary Engagement + Reaction Support ---
 		evalHistory, _ := deps.Discord.FetchContext(channelID, 10)
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Vibe Check")
-		prompt := fmt.Sprintf(`Context:
+		prompt = fmt.Sprintf(`Context:
 %s
 
 Current Message:
@@ -577,7 +568,7 @@ Analyze if Dexter should respond to this message.
 Output EXACTLY one of the following tokens:
 - "IGNORE": No action.
 - "REACTION:<emoji>": React with a single emoji.
-- "<ENGAGE/>": Generate a full text response.
+- "ENGAGE": Generate a full text response.
 
 Output ONLY the token.`, evalHistory, content)
 
@@ -586,11 +577,11 @@ Output ONLY the token.`, evalHistory, content)
 			engagementRaw = strings.TrimSpace(engagementRaw)
 			upperRaw := strings.ToUpper(engagementRaw)
 
-			if strings.Contains(upperRaw, "<ENGAGE/>") {
+			if strings.Contains(upperRaw, "ENGAGE") || strings.Contains(upperRaw, "<ENGAGE/>") {
 				shouldEngage = true
 				decisionStr = "ENGAGE_FAST"
 				responseModel = "dex-public-message-model"
-			} else if strings.Contains(upperRaw, "REACTION:") {
+			} else if strings.Contains(upperRaw, "REACTION:") || strings.Contains(upperRaw, "REACT:") {
 				shouldEngage = false
 				decisionStr = "REACTION"
 				parts := strings.SplitN(engagementRaw, ":", 2)
@@ -660,6 +651,8 @@ Output ONLY the token.`, evalHistory, content)
 		"engagement_model": "dex-engagement-model",
 		"message_count":    len(messages),
 		"engagement_raw":   engagementRaw,
+		"input_prompt":     prompt,
+		"eval_history":     evalHistory,
 	}
 
 	if err := emitEvent(deps.EventServiceURL, engagementEventData); err != nil {
