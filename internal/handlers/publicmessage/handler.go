@@ -380,7 +380,7 @@ Rules:
 3. DO NOT flag memes or common internet GIFs as explicit unless they depict actual sexual acts.
 4. Treat screenshots of pornographic websites or links to explicit galleries as Rule 1.`
 					var err error
-					description, _, err = deps.Ollama.Generate("dex-vision-model", prompt, []string{base64Img})
+					description, _, err = deps.Ollama.Generate("dex-vision", prompt, []string{base64Img})
 					if err != nil {
 						log.Printf("Vision model failed for %s: %v", filename, err)
 						continue
@@ -744,7 +744,6 @@ Output ONLY the token.`, evalHistory, content)
 		finalMessages = append(finalMessages, ollama.Message{Role: "user", Content: content})
 
 		streamMessageID, err := deps.Discord.InitStream(channelID, "<a:typing:1449387367315275786>")
-
 		if err != nil {
 
 			log.Printf("Failed to init stream: %v", err)
@@ -767,7 +766,6 @@ Output ONLY the token.`, evalHistory, content)
 			}
 			deps.Discord.UpdateStream(channelID, streamMessageID, denormalizedResponse)
 		})
-
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
 			_, _ = deps.Discord.CompleteStream(channelID, streamMessageID, "Error: I couldn't generate a response. Please try again later.")

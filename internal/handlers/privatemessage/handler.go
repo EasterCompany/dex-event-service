@@ -244,7 +244,7 @@ Rules:
 2. If the image contains non-sexual nudity (classical art, statues, medical context), memes, cartoons, or is otherwise safe, provide a concise visual description.
 3. DO NOT flag memes or common internet GIFs as explicit unless they depict actual sexual acts.
 4. Treat screenshots of pornographic websites or links to explicit galleries as Rule 1.`
-					description, _, err = deps.Ollama.Generate("dex-vision-model", prompt, []string{base64Img})
+					description, _, err = deps.Ollama.Generate("dex-vision", prompt, []string{base64Img})
 					if err != nil {
 						log.Printf("Vision model failed for %s: %v", filename, err)
 						continue
@@ -535,7 +535,6 @@ Output ONLY the token.`, evalHistory, content)
 			}
 			deps.Discord.UpdateStream(channelID, streamMessageID, denormalizedResponse)
 		})
-
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
 			_, _ = deps.Discord.CompleteStream(channelID, streamMessageID, "Error: I couldn't generate a response. Please try again later.")
