@@ -639,11 +639,10 @@ Output ONLY the token.`, evalHistory, content)
 
 	// --- 2. Build Response Context based on Model Choice ---
 	systemPrompt := utils.GetBaseSystemPrompt()
-	summaryModel := modelSummary
 
-	// Fetch Context (Hybrid Lazy Summary) - Limit to ~6k tokens (24000 chars) for 8k model
+	// Fetch Context (Hybrid Lazy Summary) - Disable automatic background summarization during thinking phase
 	contextLimit := 24000
-	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, summaryModel, contextLimit, utilityOptions)
+	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, "", contextLimit, utilityOptions)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch messages context: %v", err)
 	}
@@ -814,9 +813,14 @@ Output ONLY the token.`, evalHistory, content)
 			log.Printf("Warning: Failed to emit event: %v", err)
 		}
 
-		// --- 3. Async Signal Extraction for User Profiling ---
+		// --- 3. Async Tasks (Housekeeping & Profiling) ---
 		go func() {
 			analysisModel := modelSummary
+
+			// 1. Context Housekeeping (Summarize if needed)
+			smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Ollama, channelID, analysisModel, smartcontext.CachedSummary{}, nil, utilityOptions)
+
+			// 2. Signal Extraction for User Profiling
 			// For analysis we still use text block
 			historyText := ""
 			for _, m := range messages {

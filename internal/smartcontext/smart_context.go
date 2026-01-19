@@ -113,10 +113,10 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 
 	// 6. Trigger Background Summarization if Buffer is Full
 	// We check if raw buffer is large AND we aren't already summarizing
-	if rawBufferTextLen > contextLimit {
+	if summaryModel != "" && rawBufferTextLen > contextLimit {
 		// Trigger background update using the raw events we have
 		go func() {
-			updateSummaryBackground(context.Background(), redisClient, ollamaClient, channelID, summaryModel, summary, events, options)
+			UpdateSummary(context.Background(), redisClient, ollamaClient, channelID, summaryModel, summary, events, options)
 		}()
 	}
 
@@ -190,8 +190,37 @@ func Get(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Cl
 	return sb.String(), nil
 }
 
-// updateSummaryBackground performs the summarization task
-func updateSummaryBackground(ctx context.Context, rdb *redis.Client, client *ollama.Client, channelID string, model string, currentSummary CachedSummary, newEvents []types.Event, options map[string]interface{}) {
+// UpdateSummary performs the summarization task
+func UpdateSummary(ctx context.Context, rdb *redis.Client, client *ollama.Client, channelID string, model string, currentSummary CachedSummary, newEvents []types.Event, options map[string]interface{}) {
+	// If currentSummary is empty (LastEventID is empty), try to load it from Redis
+	if currentSummary.LastEventID == "" {
+		summaryKey := "context:summary:" + channelID
+		val, err := rdb.Get(ctx, summaryKey).Result()
+		if err == nil {
+			_ = json.Unmarshal([]byte(val), &currentSummary)
+		}
+	}
+
+	// If newEvents is empty, fetch them (up to MaxRawEvents)
+	if len(newEvents) == 0 {
+		eventIDs, err := rdb.ZRevRange(ctx, "events:channel:"+channelID, 0, int64(MaxRawEvents-1)).Result()
+		if err == nil && len(eventIDs) > 0 {
+			for _, id := range eventIDs {
+				data, err := rdb.Get(ctx, "event:"+id).Result()
+				if err == nil {
+					var evt types.Event
+					if err := json.Unmarshal([]byte(data), &evt); err == nil {
+						newEvents = append(newEvents, evt)
+					}
+				}
+			}
+			// Reorder to Chronological
+			for i, j := 0, len(newEvents)-1; i < j; i, j = i+1, j-1 {
+				newEvents[i], newEvents[j] = newEvents[j], newEvents[i]
+			}
+		}
+	}
+
 	// 1. Acquire Lock (debounce)
 	lockKey := "context:summary:lock:" + channelID
 	locked, err := rdb.SetNX(ctx, lockKey, "1", 30*time.Second).Result()
