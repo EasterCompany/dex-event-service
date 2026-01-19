@@ -871,6 +871,11 @@ func GetTemplates() map[string]EventTemplate {
 					Required:    false,
 					Description: "Model used for generating response",
 				},
+				"input_prompt": {
+					Type:        "string",
+					Required:    false,
+					Description: "Raw input prompt to the engagement model",
+				},
 				"context_history": {
 					Type:        "string",
 					Required:    false,

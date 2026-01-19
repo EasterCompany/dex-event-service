@@ -685,7 +685,7 @@ Output ONLY the token.`, evalHistory, content)
 		"message_count":    len(messages),
 		"engagement_raw":   engagementRaw,
 		"input_prompt":     prompt,
-		"eval_history":     evalHistory,
+		"context_history":  evalHistory,
 	}
 
 	if err := emitEvent(deps.EventServiceURL, engagementEventData); err != nil {
