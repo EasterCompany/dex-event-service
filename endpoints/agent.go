@@ -133,7 +133,7 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 	imaginatorActive, _ := rdb.Get(ctx, "imaginator:active_tier").Result()
 	imaginatorProtocols := make(map[string]ProtocolStatus)
 	imaginatorProtocols["alert_review"] = calculateProtocolStatus(
-		ctx, rdb, imaginatorActive, "alert_review", 3600, "dex-imaginator-model", "imaginator",
+		ctx, rdb, imaginatorActive, "alert_review", 3600, "dex-imaginator-alert-review", "imaginator",
 	)
 
 	resp.Agents["imaginator"] = AgentState{
@@ -147,7 +147,7 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 
 	// Synthesis (Every 12 hours = 43200s)
 	analyzerProtocols["synthesis"] = calculateProtocolStatus(
-		ctx, rdb, analyzerActive, "synthesis", 43200, "dex-master-model", "analyzer",
+		ctx, rdb, analyzerActive, "synthesis", 43200, "dex-master", "analyzer",
 	)
 
 	resp.Agents["analyzer"] = AgentState{
@@ -175,7 +175,7 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 
 	// Researcher (5 min cooldown handled by calculateProtocolStatus)
 	courierProtocols["researcher"] = calculateProtocolStatus(
-		ctx, rdb, courierActive, "researcher", 300, "dex-scraper-model", "courier",
+		ctx, rdb, courierActive, "researcher", 300, "dex-scraper", "courier",
 	)
 
 	resp.Agents["courier"] = AgentState{

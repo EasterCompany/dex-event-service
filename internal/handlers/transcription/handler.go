@@ -83,7 +83,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	defer deps.Discord.UpdateBotStatus("Listening for events...", "online", 2)
 
 	// Fetch context
-	summaryModel := "dex-summary-model"
+	summaryModel := "dex-summary"
 	contextLimit := 12000
 	contextHistory, err := smartcontext.Get(ctx, deps.Redis, deps.Ollama, channelID, summaryModel, contextLimit)
 	if err != nil {
@@ -92,11 +92,11 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	}
 
 	// VRAM Optimization
-	_ = deps.Ollama.UnloadAllModelsExcept(ctx, "dex-fast-engagement-model")
+	_ = deps.Ollama.UnloadAllModelsExcept(ctx, "dex-engagement-fast")
 
 	// 1. Check Engagement
 	prompt := fmt.Sprintf("Analyze if Dexter should respond to this message (from voice transcription). Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", contextHistory, transcription)
-	engagementRaw, _, err := deps.Ollama.Generate("dex-fast-engagement-model", prompt, nil)
+	engagementRaw, _, err := deps.Ollama.Generate("dex-engagement-fast", prompt, nil)
 	if err != nil {
 		log.Printf("Engagement check failed: %v", err)
 		return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
@@ -104,7 +104,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	shouldEngage := strings.Contains(engagementRaw, "<ENGAGE/>")
 
-	engagementReason := "Evaluated by dex-fast-engagement-model"
+	engagementReason := "Evaluated by dex-engagement-fast"
 
 	userCount, err := deps.Discord.GetVoiceChannelUserCount(channelID)
 	if err != nil {
@@ -138,7 +138,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		"user_id":          userID,
 		"message_content":  transcription,
 		"timestamp":        time.Now().Unix(),
-		"engagement_model": "dex-fast-engagement-model",
+		"engagement_model": "dex-engagement-fast",
 		"context_history":  contextHistory,
 		"engagement_raw":   engagementRaw,
 		"user_count":       userCount,
@@ -199,7 +199,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		// Add the current transcription if it's not already in messages (it likely isn't as the event was just created)
 		finalMessages = append(finalMessages, ollama.Message{Role: "user", Content: transcription, Name: userName})
 
-		responseModel := "dex-transcription-model"
+		responseModel := "dex-transcription"
 
 		// VRAM Optimization
 		_ = deps.Ollama.UnloadAllModelsExcept(ctx, responseModel)
