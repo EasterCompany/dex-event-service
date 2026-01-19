@@ -406,9 +406,14 @@ func (c *Client) ListRunningModels(ctx context.Context) ([]ProcessModel, error) 
 }
 
 // UnloadModel forces a model to unload by sending a request with keep_alive: 0
-func (c *Client) UnloadModel(ctx context.Context, model string) error {
+func (c *Client) UnloadModel(ctx context.Context, model string, reason string) error {
+	if reason == "" {
+		reason = "manual"
+	}
+
 	c.emit("system.cognitive.model_unload", map[string]interface{}{
-		"model": model,
+		"model":  model,
+		"reason": reason,
 	})
 
 	payload := map[string]interface{}{
@@ -446,7 +451,7 @@ func (c *Client) UnloadAllModelsExcept(ctx context.Context, keepModel string) er
 			// Models on CPU (SizeVRAM == 0) don't cause thrashing and should be preserved for speed.
 			if m.SizeVRAM > 0 {
 				log.Printf("Optimizing VRAM: Unloading idle model %s (%d bytes VRAM)...", m.Name, m.SizeVRAM)
-				if err := c.UnloadModel(ctx, m.Name); err != nil {
+				if err := c.UnloadModel(ctx, m.Name, "VRAM Optimization"); err != nil {
 					log.Printf("Failed to unload %s: %v", m.Name, err)
 				}
 			} else {
