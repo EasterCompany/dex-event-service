@@ -274,6 +274,11 @@ func main() {
 	router.HandleFunc("/service", endpoints.ServiceHandler).Methods("GET")
 	router.HandleFunc("/debug/resolve-model", endpoints.DebugResolveModelHandler).Methods("GET")
 	router.HandleFunc("/debug/warmup", func(w http.ResponseWriter, r *http.Request) {
+		// Reload options to catch any changes made via CLI during tests
+		if opt, err := config.LoadOptions(); err == nil {
+			options = opt
+		}
+
 		if options != nil {
 			go performCognitiveWarmup(ctx, options)
 			w.WriteHeader(http.StatusAccepted)
