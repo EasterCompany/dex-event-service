@@ -543,23 +543,26 @@ func performCognitiveWarmup(ctx context.Context, opts *config.OptionsConfig) {
 	ollamaURL := "http://127.0.0.1:11434"
 	client := ollama.NewClient(ollamaURL)
 
-	for _, base := range utilities {
-		model := utils.ResolveModel(base, "cpu", uSpeed)
-		log.Printf("  Warming %s...", model)
+	// Trigger background load sequentially to avoid overwhelming Ollama
+	go func() {
+		for _, base := range utilities {
+			model := utils.ResolveModel(base, "cpu", uSpeed)
+			log.Printf("  Warming %s...", model)
 
-		// Trigger background load with indefinite keep-alive
-		go func(m string) {
 			// We use Generate with empty prompt and keep_alive: -1 to force load
 			options := map[string]interface{}{
 				"keep_alive": -1,
 				"num_thread": runtime.NumCPU(),
 			}
-			_, _, err := client.GenerateWithContext(ctx, m, "", nil, options)
+			_, _, err := client.GenerateWithContext(ctx, model, "", nil, options)
 			if err != nil {
-				log.Printf("Warning: Failed to warmup model %s: %v", m, err)
+				log.Printf("Warning: Failed to warmup model %s: %v", model, err)
 			} else {
-				log.Printf("✓ Model %s is now resident in RAM.", m)
+				log.Printf("✓ Model %s is now resident in RAM.", model)
 			}
-		}(model)
-	}
+			// Small delay between loads to let system stabilize
+			time.Sleep(500 * time.Millisecond)
+		}
+		log.Println("Cognitive Warmup Complete.")
+	}()
 }
