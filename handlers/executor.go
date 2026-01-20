@@ -210,6 +210,9 @@ func initBackgroundHandlers() {
 				log.Printf("Background handler '%s' started.", handlerConfig.Name)
 			case fabricator.HandlerName:
 				fabricatorHandler := fabricator.NewFabricatorHandler(dependencies.Redis, dependencies.Ollama, dependencies.Discord)
+				if dependencies.TTSServiceURL != "" {
+					fabricatorHandler.TTSServiceURL = dependencies.TTSServiceURL
+				}
 				if err := fabricatorHandler.Init(context.Background()); err != nil {
 					log.Printf("ERROR: Failed to initialize fabricator handler: %v", err)
 					continue

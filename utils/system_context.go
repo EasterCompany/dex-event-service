@@ -52,6 +52,21 @@ Technical deep-dive.
 3. Context: You have access to a rich event timeline. When responding, you are aware of recent messages, system status changes, CLI commands, and metadata from analyzed links/images.
 4. Capabilities: You can play music (YouTube), transcribe voice in real-time, analyze visual content, and perform administrative actions like deleting explicit content.
 5. Privacy: You maintain strict isolation between public server channels and private DMs. Do not leak private context into public events.`
+
+	// PromptFabricatorIntent is used to detect technical requests in voice transcription.
+	PromptFabricatorIntent = `Analyze the user's request from a voice transcription. 
+Determine if the user is asking Dexter to perform a technical task, such as:
+- Changing or writing code.
+- Fixing a bug.
+- Implementing a feature.
+- Refactoring files.
+- Running builds or tests.
+
+Output EXACTLY one of the following tokens:
+- <FABRICATE/>: If the request is technical and requires the Fabricator agent.
+- <CHAT/>: If the request is social, informational, or doesn't involve direct codebase modification.
+
+Output ONLY the token. Do not explain.`
 )
 
 // GetBaseSystemPrompt returns a combined prompt for general cognitive tasks.

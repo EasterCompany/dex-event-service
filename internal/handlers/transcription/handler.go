@@ -149,9 +149,23 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	log.Printf("Engagement decision for transcription: %s (%v)", engagementRaw, shouldEngage)
 
+	// 1.5. Check Fabricator Intent (if addressing Dexter)
+	isFabricatorIntent := false
+	if shouldEngage {
+		intentPrompt := fmt.Sprintf("%s\n\nRequest: %s", utils.PromptFabricatorIntent, transcription)
+		intentRaw, _, err := deps.Ollama.Generate("dex-engagement-fast", intentPrompt, nil)
+		if err == nil && strings.Contains(intentRaw, "<FABRICATE/>") {
+			isFabricatorIntent = true
+			log.Printf("Detected FABRICATOR intent for transcription: %s", transcription)
+		}
+	}
+
 	decisionStr := "IGNORE"
 	if shouldEngage {
 		decisionStr = "ENGAGE"
+		if isFabricatorIntent {
+			decisionStr = "FABRICATE"
+		}
 	}
 
 	engagementEventData := map[string]interface{}{
@@ -175,6 +189,62 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	}
 
 	if shouldEngage {
+		if isFabricatorIntent {
+			// --- VOICE FABRICATOR FLOW ---
+			log.Printf("Starting voice-triggered fabrication flow...")
+
+			// 0. Check Pro Availability
+			isProAvailable, resetTime, _ := utils.CheckFabricatorPro()
+			if !isProAvailable {
+				log.Printf("Fabricator Pro exhausted (Reset: %s). Aborting voice flow.", resetTime)
+				failText := fmt.Sprintf("I'd love to help with that technical task, but my Pro capacity is currently exhausted. It should reset in %s. Since technical changes require high precision, I'd prefer to wait or have you use the CLI for better control.", resetTime)
+				if resetTime == "login required" {
+					failText = "I can't perform technical tasks right now because my Fabricator session has expired. Please log in again using the CLI."
+				}
+
+				ttsPayload := map[string]string{"text": failText, "language": "en"}
+				ttsJson, _ := json.Marshal(ttsPayload)
+				ttsResp, ttsErr := http.Post(deps.TTSServiceURL+"/generate", "application/json", bytes.NewBuffer(ttsJson))
+				if ttsErr == nil && ttsResp.StatusCode == 200 {
+					audioBytes, _ := io.ReadAll(ttsResp.Body)
+					_ = ttsResp.Body.Close()
+					_ = deps.Discord.PlayAudio(audioBytes)
+				}
+				return types.HandlerOutput{Success: true}, nil
+			}
+
+			// 1. Voice Acknowledgment
+			ackText := "Acknowledged. Initiating the Construction Protocol now. I'll analyze the codebase and implement your request."
+			ttsPayload := map[string]string{"text": ackText, "language": "en"}
+			ttsJson, _ := json.Marshal(ttsPayload)
+			ttsResp, ttsErr := http.Post(deps.TTSServiceURL+"/generate", "application/json", bytes.NewBuffer(ttsJson))
+			if ttsErr == nil && ttsResp.StatusCode == 200 {
+				audioBytes, _ := io.ReadAll(ttsResp.Body)
+				_ = ttsResp.Body.Close()
+				_ = deps.Discord.PlayAudio(audioBytes)
+			}
+
+			// 2. Emit Trigger Event
+			voiceTriggerEvent := map[string]interface{}{
+				"type":          "system.fabricator.voice_trigger",
+				"transcription": transcription,
+				"user_id":       userID,
+				"channel_id":    channelID,
+				"server_id":     serverID,
+				"timestamp":     time.Now().Unix(),
+			}
+
+			if err := emitEvent(deps.EventServiceURL, voiceTriggerEvent); err != nil {
+				log.Printf("Failed to emit voice trigger event: %v", err)
+			}
+
+			// 3. Set Cooldown
+			deps.Redis.Set(ctx, fmt.Sprintf("channel:voice_cooldown:%s", channelID), "1", 5*time.Second)
+
+			return types.HandlerOutput{Success: true}, nil
+		}
+
+		// --- STANDARD CHAT FLOW ---
 		// Fetch messages for Chat API
 		// LAZY SUMMARIZATION: Pass empty summaryModel to GetMessages to suppress background summarization
 		// during the latency-critical response phase. We will trigger it manually at the end.

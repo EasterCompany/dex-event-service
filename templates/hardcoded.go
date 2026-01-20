@@ -975,6 +975,31 @@ func GetTemplates() map[string]EventTemplate {
 			},
 		},
 
+		"system.fabricator.voice_trigger": {
+			Description: "A voice-triggered technical request for the Fabricator",
+			Format:      "Voice Fabrication Trigger: {transcription}",
+			Fields: map[string]FieldSpec{
+				"transcription": {Type: "string", Required: true},
+				"user_id":       {Type: "string", Required: true},
+				"channel_id":    {Type: "string", Required: true},
+				"server_id":     {Type: "string", Required: false},
+				"timestamp":     {Type: "number", Required: true},
+			},
+		},
+
+		"system.fabricator.voice_complete": {
+			Description: "A voice-triggered technical request has been completed",
+			Format:      "Voice Fabrication Complete: {summary}",
+			Fields: map[string]FieldSpec{
+				"summary":    {Type: "string", Required: true},
+				"output":     {Type: "string", Required: true},
+				"success":    {Type: "boolean", Required: true},
+				"user_id":    {Type: "string", Required: true},
+				"channel_id": {Type: "string", Required: true},
+				"timestamp":  {Type: "number", Required: true},
+			},
+		},
+
 		"system.diagnostic.ping": {
 			Description: "A synthetic diagnostic ping to verify system health",
 			Format:      "Diagnostic Ping: {ping_id} from {source}",
