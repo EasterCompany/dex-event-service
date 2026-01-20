@@ -131,13 +131,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	if mentions, ok := input.EventData["mentions"].([]interface{}); ok {
 		for _, m := range mentions {
 			if mentionedUser, ok := m.(map[string]interface{}); ok {
-				if mID, ok := mentionedUser["id"].(string); ok && mID != "" && mID != "dexter" {
-					userTimelineKey := "events:user:" + mID
-					deps.Redis.ZAdd(ctx, userTimelineKey, redis.Z{
-						Score:  float64(input.Timestamp),
-						Member: input.EventID,
-					})
-					deps.Redis.Expire(ctx, userTimelineKey, 24*time.Hour)
+				if mID, ok := mentionedUser["id"].(string); ok {
+					indexForUser(mID)
 				}
 			}
 		}
