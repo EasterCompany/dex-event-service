@@ -14,50 +14,16 @@ import (
 )
 
 // HandleFabricatorIntent checks if a message has technical intent and triggers the Fabricator if Pro is available.
-
 // Returns (isFabricator, error)
-
-func HandleFabricatorIntent(ctx context.Context, content string, userID string, userName string, channelID string, serverID string, mentionedBot bool, isVoice bool, deps *Dependencies) (bool, error) {
+func HandleFabricatorIntent(ctx context.Context, content string, userID string, userName string, channelID string, serverID string, mentionedBot bool, isVoice bool, isCommand bool, deps *Dependencies) (bool, error) {
 
 	const MasterUserID = "313071000877137920"
 
-	const MasterUsername = "oweneaster"
-
 	// 1. Check Intent
-
-	intentPrompt := fmt.Sprintf("%s\n\nRequest: %s", utils.PromptFabricatorIntent, content)
-
-	// Use engagement model for intent detection (usually fast and accurate enough)
-
-	uDevice := "cpu"
-
-	uSpeed := "smart"
-
-	if deps.Options != nil {
-
-		uDevice = deps.Options.Ollama.UtilityDevice
-
-		uSpeed = deps.Options.Ollama.UtilitySpeed
-
-	}
-
-	modelIntent := utils.ResolveModel("engagement", uDevice, uSpeed)
-
-	intentRaw, _, err := deps.Ollama.Generate(modelIntent, intentPrompt, nil)
-
-	if err != nil {
-
-		return false, err
-
-	}
-
-	if !strings.Contains(intentRaw, "<FABRICATE/>") {
-		return false, nil
-	}
+	// Intent detection is now handled by explicit command prefixes (!build) or wake-word analysis in voice.
+	// We skip the LLM check here to reduce latency and rely on deterministic triggers.
 
 	// 1.5 Voice Command Safety (Wake Word Enforcement)
-	// If voice, we require the user to explicitly address Dexter AND use a command word.
-	// This prevents conversational "I should build this" from triggering the agent.
 	if isVoice {
 		lowerContent := strings.ToLower(content)
 		hasWakeWord := strings.Contains(lowerContent, "dexter")
@@ -75,37 +41,23 @@ func HandleFabricatorIntent(ctx context.Context, content string, userID string, 
 
 	log.Printf("Detected FABRICATOR intent for user %s (%s): %s", userName, userID, content)
 
-	// 2. Safety Check: Master User and Mention Requirements
-
-	isMaster := userID == MasterUserID && userName == MasterUsername
+	// 2. Safety Check: Master User and Mention/Command Requirements
+	// Strict ID check is sufficient and more robust than username
+	isMaster := userID == MasterUserID
 
 	allowFabrication := false
-
 	reason := ""
 
 	if !isMaster {
-
-		if userID != MasterUserID {
-
-			reason = "the triggering user UUID does not match the Master User"
-
-		} else {
-
-			reason = "the triggering username does not match the Master User (Owen)"
-
-		}
-
-	} else if !isVoice && !mentionedBot {
-
-		reason = "the Master User did not directly mention me (@Dexter) in this text message"
-
+		reason = "the triggering user UUID does not match the Master User"
+	} else if !isVoice && !mentionedBot && !isCommand {
+		reason = "the Master User did not use a command prefix (!build/!fabricate) or mention me (@Dexter)"
 	} else {
-
 		allowFabrication = true
-
 	}
 
 	if !allowFabrication {
+		// ...
 
 		log.Printf("Fabrication blocked: %s", reason)
 

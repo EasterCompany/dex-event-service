@@ -461,11 +461,24 @@ Output ONLY the token.`, evalHistory, content)
 	}
 
 	if shouldEngage {
-		// 1.5. Check Fabricator Intent
+		// 1.5. Check Fabricator Intent (STRICT COMMAND MODE)
 		userName, _ := input.EventData["user_name"].(string)
-		isFabricator, err := handlers.HandleFabricatorIntent(ctx, content, userID, userName, channelID, input.EventData["server_id"].(string), true, false, deps)
-		if err == nil && isFabricator {
-			return types.HandlerOutput{Success: true}, nil
+		lowerContent := strings.ToLower(content)
+		isCommand := strings.HasPrefix(lowerContent, "!build") || strings.HasPrefix(lowerContent, "!fabricate")
+
+		if isCommand {
+			var cleanContent string
+			if strings.HasPrefix(lowerContent, "!build") {
+				cleanContent = strings.TrimSpace(content[6:])
+			} else {
+				cleanContent = strings.TrimSpace(content[10:])
+			}
+
+			// DMs are always "mentionedBot" = true effectively, but we pass true to satisfy logic if needed
+			isFabricator, err := handlers.HandleFabricatorIntent(ctx, cleanContent, userID, userName, channelID, input.EventData["server_id"].(string), true, false, true, deps)
+			if err == nil && isFabricator {
+				return types.HandlerOutput{Success: true}, nil
+			}
 		}
 
 		// Race Condition Protection: Claim all events in the current context

@@ -179,7 +179,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	}
 
 	if shouldEngage {
-		isFabricator, err := handlers.HandleFabricatorIntent(ctx, transcription, userID, userName, channelID, serverID, true, true, deps)
+		isFabricator, err := handlers.HandleFabricatorIntent(ctx, transcription, userID, userName, channelID, serverID, true, true, false, deps)
 		if err == nil && isFabricator {
 			// For voice, we also want to play the ack via audio (HandleFabricatorIntent only posts text)
 			ackText := "Acknowledged. Initiating the Construction Protocol now. I'll analyze the codebase and implement your request."
