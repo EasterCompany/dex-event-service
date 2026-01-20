@@ -360,10 +360,15 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			deps.Redis.Set(ctx, fmt.Sprintf("channel:voice_cooldown:%s", channelID), "1", 2*time.Second)
 
 			// ASYNC HOUSEKEEPING: Trigger background summarization after response is done
-			go func() {
-				log.Printf("Housekeeping: Triggering background context summary update for %s", channelID)
-				smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Ollama, channelID, summaryModel, smartcontext.CachedSummary{}, nil, nil)
-			}()
+			// ONLY trigger if the raw buffer is starting to get large
+			if len(contextEventIDs) >= 10 {
+				go func() {
+					log.Printf("Housekeeping: Triggering background context summary update for %s", channelID)
+					smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Ollama, channelID, summaryModel, smartcontext.CachedSummary{}, nil, nil)
+				}()
+			} else {
+				log.Printf("Housekeeping: Skipping summary update (Raw buffer size %d is below threshold)", len(contextEventIDs))
+			}
 		}
 	}
 

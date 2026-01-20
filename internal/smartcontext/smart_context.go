@@ -234,13 +234,39 @@ func UpdateSummary(ctx context.Context, rdb *redis.Client, client *ollama.Client
 	defer rdb.Del(ctx, lockKey)
 
 	// 2. Prepare Data
-	if len(newEvents) < 5 {
-		return // Not enough data
+	if len(newEvents) < 15 {
+		return // Not enough data to justify a summary yet
+	}
+
+	// 2.5. Check how many events are actually NEW since the last summary
+	newCount := 0
+	if currentSummary.LastEventID == "" {
+		newCount = len(newEvents)
+	} else {
+		found := false
+		for _, evt := range newEvents {
+			if found {
+				newCount++
+			} else if evt.ID == currentSummary.LastEventID {
+				found = true
+			}
+		}
+		if !found {
+			newCount = len(newEvents) // Summary is so old its tail is gone
+		}
+	}
+
+	// Only summarize if we have a decent batch of new info (e.g. 10 turns)
+	if newCount < 10 {
+		return
 	}
 
 	// We want to summarize the *older* portion of the events.
-	// We summarize everything except the last 3 messages to keep them fresh in the raw buffer for next time.
-	eventsToSummarize := newEvents[:len(newEvents)-3]
+	// We summarize everything except the last 5 messages to keep them fresh in the raw buffer for next time.
+	eventsToSummarize := newEvents[:len(newEvents)-5]
+	if len(eventsToSummarize) == 0 {
+		return
+	}
 	lastEvent := eventsToSummarize[len(eventsToSummarize)-1]
 
 	// Check if this lastEvent is actually newer than what we already have
