@@ -764,14 +764,10 @@ Output ONLY the token.`, evalHistory, content)
 		finalMessages = append(finalMessages, messages...)
 		finalMessages = append(finalMessages, ollama.Message{Role: "user", Content: content})
 
-		streamMessageID, err := deps.Discord.InitStream(channelID, "<a:typing:1449387367315275786>")
+		streamMessageID, err := deps.Discord.InitStream(channelID, utils.GetLoadingMessage())
 		if err != nil {
-
 			log.Printf("Failed to init stream: %v", err)
-
-			return types.HandlerOutput{Success: false, Error: err.Error()},
-				err
-
+			return types.HandlerOutput{Success: false, Error: err.Error()}, err
 		}
 
 		fullResponse := ""
