@@ -695,7 +695,8 @@ Output ONLY the token.`, evalHistory, content)
 
 	if shouldEngage {
 		// 1.5. Check Fabricator Intent (if mentioned or in main chat)
-		isFabricator, err := handlers.HandleFabricatorIntent(ctx, content, userID, channelID, input.EventData["server_id"].(string), mentionedBot, false, deps)
+		userName, _ := input.EventData["user_name"].(string)
+		isFabricator, err := handlers.HandleFabricatorIntent(ctx, content, userID, userName, channelID, input.EventData["server_id"].(string), mentionedBot, false, deps)
 		if err == nil && isFabricator {
 			return types.HandlerOutput{Success: true}, nil
 		}

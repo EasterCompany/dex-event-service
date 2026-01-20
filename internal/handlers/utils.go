@@ -17,9 +17,11 @@ import (
 
 // Returns (isFabricator, error)
 
-func HandleFabricatorIntent(ctx context.Context, content string, userID string, channelID string, serverID string, mentionedBot bool, isVoice bool, deps *Dependencies) (bool, error) {
+func HandleFabricatorIntent(ctx context.Context, content string, userID string, userName string, channelID string, serverID string, mentionedBot bool, isVoice bool, deps *Dependencies) (bool, error) {
 
 	const MasterUserID = "313071000877137920"
+
+	const MasterUsername = "oweneaster"
 
 	// 1. Check Intent
 
@@ -55,11 +57,11 @@ func HandleFabricatorIntent(ctx context.Context, content string, userID string, 
 
 	}
 
-	log.Printf("Detected FABRICATOR intent for user %s: %s", userID, content)
+	log.Printf("Detected FABRICATOR intent for user %s (%s): %s", userName, userID, content)
 
 	// 2. Safety Check: Master User and Mention Requirements
 
-	isMaster := userID == MasterUserID
+	isMaster := userID == MasterUserID && userName == MasterUsername
 
 	allowFabrication := false
 
@@ -67,7 +69,15 @@ func HandleFabricatorIntent(ctx context.Context, content string, userID string, 
 
 	if !isMaster {
 
-		reason = "the triggering user is not the Master User (Owen)"
+		if userID != MasterUserID {
+
+			reason = "the triggering user UUID does not match the Master User"
+
+		} else {
+
+			reason = "the triggering username does not match the Master User (Owen)"
+
+		}
 
 	} else if !isVoice && !mentionedBot {
 
