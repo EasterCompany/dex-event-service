@@ -566,6 +566,7 @@ Output ONLY the token.`, evalHistory, content)
 			"source":             "dex-event-service",
 			"user_id":            "dexter",
 			"user_name":          "Dexter",
+			"target_user_id":     userID,
 			"channel_id":         channelID,
 			"channel_name":       "DM",
 			"server_id":          input.EventData["server_id"],

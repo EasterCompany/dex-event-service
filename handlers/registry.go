@@ -63,7 +63,13 @@ var handlerConfigs = map[string]types.HandlerConfig{
 		Name:        "profiler-handler",
 		Description: "Accumulates analytical signals into user profiles",
 		Timeout:     30,
-		EventTypes:  []string{"analysis.user.message_signals", "messaging.bot.sent_message"},
+		EventTypes: []string{
+			"analysis.user.message_signals",
+			"messaging.bot.sent_message",
+			"messaging.user.sent_message",
+			"messaging.user.transcribed",
+			"messaging.webhook.message",
+		},
 	},
 	"analyzer-handler": {
 		Name:               "analyzer-handler",

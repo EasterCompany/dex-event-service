@@ -166,12 +166,16 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 
 		h.processUserSynthesis(ctx, targetUserID, cooldownKey)
 	}
+
+	// Update last run global metric AFTER the entire batch is complete
+	h.RedisClient.Set(ctx, "analyzer:last_run:synthesis", time.Now().Unix(), 0)
 	log.Printf("[%s] Synthesis batch complete.", h.Config.Name)
 }
 
 func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID string, cooldownKey string) {
 	startTime := time.Now()
 	log.Printf("[%s] Starting synthesis for user %s", h.Config.Name, targetUserID)
+	// ... (trimmed for context, I will provide the full function structure in the next step)
 
 	// Set active tier for frontend visibility
 	h.RedisClient.Set(ctx, "analyzer:active_tier", "synthesis", 0)
@@ -254,8 +258,6 @@ func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID s
 		h.RedisClient.Set(ctx, cooldownKey, "1", 4*time.Hour)
 	}
 
-	// 5. Update last run global metric
-	h.RedisClient.Set(ctx, "analyzer:last_run:synthesis", time.Now().Unix(), 0)
 	log.Printf("[%s] Synthesis completed for user %s (Audit: %s, AI: %v)", h.Config.Name, targetUserID, auditID, historyFound)
 }
 

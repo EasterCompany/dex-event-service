@@ -794,14 +794,14 @@ Output ONLY the token.`, evalHistory, content)
 		chatHistory = append(chatHistory, map[string]string{"role": "assistant", "content": fullResponse, "name": "Dexter"})
 
 		botEventData := map[string]interface{}{
-			"type":               types.EventTypeMessagingBotSentMessage,
-			"source":             "dex-event-service",
-			"user_id":            "dexter",
-			"user_name":          "Dexter",
-			"channel_id":         channelID,
-			"channel_name":       input.EventData["channel_name"],
-			"server_id":          input.EventData["server_id"],
-			"server_name":        input.EventData["server_name"],
+			"type":           string(types.EventTypeMessagingBotSentMessage),
+			"source":         "dex-event-service",
+			"user_id":        "dexter",
+			"user_name":      "Dexter",
+			"target_user_id": userID,
+			"channel_id":     channelID,
+			"channel_name":   input.EventData["channel_name"],
+			"server_id":      input.EventData["server_id"], "server_name": input.EventData["server_name"],
 			"message_id":         finalMessageID,
 			"content":            fullResponse,
 			"timestamp":          time.Now().Format(time.RFC3339),

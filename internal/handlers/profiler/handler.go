@@ -107,17 +107,24 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	}
 
 	// --- 1. Universal User Indexing ---
-	// Index every event that has a user_id into a user-specific timeline
+	// Index every event that has a user_id or target_user_id into user-specific timelines
 	userID, _ := input.EventData["user_id"].(string)
-	if userID != "" && userID != "dexter" {
-		userTimelineKey := "events:user:" + userID
-		deps.Redis.ZAdd(ctx, userTimelineKey, redis.Z{
-			Score:  float64(input.Timestamp),
-			Member: input.EventID,
-		})
-		// Ensure the timeline key itself has a TTL
-		deps.Redis.Expire(ctx, userTimelineKey, 24*time.Hour)
+	targetUserID, _ := input.EventData["target_user_id"].(string)
+
+	indexForUser := func(uid string) {
+		if uid != "" && uid != "dexter" && uid != "dexter-bot" {
+			userTimelineKey := "events:user:" + uid
+			deps.Redis.ZAdd(ctx, userTimelineKey, redis.Z{
+				Score:  float64(input.Timestamp),
+				Member: input.EventID,
+			})
+			// Ensure the timeline key itself has a TTL
+			deps.Redis.Expire(ctx, userTimelineKey, 24*time.Hour)
+		}
 	}
+
+	indexForUser(userID)
+	indexForUser(targetUserID)
 
 	// --- 1.5 Index Mentions ---
 	// Also index events into timelines of users who were mentioned

@@ -382,6 +382,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				"source":         "discord",
 				"user_id":        "dexter-bot",
 				"user_name":      "Dexter",
+				"target_user_id": userID,
 				"channel_id":     channelID,
 				"channel_name":   channelName,
 				"server_id":      serverID,
