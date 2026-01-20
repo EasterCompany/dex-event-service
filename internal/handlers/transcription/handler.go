@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,26 @@ import (
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
 )
+
+var (
+	// Regex to remove text in parentheses (e.g., "(Slight pause)")
+	reParentheses = regexp.MustCompile(`\([^)]*\)`)
+	// Regex to remove text in asterisks (e.g., "*is*")
+	reAsterisks = regexp.MustCompile(`\*([^*]+)\*`)
+	// Regex to remove leftover single asterisks
+	reSingleAsterisk = regexp.MustCompile(`\*`)
+)
+
+func cleanForSpeech(text string) string {
+	// 1. Remove stage directions in parentheses
+	text = reParentheses.ReplaceAllString(text, "")
+	// 2. Remove markdown italics/bold but keep the content
+	text = reAsterisks.ReplaceAllString(text, "$1")
+	// 3. Remove any remaining asterisks
+	text = reSingleAsterisk.ReplaceAllString(text, "")
+	// 4. Clean up whitespace
+	return strings.TrimSpace(text)
+}
 
 func emitEvent(serviceURL string, eventData map[string]interface{}) error {
 	reqBody := map[string]interface{}{
@@ -297,7 +318,11 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					sentence := buff[:lastIdx+1]
 					remainder := buff[lastIdx+1:]
 
-					sentenceChan <- strings.TrimSpace(sentence)
+					cleanSentence := cleanForSpeech(sentence)
+					if cleanSentence != "" {
+						sentenceChan <- cleanSentence
+					}
+
 					currentBuffer.Reset()
 					currentBuffer.WriteString(remainder)
 					hasDelimiter = true
@@ -309,8 +334,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				parts := strings.Split(buff, "\n")
 				// Send all complete parts
 				for i := 0; i < len(parts)-1; i++ {
-					if trimmed := strings.TrimSpace(parts[i]); trimmed != "" {
-						sentenceChan <- trimmed
+					if cleanPart := cleanForSpeech(parts[i]); cleanPart != "" {
+						sentenceChan <- cleanPart
 					}
 				}
 				// Keep the last part
@@ -321,8 +346,8 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 		// Flush remaining buffer
 		if currentBuffer.Len() > 0 {
-			if trimmed := strings.TrimSpace(currentBuffer.String()); trimmed != "" {
-				sentenceChan <- trimmed
+			if cleanFinal := cleanForSpeech(currentBuffer.String()); cleanFinal != "" {
+				sentenceChan <- cleanFinal
 			}
 		}
 
