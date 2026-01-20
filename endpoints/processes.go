@@ -77,7 +77,7 @@ func HandleProcessRegistration(w http.ResponseWriter, r *http.Request) {
 
 	// Emit registration event ONLY if new or state changed
 	if !exists || stateChanged {
-		_, _ = utils.SendEvent(ctx, redisClient, "process-manager", "system.process.registered", map[string]interface{}{
+		_, _ = utils.SendEvent(ctx, redisClient, "process-manager", "system.process.silent_registered", map[string]interface{}{
 			"process_id": req.ID,
 			"pid":        req.PID,
 			"status":     "registered",
@@ -135,8 +135,8 @@ func HandleProcessUnregistration(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("Process unregistered successfully"))
 
-	// Emit unregistration event
-	_, _ = utils.SendEvent(ctx, redisClient, "process-manager", "system.process.unregistered", map[string]interface{}{
+	// Emit unregistration event for state tracking
+	_, _ = utils.SendEvent(ctx, redisClient, "process-manager", "system.process.silent_unregistered", map[string]interface{}{
 		"process_id": id,
 		"status":     "unregistered",
 		"timestamp":  time.Now().Unix(),
