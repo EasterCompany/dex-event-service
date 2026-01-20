@@ -103,8 +103,8 @@ func (c *Client) FetchWebView(linkURL string) (*WebViewResponse, error) {
 		data, err := os.ReadFile(webViewResp.ScreenshotPath)
 		if err == nil {
 			webViewResp.Screenshot = base64.StdEncoding.EncodeToString(data)
-			// Optional: Clean up file if we are consuming it immediately
-			// _ = os.Remove(webViewResp.ScreenshotPath)
+			// Clean up file if we are consuming it immediately
+			_ = os.Remove(webViewResp.ScreenshotPath)
 		} else {
 			// If file read fails, we might still have screenshot in payload if fallback triggered
 			if webViewResp.Screenshot == "" {
