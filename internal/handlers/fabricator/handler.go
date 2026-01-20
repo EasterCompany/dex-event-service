@@ -43,7 +43,7 @@ func NewFabricatorHandler(redis *redis.Client, ollama *ollama.Client, discord *d
 			Name:      "Fabricator",
 			ProcessID: FabricatorProcessID,
 			Models: map[string]string{
-				"construction": "gemini-cli-yolo",
+				"construction": "fabricator-cli-yolo",
 			},
 			ProtocolAliases: map[string]string{
 				"construction": "Construction",
@@ -138,10 +138,10 @@ func (h *FabricatorHandler) PerformFabrication(ctx context.Context, blueprint ty
 	// Gather Context
 	prompt := h.buildPrompt(blueprint)
 
-	// Execute Gemini CLI
-	binPath, err := exec.LookPath("gemini")
+	// Execute Fabricator CLI
+	binPath, err := exec.LookPath("fabricator")
 	if err != nil {
-		log.Printf("[%s] Error: 'gemini' binary not found in PATH.", HandlerName)
+		log.Printf("[%s] Error: 'fabricator' binary not found in PATH.", HandlerName)
 		utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
 		return nil, "", err
 	}

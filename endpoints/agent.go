@@ -161,7 +161,7 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 
 	// Construction (Every 60s check)
 	fabricatorProtocols["construction"] = calculateProtocolStatus(
-		ctx, rdb, fabricatorActive, "construction", 60, "gemini-cli-yolo", "fabricator",
+		ctx, rdb, fabricatorActive, "construction", 60, "fabricator-cli-yolo", "fabricator",
 	)
 
 	resp.Agents["fabricator"] = AgentState{
