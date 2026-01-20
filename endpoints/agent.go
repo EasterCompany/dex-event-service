@@ -186,6 +186,13 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 	// --- System State ---
 	lastTransition, _ := rdb.Get(ctx, "system:last_transition_ts").Int64()
 	state, _ := rdb.Get(ctx, "system:state").Result()
+
+	// Robustness check: if system:is_paused is true, state MUST be paused
+	isPaused, _ := rdb.Get(ctx, "system:is_paused").Result()
+	if isPaused == "true" {
+		state = "paused"
+	}
+
 	if state == "" {
 		state = "idle"
 	}

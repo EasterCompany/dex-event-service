@@ -153,13 +153,18 @@ func TransitionToBusy(ctx context.Context, redisClient *redis.Client) {
 // TransitionToIdle handles the state change from Busy to Idle.
 func TransitionToIdle(ctx context.Context, redisClient *redis.Client) {
 	lastState, _ := redisClient.Get(ctx, "system:state").Result()
-	if lastState == "idle" {
+	if lastState == "idle" || lastState == "paused" {
 		return
+	}
+
+	targetState := "idle"
+	if IsSystemPaused(ctx, redisClient) {
+		targetState = "paused"
 	}
 
 	// Note: total_active_seconds is handled by individual process completion in ClearProcess.
 	// This function primarily marks the transition time for the NEXT idle period to be measured correctly.
-	redisClient.Set(ctx, "system:state", "idle", 0)
+	redisClient.Set(ctx, "system:state", targetState, 0)
 	redisClient.Set(ctx, "system:last_transition_ts", time.Now().Unix(), 0)
 }
 
