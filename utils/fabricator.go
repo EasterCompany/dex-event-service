@@ -2,22 +2,27 @@ package utils
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // CheckFabricatorPro checks if the Fabricator Pro model has available quota.
 // Returns (isAvailable, resetTime, error)
 func CheckFabricatorPro() (bool, string, error) {
-	// We run 'fabricator info' to see if we get a quota error.
-	// We capture both stdout and stderr as the error can go to either.
-	binPath, err := exec.LookPath("fabricator")
+	// We run 'dex-fabricator-cli info' to see if we get a quota error.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	binPath, err := exec.LookPath("dex-fabricator-cli")
 	if err != nil {
-		return false, "", err
+		return false, "", fmt.Errorf("dex-fabricator-cli not found in PATH")
 	}
 
-	cmd := exec.Command(binPath, "info")
+	cmd := exec.CommandContext(ctx, binPath, "info")
 	var out bytes.Buffer
 	cmd.Stderr = &out
 	cmd.Stdout = &out

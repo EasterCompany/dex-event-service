@@ -8,7 +8,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -174,14 +176,24 @@ func (h *FabricatorHandler) PerformVoiceFabrication(ctx context.Context, transcr
 	// 1. Build Autonomous Prompt
 	prompt := fmt.Sprintf("User Request (via Voice): %s\n\nObjective: Implement the user's request using your tools. You are running in autonomous YOLO mode. Do not ask for confirmation. Report your changes clearly in the output.", transcription)
 
+	homeDir, _ := os.UserHomeDir()
+	workingDir := filepath.Join(homeDir, "EasterCompany")
+
+	// Check if source code directory exists
+	if _, err := os.Stat(workingDir); os.IsNotExist(err) {
+		log.Printf("[%s] Error: No source code found on this system (~/EasterCompany). Fabricator cannot self-evolve.", HandlerName)
+		return
+	}
+
 	// 2. Execute Fabricator CLI
-	binPath, err := exec.LookPath("fabricator")
+	binPath, err := exec.LookPath("dex-fabricator-cli")
 	if err != nil {
-		log.Printf("[%s] Error: 'fabricator' binary not found.", HandlerName)
+		log.Printf("[%s] Error: 'dex-fabricator-cli' binary not found.", HandlerName)
 		return
 	}
 
 	cmd := exec.CommandContext(ctx, binPath, "--yolo", "--prompt", prompt)
+	cmd.Dir = workingDir
 	out, err := cmd.CombinedOutput()
 	output := string(out)
 
@@ -284,16 +296,27 @@ func (h *FabricatorHandler) PerformFabrication(ctx context.Context, blueprint ty
 	// Gather Context
 	prompt := h.buildPrompt(blueprint)
 
+	homeDir, _ := os.UserHomeDir()
+	workingDir := filepath.Join(homeDir, "EasterCompany")
+
+	// Check if source code directory exists
+	if _, err := os.Stat(workingDir); os.IsNotExist(err) {
+		log.Printf("[%s] Error: No source code found on this system (~/EasterCompany). Fabricator cannot self-evolve.", HandlerName)
+		utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
+		return nil, "", fmt.Errorf("no source code found")
+	}
+
 	// Execute Fabricator CLI
-	binPath, err := exec.LookPath("fabricator")
+	binPath, err := exec.LookPath("dex-fabricator-cli")
 	if err != nil {
-		log.Printf("[%s] Error: 'fabricator' binary not found in PATH.", HandlerName)
+		log.Printf("[%s] Error: 'dex-fabricator-cli' binary not found in PATH.", HandlerName)
 		utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
 		return nil, "", err
 	}
 
 	// Use --yolo for autonomous execution
 	cmd := exec.CommandContext(ctx, binPath, "--yolo")
+	cmd.Dir = workingDir
 	cmd.Stdin = strings.NewReader(prompt)
 
 	// Capture output
