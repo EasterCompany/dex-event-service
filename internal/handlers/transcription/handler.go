@@ -183,13 +183,31 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		if err == nil && isFabricator {
 			// For voice, we also want to play the ack via audio (HandleFabricatorIntent only posts text)
 			ackText := "Acknowledged. Initiating the Construction Protocol now. I'll analyze the codebase and implement your request."
-			ttsPayload := map[string]string{"text": ackText, "language": "en"}
+
+			// Optimized: Use shared file system
+			tmpDir := "/tmp/dexter/audio"
+			_ = os.MkdirAll(tmpDir, 0777)
+			filename := fmt.Sprintf("ack-%d.wav", time.Now().UnixNano())
+			filePath := filepath.Join(tmpDir, filename)
+
+			ttsPayload := map[string]string{
+				"text":        ackText,
+				"language":    "en",
+				"output_path": filePath,
+			}
 			ttsJson, _ := json.Marshal(ttsPayload)
+
 			ttsResp, ttsErr := http.Post(deps.TTSServiceURL+"/generate", "application/json", bytes.NewBuffer(ttsJson))
 			if ttsErr == nil && ttsResp.StatusCode == 200 {
-				audioBytes, _ := io.ReadAll(ttsResp.Body)
+				var respData map[string]string
+				bodyBytes, _ := io.ReadAll(ttsResp.Body)
 				_ = ttsResp.Body.Close()
-				_ = deps.Discord.PlayAudio(audioBytes)
+
+				if json.Unmarshal(bodyBytes, &respData) == nil && respData["file_path"] != "" {
+					_ = deps.Discord.PlayAudioFromFile(respData["file_path"])
+				} else {
+					_ = deps.Discord.PlayAudio(bodyBytes)
+				}
 			}
 			return types.HandlerOutput{Success: true}, nil
 		}

@@ -52,9 +52,25 @@ func HandleFabricatorIntent(ctx context.Context, content string, userID string, 
 	}
 
 	if !strings.Contains(intentRaw, "<FABRICATE/>") {
-
 		return false, nil
+	}
 
+	// 1.5 Voice Command Safety (Wake Word Enforcement)
+	// If voice, we require the user to explicitly address Dexter AND use a command word.
+	// This prevents conversational "I should build this" from triggering the agent.
+	if isVoice {
+		lowerContent := strings.ToLower(content)
+		hasWakeWord := strings.Contains(lowerContent, "dexter")
+		hasCommand := strings.Contains(lowerContent, "fabricate") ||
+			strings.Contains(lowerContent, "build") ||
+			strings.Contains(lowerContent, "create") ||
+			strings.Contains(lowerContent, "implement") ||
+			strings.Contains(lowerContent, "construct")
+
+		if !hasWakeWord || !hasCommand {
+			log.Printf("Fabricator Intent detected but blocked: Missing wake word ('Dexter') or command word in voice.")
+			return false, nil
+		}
 	}
 
 	log.Printf("Detected FABRICATOR intent for user %s (%s): %s", userName, userID, content)
