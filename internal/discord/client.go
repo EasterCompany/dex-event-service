@@ -528,6 +528,27 @@ func (c *Client) PlayAudio(audioData []byte) error {
 
 }
 
+func (c *Client) PlayAudioFromFile(filePath string) error {
+	req, err := http.NewRequest("POST", c.BaseURL+"/audio/play?file_path="+filePath, nil)
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("X-Service-Name", "dex-event-service")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("discord service returned %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	return nil
+}
+
 func (c *Client) GetVoiceChannelUserCount(channelID string) (int, error) {
 
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/channel/voice/count?id=%s", c.BaseURL, channelID), nil)

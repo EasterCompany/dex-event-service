@@ -8,10 +8,14 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/EasterCompany/dex-event-service/internal/handlers"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/profiler"
@@ -255,17 +259,28 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 		// Use ChatStream for lower latency voice response
 		sentenceChan := make(chan string, 10)
-		audioChan := make(chan []byte, 10)
+
+		type AudioPayload struct {
+			Bytes []byte
+			Path  string
+		}
+		audioChan := make(chan AudioPayload, 10)
 		var wg sync.WaitGroup
 
 		// 1. Player Worker (Consumes Audio -> Plays to Discord)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for audioData := range audioChan {
+			for payload := range audioChan {
 				deps.Discord.UpdateBotStatus("Speaking...", "online", 0)
-				if playErr := deps.Discord.PlayAudio(audioData); playErr != nil {
-					log.Printf("Failed to play audio in Discord: %v", playErr)
+				if payload.Path != "" {
+					if playErr := deps.Discord.PlayAudioFromFile(payload.Path); playErr != nil {
+						log.Printf("Failed to play audio from file: %v", playErr)
+					}
+				} else {
+					if playErr := deps.Discord.PlayAudio(payload.Bytes); playErr != nil {
+						log.Printf("Failed to play audio bytes: %v", playErr)
+					}
 				}
 			}
 		}()
@@ -278,7 +293,17 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				log.Printf("Generating TTS for: %s", text)
 				deps.Discord.UpdateBotStatus("Generating speech...", "online", 0)
 
-				ttsPayload := map[string]string{"text": text, "language": "en"}
+				// Optimized: Use shared file system
+				tmpDir := "/tmp/dexter/audio"
+				_ = os.MkdirAll(tmpDir, 0777)
+				filename := fmt.Sprintf("tts-stream-%s.wav", uuid.New().String())
+				filePath := filepath.Join(tmpDir, filename)
+
+				ttsPayload := map[string]string{
+					"text":        text,
+					"language":    "en",
+					"output_path": filePath,
+				}
 				ttsJson, _ := json.Marshal(ttsPayload)
 
 				ttsResp, ttsErr := http.Post(deps.TTSServiceURL+"/generate", "application/json", bytes.NewBuffer(ttsJson))
@@ -288,9 +313,17 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				}
 
 				if ttsResp.StatusCode == 200 {
-					audioBytes, _ := io.ReadAll(ttsResp.Body)
+					// Check if we got a file path back
+					var respData map[string]string
+					bodyBytes, _ := io.ReadAll(ttsResp.Body)
 					_ = ttsResp.Body.Close()
-					audioChan <- audioBytes
+
+					if json.Unmarshal(bodyBytes, &respData) == nil && respData["file_path"] != "" {
+						audioChan <- AudioPayload{Path: filePath}
+					} else {
+						// Fallback: Use bytes (re-wrap bodyBytes)
+						audioChan <- AudioPayload{Bytes: bodyBytes}
+					}
 				} else {
 					_ = ttsResp.Body.Close()
 					log.Printf("TTS service error: %d", ttsResp.StatusCode)
