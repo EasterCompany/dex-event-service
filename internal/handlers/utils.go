@@ -15,7 +15,7 @@ import (
 
 // HandleFabricatorIntent checks if a message has technical intent and triggers the Fabricator if Pro is available.
 // Returns (isFabricator, error)
-func HandleFabricatorIntent(ctx context.Context, content string, userID string, userName string, channelID string, serverID string, mentionedBot bool, isVoice bool, isCommand bool, deps *Dependencies) (bool, error) {
+func HandleFabricatorIntent(ctx context.Context, content string, userID string, userName string, channelID string, serverID string, mentionedBot bool, isVoice bool, isCommand bool, contextHistory string, deps *Dependencies) (bool, error) {
 
 	const MasterUserID = "313071000877137920"
 
@@ -115,9 +115,15 @@ User Request: %s`, reason, content)
 	_, _ = deps.Discord.PostMessage(channelID, ackText)
 
 	// 4. Emit Trigger Event
+	// Inject Context History into the prompt so the Fabricator has short-term memory
+	fullPrompt := content
+	if contextHistory != "" {
+		fullPrompt = fmt.Sprintf("Context History:\n%s\n\nUser Request: %s", contextHistory, content)
+	}
+
 	voiceTriggerEvent := map[string]interface{}{
 		"type":          "system.fabricator.voice_trigger", // Reuse same event type for now as FabricatorHandler listens to it
-		"transcription": content,
+		"transcription": fullPrompt,
 		"user_id":       userID,
 		"channel_id":    channelID,
 		"server_id":     serverID,

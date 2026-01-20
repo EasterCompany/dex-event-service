@@ -192,7 +192,7 @@ func (h *FabricatorHandler) PerformVoiceFabrication(ctx context.Context, transcr
 		return
 	}
 
-	cmd := exec.CommandContext(ctx, binPath, "--yolo", "--prompt", prompt)
+	cmd := exec.CommandContext(ctx, binPath, "--yolo", "--resume", "--prompt", prompt)
 	cmd.Dir = workingDir
 	out, err := cmd.CombinedOutput()
 	output := string(out)
@@ -315,7 +315,8 @@ func (h *FabricatorHandler) PerformFabrication(ctx context.Context, blueprint ty
 	}
 
 	// Use --yolo for autonomous execution
-	cmd := exec.CommandContext(ctx, binPath, "--yolo")
+	// Use --resume to maintain session continuity
+	cmd := exec.CommandContext(ctx, binPath, "--yolo", "--resume")
 	cmd.Dir = workingDir
 	cmd.Stdin = strings.NewReader(prompt)
 

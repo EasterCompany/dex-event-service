@@ -475,7 +475,8 @@ Output ONLY the token.`, evalHistory, content)
 			}
 
 			// DMs are always "mentionedBot" = true effectively, but we pass true to satisfy logic if needed
-			isFabricator, err := handlers.HandleFabricatorIntent(ctx, cleanContent, userID, userName, channelID, input.EventData["server_id"].(string), true, false, true, deps)
+			// Pass evalHistory to provide short-term memory to the Fabricator
+			isFabricator, err := handlers.HandleFabricatorIntent(ctx, cleanContent, userID, userName, channelID, input.EventData["server_id"].(string), true, false, true, evalHistory, deps)
 			if err == nil && isFabricator {
 				return types.HandlerOutput{Success: true}, nil
 			}

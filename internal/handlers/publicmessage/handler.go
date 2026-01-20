@@ -710,7 +710,8 @@ Output ONLY the token.`, evalHistory, content)
 			// Pass cleaned content to intent handler
 			// We still use HandleFabricatorIntent to perform safety checks (User ID) and Pro availability checks
 			// Pass isCommand=true to bypass mention check
-			isFabricator, err := handlers.HandleFabricatorIntent(ctx, cleanContent, userID, userName, channelID, input.EventData["server_id"].(string), mentionedBot, false, true, deps)
+			// Pass evalHistory to provide short-term memory to the Fabricator
+			isFabricator, err := handlers.HandleFabricatorIntent(ctx, cleanContent, userID, userName, channelID, input.EventData["server_id"].(string), mentionedBot, false, true, evalHistory, deps)
 			if err == nil && isFabricator {
 				return types.HandlerOutput{Success: true}, nil
 			}
