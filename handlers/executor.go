@@ -144,8 +144,7 @@ func startZombieReaper() {
 
 func reapProcess(ctx context.Context, id string) {
 	// Call utils logic to clear process correctly (updates busy count and status)
-	// We pass nil for discord client as we don't need to sync status during reaper (next turn will sync)
-	utils.ClearProcess(ctx, dependencies.Redis, nil, id)
+	utils.ClearProcess(ctx, dependencies.Redis, dependencies.Discord, id)
 
 	// Emit unregistration event for visibility
 	_, _ = utils.SendEvent(ctx, dependencies.Redis, "zombie-reaper", "system.process.reaped", map[string]interface{}{
