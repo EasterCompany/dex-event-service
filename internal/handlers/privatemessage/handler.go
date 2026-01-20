@@ -462,7 +462,7 @@ Output ONLY the token.`, evalHistory, content)
 
 	if shouldEngage {
 		// 1.5. Check Fabricator Intent
-		isFabricator, err := handlers.HandleFabricatorIntent(ctx, content, userID, channelID, input.EventData["server_id"].(string), deps)
+		isFabricator, err := handlers.HandleFabricatorIntent(ctx, content, userID, channelID, input.EventData["server_id"].(string), true, false, deps)
 		if err == nil && isFabricator {
 			return types.HandlerOutput{Success: true}, nil
 		}
