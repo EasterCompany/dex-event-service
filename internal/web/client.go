@@ -2,11 +2,14 @@ package web
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -31,11 +34,12 @@ type MetadataResponse struct {
 
 // WebViewResponse matches the structure returned by the /webview endpoint in dex-web-service
 type WebViewResponse struct {
-	URL        string `json:"url"`
-	Title      string `json:"title,omitempty"`
-	Content    string `json:"content,omitempty"`    // Rendered HTML content
-	Screenshot string `json:"screenshot,omitempty"` // Base64 encoded screenshot
-	Error      string `json:"error,omitempty"`
+	URL            string `json:"url"`
+	Title          string `json:"title,omitempty"`
+	Content        string `json:"content,omitempty"`         // Rendered HTML content
+	Screenshot     string `json:"screenshot,omitempty"`      // Base64 encoded screenshot
+	ScreenshotPath string `json:"screenshot_path,omitempty"` // Local path to screenshot
+	Error          string `json:"error,omitempty"`
 }
 
 func (c *Client) FetchMetadata(linkURL string) (*MetadataResponse, error) {
@@ -63,7 +67,13 @@ func (c *Client) FetchMetadata(linkURL string) (*MetadataResponse, error) {
 
 // FetchWebView calls the /webview endpoint of dex-web-service to get headless browser data.
 func (c *Client) FetchWebView(linkURL string) (*WebViewResponse, error) {
-	reqURL := fmt.Sprintf("%s/webview?url=%s", c.BaseURL, url.QueryEscape(linkURL))
+	// Create temp path for screenshot
+	tmpDir := "/tmp/dexter/images"
+	_ = os.MkdirAll(tmpDir, 0777)
+	filename := fmt.Sprintf("webview-%d.png", time.Now().UnixNano())
+	screenshotPath := filepath.Join(tmpDir, filename)
+
+	reqURL := fmt.Sprintf("%s/webview?url=%s&output_path=%s", c.BaseURL, url.QueryEscape(linkURL), url.QueryEscape(screenshotPath))
 
 	// Webview calls can take longer due to browser startup and page rendering
 	client := &http.Client{Timeout: 45 * time.Second} // Increased timeout
@@ -86,6 +96,21 @@ func (c *Client) FetchWebView(linkURL string) (*WebViewResponse, error) {
 	// Propagate error from the webview response itself
 	if webViewResp.Error != "" {
 		return nil, fmt.Errorf("web view service reported error: %s", webViewResp.Error)
+	}
+
+	// If we got a path back, read it and populate Screenshot (base64) for backward compat / usage
+	if webViewResp.ScreenshotPath != "" {
+		data, err := os.ReadFile(webViewResp.ScreenshotPath)
+		if err == nil {
+			webViewResp.Screenshot = base64.StdEncoding.EncodeToString(data)
+			// Optional: Clean up file if we are consuming it immediately
+			// _ = os.Remove(webViewResp.ScreenshotPath)
+		} else {
+			// If file read fails, we might still have screenshot in payload if fallback triggered
+			if webViewResp.Screenshot == "" {
+				return nil, fmt.Errorf("failed to read screenshot from path: %w", err)
+			}
+		}
 	}
 
 	return &webViewResp, nil
