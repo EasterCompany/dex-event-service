@@ -670,12 +670,10 @@ Output ONLY the token.`, evalHistory, content)
 		systemPrompt += "\n\n" + channelMembers
 	}
 
-	_ = engagementReason // Ensure variable is used
-
 	engagementEventData := map[string]interface{}{
 		"type":             "engagement.decision",
 		"decision":         decisionStr,
-		"reason":           "Evaluated by " + modelEngagement,
+		"reason":           engagementReason,
 		"handler":          "public-message-handler",
 		"event_id":         input.EventID,
 		"channel_id":       channelID,
