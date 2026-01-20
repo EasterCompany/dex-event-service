@@ -39,10 +39,15 @@ func HandleProcessRegistration(w http.ResponseWriter, r *http.Request) {
 
 	// Try to get existing process to preserve start time if updating
 	var pi ProcessInfo
+	exists := false
 	val, err := redisClient.Get(ctx, key).Result()
 	if err == nil {
-		_ = json.Unmarshal([]byte(val), &pi)
+		if jsonErr := json.Unmarshal([]byte(val), &pi); jsonErr == nil {
+			exists = true
+		}
 	}
+
+	stateChanged := pi.State != req.State
 
 	if pi.StartTime == 0 {
 		pi.StartTime = time.Now().Unix()
@@ -50,6 +55,7 @@ func HandleProcessRegistration(w http.ResponseWriter, r *http.Request) {
 
 	pi.ChannelID = req.ID
 	pi.State = req.State
+	pi.PID = req.PID
 	pi.UpdatedAt = time.Now().Unix()
 
 	jsonBytes, _ := json.Marshal(pi)
@@ -60,18 +66,25 @@ func HandleProcessRegistration(w http.ResponseWriter, r *http.Request) {
 
 	// Update system state
 	utils.TransitionToBusy(ctx, redisClient)
-	redisClient.Incr(ctx, "system:busy_ref_count")
+
+	// ONLY increment ref count if it's a NEW process
+	if !exists {
+		redisClient.Incr(ctx, "system:busy_ref_count")
+	}
 
 	w.WriteHeader(http.StatusAccepted)
 	_, _ = w.Write([]byte("Process registered successfully"))
 
-	// Emit registration event
-	_, _ = utils.SendEvent(ctx, redisClient, "process-manager", "system.process.registered", map[string]interface{}{
-		"process_id": req.ID,
-		"pid":        req.PID,
-		"status":     "registered",
-		"timestamp":  time.Now().Unix(),
-	})
+	// Emit registration event ONLY if new or state changed
+	if !exists || stateChanged {
+		_, _ = utils.SendEvent(ctx, redisClient, "process-manager", "system.process.registered", map[string]interface{}{
+			"process_id": req.ID,
+			"pid":        req.PID,
+			"status":     "registered",
+			"state":      req.State,
+			"timestamp":  time.Now().Unix(),
+		})
+	}
 }
 
 // HandleProcessUnregistration removes a process from Redis.

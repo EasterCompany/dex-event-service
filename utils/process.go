@@ -181,6 +181,18 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 	// 1. Check if process already exists
 	exists, _ := redisClient.Exists(ctx, key).Result()
 
+	existingState := ""
+	if exists > 0 {
+		if val, err := redisClient.Get(ctx, key).Result(); err == nil {
+			var p map[string]interface{}
+			if jsonErr := json.Unmarshal([]byte(val), &p); jsonErr == nil {
+				existingState, _ = p["state"].(string)
+			}
+		}
+	}
+
+	stateChanged := existingState != state
+
 	// 2. Increment Ref Count ONLY if it's a NEW process (not already in info or queued)
 	// Note: We check exists on the specific key (info or queued)
 	if exists == 0 {
@@ -215,6 +227,17 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 	jsonBytes, _ := json.Marshal(data)
 	// Apply global 24-hour TTL
 	redisClient.Set(ctx, key, jsonBytes, DefaultTTL)
+
+	// Emit registration event ONLY if new or state changed
+	if exists == 0 || stateChanged {
+		_, _ = SendEvent(ctx, redisClient, "process-manager", "system.process.registered", map[string]interface{}{
+			"process_id": processID,
+			"pid":        os.Getpid(),
+			"status":     "registered",
+			"state":      state,
+			"timestamp":  time.Now().Unix(),
+		})
+	}
 
 	// Synchronize with Discord
 	if discordClient != nil && state != "Queued" {

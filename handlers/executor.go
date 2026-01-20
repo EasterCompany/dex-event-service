@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/EasterCompany/dex-event-service/templates"
@@ -78,11 +80,80 @@ func InitExecutor(deps *internalHandlers.Dependencies) {
 	jobQueue = make(chan *job, 1000) // Buffer size
 	workerOnce.Do(func() {
 		go startWorker()
+		go startZombieReaper()
 	})
-	log.Println("Executor initialized with single-worker queue.")
+	log.Println("Executor initialized with single-worker queue and Zombie Reaper.")
 
 	// Initialize and run background handlers
 	initBackgroundHandlers()
+}
+
+// startZombieReaper periodically cleans up processes belonging to dead PIDs.
+func startZombieReaper() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if dependencies == nil || dependencies.Redis == nil {
+			continue
+		}
+
+		ctx := context.Background()
+		// Scan for all active process info keys
+		iter := dependencies.Redis.Scan(ctx, 0, "process:info:*", 0).Iterator()
+
+		for iter.Next(ctx) {
+			key := iter.Val()
+			data, err := dependencies.Redis.Get(ctx, key).Result()
+			if err != nil {
+				continue
+			}
+
+			var pi struct {
+				PID       int    `json:"pid"`
+				ChannelID string `json:"channel_id"`
+				State     string `json:"state"`
+			}
+			if err := json.Unmarshal([]byte(data), &pi); err != nil {
+				continue
+			}
+
+			// If PID is 0, we can't reliably reap it unless we add service origin tracking.
+			// For now, we only reap non-zero PIDs.
+			if pi.PID <= 0 {
+				continue
+			}
+
+			// Check if process is alive
+			process, err := os.FindProcess(pi.PID)
+			if err != nil {
+				log.Printf("Zombie Reaper: PID %d not found. Reaping process %s...", pi.PID, pi.ChannelID)
+				reapProcess(ctx, pi.ChannelID)
+				continue
+			}
+
+			// On Unix, FindProcess always succeeds. We must send signal 0 to check if it exists.
+			err = process.Signal(syscall.Signal(0))
+			if err != nil {
+				log.Printf("Zombie Reaper: PID %d is dead. Reaping process %s...", pi.PID, pi.ChannelID)
+				reapProcess(ctx, pi.ChannelID)
+			}
+		}
+	}
+}
+
+func reapProcess(ctx context.Context, id string) {
+	// Call utils logic to clear process correctly (updates busy count and status)
+	// We pass nil for discord client as we don't need to sync status during reaper (next turn will sync)
+	utils.ClearProcess(ctx, dependencies.Redis, nil, id)
+
+	// Emit unregistration event for visibility
+	_, _ = utils.SendEvent(ctx, dependencies.Redis, "zombie-reaper", "system.process.reaped", map[string]interface{}{
+		"process_id": id,
+		"status":     "reaped",
+		"reason":     "PID deceased",
+		"timestamp":  time.Now().Unix(),
+	})
 }
 
 func initBackgroundHandlers() {
