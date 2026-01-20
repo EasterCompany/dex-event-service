@@ -694,6 +694,12 @@ Output ONLY the token.`, evalHistory, content)
 	}
 
 	if shouldEngage {
+		// 1.5. Check Fabricator Intent (if mentioned or in main chat)
+		isFabricator, err := handlers.HandleFabricatorIntent(ctx, content, userID, channelID, input.EventData["server_id"].(string), deps)
+		if err == nil && isFabricator {
+			return types.HandlerOutput{Success: true}, nil
+		}
+
 		// Race Condition Protection: Claim all events in the current context
 		if deps.Redis != nil {
 			for _, id := range contextEventIDs {
