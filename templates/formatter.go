@@ -9,11 +9,6 @@ import (
 
 // FormatEventAsText converts an event to a human-readable text line
 func FormatEventAsText(eventType string, eventData map[string]interface{}, service string, timestamp int64, depth int, timezone string, language string) string {
-	// 0. Explicitly ignore silent events
-	if strings.Contains(eventType, ".silent_") {
-		return ""
-	}
-
 	templates := GetTemplates()
 	template, exists := templates[eventType]
 

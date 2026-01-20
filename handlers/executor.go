@@ -148,7 +148,7 @@ func reapProcess(ctx context.Context, id string) {
 	utils.ClearProcess(ctx, dependencies.Redis, nil, id)
 
 	// Emit unregistration event for visibility
-	_, _ = utils.SendEvent(ctx, dependencies.Redis, "zombie-reaper", "system.process.silent_reaped", map[string]interface{}{
+	_, _ = utils.SendEvent(ctx, dependencies.Redis, "zombie-reaper", "system.process.reaped", map[string]interface{}{
 		"process_id": id,
 		"status":     "reaped",
 		"reason":     "PID deceased",

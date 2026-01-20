@@ -230,7 +230,7 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 
 	// Emit registration event ONLY if new or state changed
 	if exists == 0 || stateChanged {
-		_, _ = SendEvent(ctx, redisClient, "process-manager", "system.process.silent_registered", map[string]interface{}{
+		_, _ = SendEvent(ctx, redisClient, "process-manager", "system.process.registered", map[string]interface{}{
 			"process_id": processID,
 			"pid":        os.Getpid(),
 			"status":     "registered",
