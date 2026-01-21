@@ -56,7 +56,14 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	channelID, _ := input.EventData["channel_id"].(string)
 	userID, _ := input.EventData["user_id"].(string)
 	mentionedBot, _ := input.EventData["mentioned_bot"].(bool)
+
+	// Robust test_id extraction
 	testID, _ := input.EventData["test_id"].(string)
+	if testID == "" {
+		if meta, ok := input.EventData["metadata"].(map[string]interface{}); ok {
+			testID, _ = meta["test_id"].(string)
+		}
+	}
 
 	// --- 0. Reload Options Dynamically ---
 	// We reload here so that model resolution and quiet mode use the latest user settings.
