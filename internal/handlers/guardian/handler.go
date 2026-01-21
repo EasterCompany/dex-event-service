@@ -15,7 +15,6 @@ import (
 	"github.com/EasterCompany/dex-event-service/internal/discord"
 	"github.com/EasterCompany/dex-event-service/internal/ollama"
 	"github.com/EasterCompany/dex-event-service/internal/web"
-	"github.com/EasterCompany/dex-event-service/templates"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/google/uuid"
@@ -61,7 +60,7 @@ func NewGuardianHandler(redis *redis.Client, ollama *ollama.Client, discord *dis
 			DateTimeAware:   true,
 			EnforceMarkdown: true,
 			RequiredSections: []string{
-				"Summary", "Content", "Priority", "Category", "Related",
+				"SYSTEM", "ANOMALIES", "MAJOR ISSUES:", "MINOR ISSUES:",
 			},
 		},
 		DiscordClient: discord,
@@ -182,10 +181,58 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 
 		if err == nil {
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
-			for i := range sentryResults {
-				sentryResults[i].Type = "alert"
-				_, _ = h.emitResult(ctx, sentryResults[i], "sentry", auditEventID)
+
+			// Fetch the raw output from the audit event to get the full report
+			val, _ := h.RedisClient.Get(ctx, "event:"+auditEventID).Result()
+			var e types.Event
+			var auditData struct {
+				RawOutput string `json:"raw_output"`
 			}
+			if json.Unmarshal([]byte(val), &e) == nil {
+				_ = json.Unmarshal(e.Event, &auditData)
+			}
+
+			report := auditData.RawOutput
+			if report == "" && len(sentryResults) > 0 {
+				report = sentryResults[0].Content
+			}
+
+			// Save to /tmp
+			tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("guardian-sentry-report-%d.md", time.Now().Unix()))
+			_ = os.WriteFile(tmpPath, []byte(report), 0644)
+			log.Printf("[%s] Sentry report saved to %s", HandlerName, tmpPath)
+
+			// Emit main event (24h TTL)
+			res := agent.AnalysisResult{
+				Title:   "Guardian Sentry Report",
+				Summary: "System health check completed.",
+				Content: report,
+				Type:    "alert",
+			}
+			_, _ = h.emitResult(ctx, res, "sentry", auditEventID)
+
+			// Check for MAJOR ISSUES and emit additional alert if found
+			if strings.Contains(strings.ToUpper(report), "# MAJOR ISSUES:") && !strings.Contains(strings.ToUpper(report), "NONE.") {
+				// Extract major issues for the alert summary
+				majorIssuesSection := ""
+				parts := strings.Split(report, "# MAJOR ISSUES:")
+				if len(parts) > 1 {
+					majorIssuesSection = strings.Split(parts[1], "#")[0]
+				}
+
+				if strings.TrimSpace(majorIssuesSection) != "" && !strings.Contains(strings.ToUpper(majorIssuesSection), "NONE.") {
+					alertRes := agent.AnalysisResult{
+						Title:    "MAJOR SYSTEM ISSUES DETECTED",
+						Priority: "high",
+						Category: "system",
+						Summary:  "Guardian detected major system issues during Sentry analysis.",
+						Content:  majorIssuesSection,
+						Type:     "alert",
+					}
+					_, _ = h.emitResult(ctx, alertRes, "sentry", auditEventID)
+				}
+			}
+
 			h.RedisClient.Set(ctx, "guardian:last_run:sentry", time.Now().Unix(), 0)
 		} else {
 			utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
@@ -213,30 +260,69 @@ func (h *GuardianHandler) gatherContext(ctx context.Context, tier string, previo
 	status, _ := h.fetchSystemStatus(ctx)
 	logs, _ := h.fetchRecentLogs(ctx)
 
-	var cliHelp, tests, events, systemInfo, knownIssues string
+	var tests, events, systemInfo, knownIssues, sourceStatus string
 	switch tier {
 	case "sentry":
 		tests, _ = h.fetchTestResults(ctx)
 		events, _ = h.fetchEventsForAnalysis(ctx)
 		systemInfo, _ = h.fetchSystemHardware(ctx)
 		knownIssues = h.fetchRecentAlerts(ctx)
+		sourceStatus, _ = h.fetchSourceCodeStatus(ctx)
 	}
 
-	return h.formatContext(tier, status, logs, cliHelp, tests, events, systemInfo, knownIssues, previousResults)
+	return h.formatContext(tier, status, logs, tests, events, systemInfo, knownIssues, sourceStatus, previousResults)
 }
 
-func (h *GuardianHandler) formatContext(tier, status, logs, cliHelp, tests, events, systemInfo, knownIssues string, previousResults []agent.AnalysisResult) string {
-	// Base context with common components (these all start and end with \n)
-	context := fmt.Sprintf("## SYSTEM STATUS\n%s\n## LOGS\n%s",
+func (h *GuardianHandler) formatContext(tier, status, logs, tests, events, systemInfo, knownIssues, sourceStatus string, previousResults []agent.AnalysisResult) string {
+	// Base context with common components
+	context := fmt.Sprintf("## SYSTEM STATUS (dex status)\n%s\n\n## LOGS (dex logs)\n%s",
 		status, logs)
 
 	switch tier {
 	case "sentry":
-		context += fmt.Sprintf("\n## TEST\n%s\n## SYSTEM\n%s\n## KNOWN ISSUES (Do not re-report)\n%s\n## EVENTS\n%s",
-			tests, systemInfo, knownIssues, events)
+		context += fmt.Sprintf("\n\n## SOURCE CODE STATUS (git status)\n%s\n\n## TEST RESULTS (dex test)\n%s\n\n## HARDWARE STATUS (dex system)\n%s\n\n## KNOWN ISSUES (Do not re-report)\n%s\n\n## EVENT TIMELINE (dex event log)\n%s",
+			sourceStatus, tests, systemInfo, knownIssues, events)
 	}
 
 	return context
+}
+
+func (h *GuardianHandler) fetchSourceCodeStatus(ctx context.Context) (string, error) {
+	home, _ := os.UserHomeDir()
+	repoPath := filepath.Join(home, "EasterCompany")
+	cmd := exec.CommandContext(ctx, "bash", "-l", "-c", fmt.Sprintf("cd %s && git status --short", repoPath))
+	out, _ := cmd.CombinedOutput()
+	return string(out), nil
+}
+
+func (h *GuardianHandler) fetchEventsForAnalysis(ctx context.Context) (string, error) {
+	cmd := h.createDexCommand(ctx, "event", "log", "-n", "50")
+	out, _ := cmd.CombinedOutput()
+	return utils.StripANSI(string(out)), nil
+}
+
+func (h *GuardianHandler) fetchSystemStatus(ctx context.Context) (string, error) {
+	cmd := h.createDexCommand(ctx, "status", "--no-event")
+	out, _ := cmd.CombinedOutput()
+	return utils.StripANSI(string(out)), nil
+}
+
+func (h *GuardianHandler) fetchSystemHardware(ctx context.Context) (string, error) {
+	cmd := h.createDexCommand(ctx, "system", "--no-event")
+	out, _ := cmd.CombinedOutput()
+	return utils.StripANSI(string(out)), nil
+}
+
+func (h *GuardianHandler) fetchRecentLogs(ctx context.Context) (string, error) {
+	cmd := h.createDexCommand(ctx, "logs", "--no-event")
+	out, _ := cmd.CombinedOutput()
+	return utils.StripANSI(string(out)), nil
+}
+
+func (h *GuardianHandler) fetchTestResults(ctx context.Context) (string, error) {
+	cmd := h.createDexCommand(ctx, "test", "--no-event")
+	out, _ := cmd.CombinedOutput()
+	return utils.StripANSI(string(out)), nil
 }
 
 func (h *GuardianHandler) fetchRecentAlerts(ctx context.Context) string {
@@ -265,8 +351,6 @@ func (h *GuardianHandler) fetchRecentAlerts(ctx context.Context) string {
 	}
 	return strings.Join(alerts, "\n")
 }
-
-// ... Context fetching methods remain largely similar but return strings for cleaner injection ...
 
 func (h *GuardianHandler) emitResult(ctx context.Context, res agent.AnalysisResult, tier string, auditEventID string) (string, error) {
 	eventID := uuid.New().String()
@@ -312,50 +396,6 @@ func (h *GuardianHandler) getDexBinaryPath() string {
 		return "dex"
 	}
 	return filepath.Join(home, "Dexter", "bin", "dex")
-}
-
-func (h *GuardianHandler) fetchEventsForAnalysis(ctx context.Context) (string, error) {
-	eventIDs, _ := h.RedisClient.ZRevRange(ctx, "events:timeline", 0, 50).Result()
-	var lines []string
-	// Iterate backwards to get oldest first
-	for i := len(eventIDs) - 1; i >= 0; i-- {
-		id := eventIDs[i]
-		val, _ := h.RedisClient.Get(ctx, "event:"+id).Result()
-		var e types.Event
-		if err := json.Unmarshal([]byte(val), &e); err == nil {
-			if e.Service == "dex-discord-service" {
-				continue
-			}
-			var ed map[string]interface{}
-			_ = json.Unmarshal(e.Event, &ed)
-			lines = append(lines, templates.FormatEventAsText(ed["type"].(string), ed, e.Service, e.Timestamp, 0, "UTC", "en"))
-		}
-	}
-	return strings.Join(lines, "\n"), nil
-}
-
-func (h *GuardianHandler) fetchSystemStatus(ctx context.Context) (string, error) {
-	cmd := h.createDexCommand(ctx, "status", "--no-event")
-	out, _ := cmd.CombinedOutput()
-	return utils.StripANSI(string(out)), nil
-}
-
-func (h *GuardianHandler) fetchSystemHardware(ctx context.Context) (string, error) {
-	cmd := h.createDexCommand(ctx, "system", "--no-event")
-	out, _ := cmd.CombinedOutput()
-	return utils.StripANSI(string(out)), nil
-}
-
-func (h *GuardianHandler) fetchRecentLogs(ctx context.Context) (string, error) {
-	cmd := h.createDexCommand(ctx, "logs", "--no-event")
-	out, _ := cmd.CombinedOutput()
-	return utils.StripANSI(string(out)), nil
-}
-
-func (h *GuardianHandler) fetchTestResults(ctx context.Context) (string, error) {
-	cmd := h.createDexCommand(ctx, "test", "--no-event")
-	out, _ := cmd.CombinedOutput()
-	return utils.StripANSI(string(out)), nil
 }
 
 func (h *GuardianHandler) createDexCommand(ctx context.Context, args ...string) *exec.Cmd {
