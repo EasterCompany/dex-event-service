@@ -39,15 +39,6 @@ type ModelRequest struct {
 	Options  json.RawMessage `json:"options,omitempty"` // Pass through options opaque
 }
 
-func getKeepAlive(options map[string]interface{}) interface{} {
-	if options != nil {
-		if val, ok := options["keep_alive"]; ok {
-			return val
-		}
-	}
-	return nil
-}
-
 func (c *Client) SetEventCallback(callback func(eventType string, data map[string]interface{})) {
 	c.EventCallback = callback
 }
@@ -127,21 +118,22 @@ func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []M
 		"method": "chat",
 	})
 
-	keepAlive := getKeepAlive(options)
+	// Convert options to RawMessage for pass-through
+	optsBytes, _ := json.Marshal(options)
 
-	reqBody := ChatRequest{
-		Model:     model,
-		Messages:  messages,
-		Stream:    false,
-		Options:   options,
-		KeepAlive: keepAlive,
+	reqBody := ModelRequest{
+		Model:    model,
+		Messages: messages,
+		Stream:   false,
+		Options:  optsBytes,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return Message{}, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/chat", bytes.NewBuffer(jsonData))
+	// HIT THE HUB
+	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/model/run", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return Message{}, err
 	}
@@ -154,37 +146,48 @@ func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []M
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("Error closing ollama chat response body: %v", err)
+			log.Printf("Error closing hub response body: %v", err)
 		}
 	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return Message{}, fmt.Errorf("ollama chat returned status %d: %s", resp.StatusCode, string(body))
+		return Message{}, fmt.Errorf("hub returned status %d: %s", resp.StatusCode, string(body))
 	}
 
+	// The dedicated service returns the raw Ollama/Llama response stream or body.
+	// For Chat (non-stream), it returns the Ollama ChatResponse JSON.
 	body, _ := io.ReadAll(resp.Body)
 	var response ChatResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return Message{}, err
+		// Fallback: It might be a simple JSON from a custom service
+		var simpleResp map[string]string
+		if err2 := json.Unmarshal(body, &simpleResp); err2 == nil {
+			if val, ok := simpleResp["response"]; ok {
+				return Message{Role: "assistant", Content: val}, nil
+			}
+		}
+		return Message{}, fmt.Errorf("failed to unmarshal hub response: %v. Body: %s", err, string(body))
 	}
 	return response.Message, nil
 }
 
 func (c *Client) ChatStream(ctx context.Context, model string, messages []Message, options map[string]interface{}, callback func(string)) (GenerationStats, error) {
-	reqBody := ChatRequest{
-		Model:     model,
-		Messages:  messages,
-		Stream:    true,
-		Options:   options,
-		KeepAlive: getKeepAlive(options),
+	// Convert options to RawMessage for pass-through
+	optsBytes, _ := json.Marshal(options)
+
+	reqBody := ModelRequest{
+		Model:    model,
+		Messages: messages,
+		Stream:   true,
+		Options:  optsBytes,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return GenerationStats{}, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/chat", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/model/run", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return GenerationStats{}, err
 	}
@@ -197,13 +200,13 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []Messag
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("Error closing ollama chat response body: %v", err)
+			log.Printf("Error closing hub response body: %v", err)
 		}
 	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return GenerationStats{}, fmt.Errorf("ollama chat returned status %d: %s", resp.StatusCode, string(body))
+		return GenerationStats{}, fmt.Errorf("hub returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	stats := GenerationStats{}
@@ -217,21 +220,21 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []Messag
 			return stats, err
 		}
 
+		// Try to parse as Ollama ChatResponse
 		var chunk ChatResponse
-		if err := json.Unmarshal(line, &chunk); err != nil {
-			continue
-		}
-		if chunk.Message.Content != "" {
-			callback(chunk.Message.Content)
-		}
-		if chunk.Done {
-			stats.EvalCount = chunk.EvalCount
-			stats.PromptEvalCount = chunk.PromptEvalCount
-			stats.TotalDuration = time.Duration(chunk.TotalDuration)
-			stats.LoadDuration = time.Duration(chunk.LoadDuration)
-			stats.PromptEvalDuration = time.Duration(chunk.PromptEvalDuration)
-			stats.EvalDuration = time.Duration(chunk.EvalDuration)
-			break
+		if err := json.Unmarshal(line, &chunk); err == nil {
+			if chunk.Message.Content != "" {
+				callback(chunk.Message.Content)
+			}
+			if chunk.Done {
+				stats.EvalCount = chunk.EvalCount
+				stats.PromptEvalCount = chunk.PromptEvalCount
+				stats.TotalDuration = time.Duration(chunk.TotalDuration)
+				stats.LoadDuration = time.Duration(chunk.LoadDuration)
+				stats.PromptEvalDuration = time.Duration(chunk.PromptEvalDuration)
+				stats.EvalDuration = time.Duration(chunk.EvalDuration)
+				break
+			}
 		}
 	}
 	return stats, nil
@@ -249,22 +252,21 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 		"method": "generate",
 	})
 
-	keepAlive := getKeepAlive(options)
+	// Convert options
+	optsBytes, _ := json.Marshal(options)
 
-	reqBody := GenerateRequest{
-		Model:     model,
-		Prompt:    prompt,
-		Images:    images,
-		Stream:    false,
-		Options:   options,
-		KeepAlive: keepAlive,
+	reqBody := ModelRequest{
+		Model:   model,
+		Prompt:  prompt,
+		Stream:  false,
+		Options: optsBytes,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", GenerationStats{}, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/generate", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/model/run", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", GenerationStats{}, err
 	}
@@ -277,17 +279,24 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("Error closing ollama response body: %v", err)
+			log.Printf("Error closing hub response body: %v", err)
 		}
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", GenerationStats{}, fmt.Errorf("ollama returned status: %d", resp.StatusCode)
+		return "", GenerationStats{}, fmt.Errorf("hub returned status: %d", resp.StatusCode)
 	}
 
 	body, _ := io.ReadAll(resp.Body)
 	var response GenerateResponse
 	if err := json.Unmarshal(body, &response); err != nil {
+		// Fallback for simple map response
+		var simpleResp map[string]string
+		if err2 := json.Unmarshal(body, &simpleResp); err2 == nil {
+			if val, ok := simpleResp["response"]; ok {
+				return val, GenerationStats{}, nil
+			}
+		}
 		return "", GenerationStats{}, err
 	}
 
@@ -304,38 +313,39 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 }
 
 func (c *Client) GenerateStream(model, prompt string, images []string, options map[string]interface{}, callback func(string)) (GenerationStats, error) {
+	// Convert options
+	optsBytes, _ := json.Marshal(options)
 
-	reqBody := GenerateRequest{
-
-		Model: model,
-
-		Prompt: prompt,
-
-		Images: images,
-
-		Stream: true,
-
-		Options: options,
-
-		KeepAlive: getKeepAlive(options),
+	reqBody := ModelRequest{
+		Model:   model,
+		Prompt:  prompt,
+		Stream:  true,
+		Options: optsBytes,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return GenerationStats{}, err
 	}
 
-	resp, err := http.Post(c.BaseURL+"/api/generate", "application/json", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", c.BaseURL+"/model/run", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return GenerationStats{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		return GenerationStats{}, err
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("Error closing ollama response body: %v", err)
+			log.Printf("Error closing hub response body: %v", err)
 		}
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return GenerationStats{}, fmt.Errorf("ollama returned status: %d", resp.StatusCode)
+		return GenerationStats{}, fmt.Errorf("hub returned status: %d", resp.StatusCode)
 	}
 
 	stats := GenerationStats{}
@@ -350,20 +360,19 @@ func (c *Client) GenerateStream(model, prompt string, images []string, options m
 		}
 
 		var chunk GenerateResponse
-		if err := json.Unmarshal(line, &chunk); err != nil {
-			continue
-		}
-		if chunk.Response != "" {
-			callback(chunk.Response)
-		}
-		if chunk.Done {
-			stats.EvalCount = chunk.EvalCount
-			stats.PromptEvalCount = chunk.PromptEvalCount
-			stats.TotalDuration = time.Duration(chunk.TotalDuration)
-			stats.LoadDuration = time.Duration(chunk.LoadDuration)
-			stats.PromptEvalDuration = time.Duration(chunk.PromptEvalDuration)
-			stats.EvalDuration = time.Duration(chunk.EvalDuration)
-			break
+		if err := json.Unmarshal(line, &chunk); err == nil {
+			if chunk.Response != "" {
+				callback(chunk.Response)
+			}
+			if chunk.Done {
+				stats.EvalCount = chunk.EvalCount
+				stats.PromptEvalCount = chunk.PromptEvalCount
+				stats.TotalDuration = time.Duration(chunk.TotalDuration)
+				stats.LoadDuration = time.Duration(chunk.LoadDuration)
+				stats.PromptEvalDuration = time.Duration(chunk.PromptEvalDuration)
+				stats.EvalDuration = time.Duration(chunk.EvalDuration)
+				break
+			}
 		}
 	}
 	return stats, nil
