@@ -230,7 +230,7 @@ func main() {
 	eventURL = getServiceURL("dex-event-service", "cs", "8082")
 	ttsURL = getServiceURL("dex-tts-service", "be", "8200")
 	webURL = getServiceURL("dex-web-service", "be", "8201")
-	ollamaURL = "http://127.0.0.1:11434" // Default
+	ollamaURL = "http://127.0.0.1:8400" // Point to Hub (dex-model-service)
 
 	// Initialize dependencies
 	deps := &internalHandlers.Dependencies{
