@@ -736,9 +736,6 @@ Output ONLY the token.`, evalHistory, content)
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Typing response...")
 		deps.Discord.TriggerTyping(channelID)
 
-		// VRAM Optimization
-		_ = deps.Ollama.UnloadAllModelsExcept(ctx, responseModel)
-
 		if deps.Redis != nil {
 			deps.Redis.Expire(context.Background(), lockKey, 60*time.Second)
 		}
