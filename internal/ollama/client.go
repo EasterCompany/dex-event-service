@@ -15,7 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const DefaultURL = "http://127.0.0.1:11434"
+const DefaultURL = "http://127.0.0.1:8400"
 
 type Client struct {
 	BaseURL       string
@@ -28,6 +28,15 @@ func NewClient(url string, rdb *redis.Client) *Client {
 		url = DefaultURL
 	}
 	return &Client{BaseURL: url, Redis: rdb}
+}
+
+// ModelRequest represents the standard request format for the Model Hub
+type ModelRequest struct {
+	Model    string          `json:"model"`
+	Prompt   string          `json:"prompt,omitempty"`
+	Messages []Message       `json:"messages,omitempty"`
+	Stream   bool            `json:"stream"`
+	Options  json.RawMessage `json:"options,omitempty"` // Pass through options opaque
 }
 
 func getKeepAlive(options map[string]interface{}) interface{} {
