@@ -56,6 +56,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	channelID, _ := input.EventData["channel_id"].(string)
 	userID, _ := input.EventData["user_id"].(string)
 	mentionedBot, _ := input.EventData["mentioned_bot"].(bool)
+	testID, _ := input.EventData["test_id"].(string)
 
 	// --- 0. Reload Options Dynamically ---
 	// We reload here so that model resolution and quiet mode use the latest user settings.
@@ -123,6 +124,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					"timestamp":       time.Now().Unix(),
 					"channel_id":      channelID,
 					"user_id":         userID,
+					"test_id":         testID,
 				}
 				if err := emitEvent(deps.EventServiceURL, routerEvent); err != nil {
 					log.Printf("Warning: Failed to emit router decision event: %v", err)
@@ -238,6 +240,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 						"reason":       "Explicit link text detected: " + foundURL,
 						"handler":      "public-message-handler",
 						"raw_output":   isExplicitRaw,
+						"test_id":      testID,
 					}
 					_ = emitEvent(deps.EventServiceURL, modEvent)
 
@@ -271,6 +274,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					"channel_id":      channelID,
 					"user_id":         userID,
 					"server_id":       input.EventData["server_id"],
+					"test_id":         testID,
 				}
 				if err := emitEvent(deps.EventServiceURL, linkEvent); err != nil {
 					log.Printf("Warning: Failed to emit link event: %v", err)
@@ -412,6 +416,7 @@ Rules:
 							"reason":       "Explicit content detected in attachment: " + filename,
 							"handler":      "public-message-handler",
 							"raw_output":   description,
+							"test_id":      testID,
 						}
 						if err := emitEvent(deps.EventServiceURL, modEvent); err != nil {
 							log.Printf("Failed to emit moderation event: %v", err)
@@ -441,6 +446,7 @@ Rules:
 					"server_id":       input.EventData["server_id"],
 					"url":             url,
 					"base64_preview":  base64Img,
+					"test_id":         testID,
 				}
 				if err := emitEvent(deps.EventServiceURL, analysisEvent); err != nil {
 					log.Printf("Warning: Failed to emit visual event: %v", err)
@@ -685,6 +691,7 @@ Output ONLY the token.`, evalHistory, content)
 		"engagement_raw":   engagementRaw,
 		"input_prompt":     prompt,
 		"context_history":  evalHistory,
+		"test_id":          testID,
 	}
 
 	if err := emitEvent(deps.EventServiceURL, engagementEventData); err != nil {
@@ -827,6 +834,7 @@ Output ONLY the token.`, evalHistory, content)
 			"load_duration_ms":   stats.LoadDuration.Milliseconds(),
 			"prompt_duration_ms": stats.PromptEvalDuration.Milliseconds(),
 			"eval_duration_ms":   stats.EvalDuration.Milliseconds(),
+			"test_id":            testID,
 		}
 		if err := emitEvent(deps.EventServiceURL, botEventData); err != nil {
 			log.Printf("Warning: Failed to emit event: %v", err)
@@ -860,6 +868,7 @@ Output ONLY the token.`, evalHistory, content)
 				"raw_output":      raw,
 				"model":           analysisModel,
 				"timestamp":       time.Now().Unix(),
+				"test_id":         testID,
 			}
 			_ = emitEvent(deps.EventServiceURL, signalEvent)
 		}()
