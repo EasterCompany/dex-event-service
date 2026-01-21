@@ -294,6 +294,7 @@ func main() {
 	router.HandleFunc("/system_monitor", endpoints.SystemMonitorHandler).Methods("GET")
 	router.HandleFunc("/system/hardware", endpoints.SystemHardwareHandler).Methods("GET")
 	router.HandleFunc("/system/options", endpoints.SystemOptionsHandler).Methods("GET", "POST")
+	router.HandleFunc("/system/lock", endpoints.SystemLockHandler(redisClient)).Methods("POST")
 	router.HandleFunc("/system/service/{action}", endpoints.SystemServiceControlHandler).Methods("POST")
 	router.HandleFunc("/processes", endpoints.ListProcessesHandler).Methods("GET")
 	router.HandleFunc("/processes", endpoints.HandleProcessRegistration).Methods("POST")

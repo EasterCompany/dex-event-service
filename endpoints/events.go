@@ -262,6 +262,18 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 			return
 		}
 
+		// Check for System Lock
+		if IsEventLocked(req) {
+			if err := QueuePendingEvent(redisClient, req); err != nil {
+				http.Error(w, "System is locked and queue failed", http.StatusServiceUnavailable)
+				return
+			}
+			// Return Accepted to indicate received but not processed immediately
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "queued", "reason": "system_locked"})
+			return
+		}
+
 		if len(req.Event) == 0 {
 			http.Error(w, "Event field is required", http.StatusBadRequest)
 			return
