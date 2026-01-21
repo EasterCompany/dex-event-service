@@ -284,7 +284,7 @@ func UpdateSummary(ctx context.Context, rdb *redis.Client, client *ollama.Client
 	}
 
 	if model == "" {
-		model = "dex-summary-fast-cpu"
+		model = "dex-summary-model"
 	}
 
 	// 3. Generate

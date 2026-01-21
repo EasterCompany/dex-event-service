@@ -85,6 +85,11 @@ Rules: Be concise. No long explanations unless asked.`
 // ResolveModel returns the full name of the model variant to use based on configuration.
 // baseName should be the core model name (e.g., "engagement", "summary", "public-message").
 func ResolveModel(baseName string, utilityDevice string, utilitySpeed string) string {
+	// Standardize singleton models
+	if baseName == "engagement" || baseName == "summary" {
+		return "dex-" + baseName + "-model"
+	}
+
 	suffix := ""
 
 	// Determine Speed Variant

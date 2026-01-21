@@ -108,7 +108,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	defer deps.Discord.UpdateBotStatus("Listening for events...", "online", 2)
 
 	// Fetch context
-	summaryModel := "dex-summary"
+	summaryModel := "dex-summary-model"
 	contextLimit := 12000
 	contextHistory, err := smartcontext.Get(ctx, deps.Redis, deps.Ollama, channelID, summaryModel, contextLimit)
 	if err != nil {
@@ -120,7 +120,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	// Skip unloading if we hold the Voice Mode lock, as we want both models loaded.
 	holder, _ := deps.Redis.Get(ctx, "system:cognitive_lock").Result()
 	if holder != "Voice Mode" {
-		_ = deps.Ollama.UnloadAllModelsExcept(ctx, "dex-engagement-fast")
+		_ = deps.Ollama.UnloadAllModelsExcept(ctx, "dex-engagement-model")
 	}
 
 	// 1. Check Engagement
@@ -142,13 +142,13 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	} else {
 		// More users present: Perform inference to see if Dexter was addressed.
 		prompt := fmt.Sprintf("Analyze if Dexter should respond to this message (from voice transcription). Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", contextHistory, transcription)
-		engagementRaw, _, err = deps.Ollama.Generate("dex-engagement-fast", prompt, nil)
+		engagementRaw, _, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
 		if err != nil {
 			log.Printf("Engagement check failed: %v", err)
 			return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
 		}
 		shouldEngage = strings.Contains(engagementRaw, "<ENGAGE/>")
-		engagementReason = "Evaluated by dex-engagement-fast"
+		engagementReason = "Evaluated by dex-engagement-model"
 	}
 
 	log.Printf("Engagement decision for transcription: %s (%v)", engagementRaw, shouldEngage)
@@ -168,7 +168,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		"user_id":          userID,
 		"message_content":  transcription,
 		"timestamp":        time.Now().Unix(),
-		"engagement_model": "dex-engagement-fast",
+		"engagement_model": "dex-engagement-model",
 		"context_history":  contextHistory,
 		"engagement_raw":   engagementRaw,
 		"user_count":       userCount,

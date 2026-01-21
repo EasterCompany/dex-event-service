@@ -46,7 +46,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	_, _, _ = deps.Ollama.Generate("dex-transcription", "warmup", nil)
 
 	// Warm up engagement (will overflow if transcription took all VRAM)
-	_, _, _ = deps.Ollama.Generate("dex-engagement-fast", "warmup", nil)
+	_, _, _ = deps.Ollama.Generate("dex-engagement-model", "warmup", nil)
 
 	deps.Discord.UpdateBotStatus("Greeting...", "online", 0)
 

@@ -204,7 +204,7 @@ func (h *FabricatorHandler) PerformVoiceFabrication(ctx context.Context, transcr
 	summary := "I encountered an error while trying to implement your request."
 	if success {
 		summaryPrompt := fmt.Sprintf("Summarize the following technical changes into a single, natural sentence for voice reporting.\n\nOutput:\n%s", output)
-		summary, _, _ = h.OllamaClient.Generate("dex-summary-fast", summaryPrompt, nil)
+		summary, _, _ = h.OllamaClient.Generate("dex-summary-model", summaryPrompt, nil)
 		if summary == "" {
 			summary = "I've completed the requested changes and verified the build."
 		}

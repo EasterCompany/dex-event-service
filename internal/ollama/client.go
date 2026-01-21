@@ -479,8 +479,8 @@ func (c *Client) UnloadAllModelsExcept(ctx context.Context, keepModel string) er
 		if m.Name != keepModel && m.Model != keepModel {
 			// PROTECTION: Never unload voice-critical models during Voice Mode
 			if isVoiceMode {
-				if m.Name == "dex-transcription" || m.Name == "dex-engagement-fast" ||
-					m.Model == "dex-transcription" || m.Model == "dex-engagement-fast" {
+				if m.Name == "dex-transcription" || m.Name == "dex-engagement-model" ||
+					m.Model == "dex-transcription" || m.Model == "dex-engagement-model" {
 					log.Printf("VRAM Optimization: Preserving protected voice model %s", m.Name)
 					continue
 				}
