@@ -380,7 +380,12 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	options := GetSystemOptionsSnapshot()
 
 	// 7. Web History
-	webHistory, _ := utils.GetWebHistory(redisClient)
+	rawWebHistory, _ := utils.GetWebHistory(redisClient)
+	webHistory := make([]utils.WebHistoryItem, 0, len(rawWebHistory))
+	for _, item := range rawWebHistory {
+		item.Screenshot = "" // Strip Base64 screenshot for public dashboard
+		webHistory = append(webHistory, item)
+	}
 
 	// 8. Chores
 	allChores := []*chores.Chore{}
@@ -563,6 +568,16 @@ func getSanitizedEvents(ctx context.Context, key string, count int) []types.Even
 			delete(eventData, "context_history")
 			delete(eventData, "engagement_raw")
 			delete(eventData, "response_raw")
+			delete(eventData, "base64_preview")
+
+			// Strip base64 from attachments
+			if attachments, ok := eventData["attachments"].([]interface{}); ok {
+				for _, att := range attachments {
+					if attMap, ok := att.(map[string]interface{}); ok {
+						delete(attMap, "base64")
+					}
+				}
+			}
 
 			// MASKING: Hide sensitive message content for public view
 			// PRESERVE: Titles for Blueprints/Notifications are now allowed
