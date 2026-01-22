@@ -332,83 +332,25 @@ Rules:
 		defer deps.Redis.Del(context.Background(), lockKey)
 	}
 
-	// Dynamic Model Resolution
-	uDevice := "cpu"
-	uSpeed := "smart"
-	if deps.Options != nil {
-		uDevice = deps.Options.Cognitive.UtilityDevice
-		uSpeed = deps.Options.Cognitive.UtilitySpeed
-	}
+	// Standardized Models
+	modelEngagement := "dex-engagement-model"
+	modelSummary := "dex-summary-model"
+	modelResponse := "dex-private-message"
 
-	modelEngagement := utils.ResolveModel("engagement", uDevice, uSpeed)
-	modelSummary := utils.ResolveModel("summary", uDevice, uSpeed)
-	modelResponse := utils.ResolveModel("private-message", "gpu", "smart")
-
-	// Model Options (Keep-Alive for fast-cpu utilities)
+	// Model Options
 	utilityOptions := map[string]interface{}{
 		"num_thread": runtime.NumCPU(),
 	}
-	if strings.HasSuffix(modelEngagement, "-fast-cpu") || strings.HasSuffix(modelSummary, "-fast-cpu") {
-		utilityOptions["keep_alive"] = -1
-	}
 
-	shouldEngage := false
-	engagementReason := "Evaluated by " + modelEngagement
-	var engagementRaw string
+	shouldEngage := true // Always engage in DMs
+	engagementReason := "Forced engagement: Private Message (DM)"
+	engagementRaw := "<DM_DETECTED/>"
 	var err error
+	decisionStr := "ENGAGE"
 
-	// --- 1. Determine Engagement Decision ---
-	evalHistory, _ = deps.Discord.FetchContext(channelID, 10)
-	utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Vibe Check")
-	prompt = fmt.Sprintf(`Context:
-%s
-
-Current Message:
-%s
-
-Your task is to decide how Dexter should engage with the current Private Message (DM).
-Output EXACTLY one of the following tokens:
-- "IGNORE": No action.
-- "REACTION:<emoji>": React with a single emoji.
-- "ENGAGE": Generate a full text response.
-
-Output ONLY the token.`, evalHistory, content)
-
-	engagementRaw, _, err = deps.Model.GenerateWithContext(ctx, modelEngagement, prompt, nil, utilityOptions)
-	decisionStr := "IGNORE"
-
-	if err == nil {
-		engagementRaw = strings.TrimSpace(engagementRaw)
-		upperRaw := strings.ToUpper(engagementRaw)
-
-		if strings.Contains(upperRaw, "ENGAGE") || strings.Contains(upperRaw, "<ENGAGE/>") {
-			shouldEngage = true
-			decisionStr = "REPLY_REGULAR"
-		} else if strings.Contains(upperRaw, "REACTION:") || strings.Contains(upperRaw, "REACT:") {
-			shouldEngage = false
-			decisionStr = "REACTION"
-			// Extract emoji from either REACTION: or REACT:
-			parts := strings.SplitN(engagementRaw, ":", 2)
-			if len(parts) == 2 {
-				emoji := strings.TrimSpace(parts[1])
-				if emoji != "" {
-					messageID, _ := input.EventData["message_id"].(string)
-					if messageID != "" {
-						log.Printf("Reacting with emoji in DM %s: %s", channelID, emoji)
-						_ = deps.Discord.AddReaction(channelID, messageID, emoji)
-						decisionStr = "REACTION:" + emoji
-					}
-				}
-			}
-		} else {
-			shouldEngage = false
-			decisionStr = "IGNORE"
-		}
-	} else {
-		// Even if model fails, populate telemetry for the event
-		evalHistory, _ = deps.Discord.FetchContext(channelID, 10)
-		engagementRaw = "ERROR: " + err.Error()
-	}
+	// Skip Model Hub check for DMs
+	prompt = "FORCED_BY_DM"
+	evalHistory = ""
 
 	responseModel := modelResponse
 
@@ -494,9 +436,6 @@ Output ONLY the token.`, evalHistory, content)
 
 		utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Thinking...")
 		deps.Discord.TriggerTyping(channelID)
-
-		// VRAM Optimization
-		_ = deps.Model.UnloadAllModelsExcept(ctx, responseModel)
 
 		if deps.Redis != nil {
 			deps.Redis.Expire(context.Background(), lockKey, 60*time.Second)

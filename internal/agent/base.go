@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -20,30 +19,6 @@ type BaseAgent struct {
 	ModelClient *model.Client
 	ChatManager *utils.ChatContextManager
 	StopTokens  []string
-}
-
-func (b *BaseAgent) isHeavyModel(modelName string) bool {
-	// Explicit heavy models
-	heavyModels := map[string]bool{
-		"dex-courier-researcher":      true,
-		"dex-guardian-sentry":         true,
-		"dex-imaginator-alert-review": true,
-		"dex-master":                  true,
-		"dex-private-message":         true,
-		"dex-public-message":          true,
-		"dex-transcription":           true,
-	}
-	if heavyModels[modelName] {
-		return true
-	}
-
-	// Check for size indicators in name
-	lower := strings.ToLower(modelName)
-	if strings.Contains(lower, "27b") || strings.Contains(lower, "70b") || strings.Contains(lower, "llama4") {
-		return true
-	}
-
-	return false
 }
 
 // IsActuallyBusy checks if the system is currently processing tasks.
@@ -153,14 +128,6 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 	}
 	taskHeader := fmt.Sprintf("# TASK\n\nYour task is to generate a %s %s report from the following data.\n\n", agentConfig.Name, protocolAlias)
 	inputContext = taskHeader + inputContext
-
-	// VRAM Optimization for heavy models
-	if b.isHeavyModel(modelName) {
-		log.Printf("VRAM Optimization: Unloading other models for heavy lifter %s...", modelName)
-		if err := b.ModelClient.UnloadAllModelsExcept(ctx, modelName); err != nil {
-			log.Printf("Warning: VRAM optimization failed: %v", err)
-		}
-	}
 
 	var allCorrections []Correction
 	var rawOutput string

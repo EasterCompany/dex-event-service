@@ -464,24 +464,14 @@ Rules:
 		defer deps.Redis.Del(context.Background(), lockKey)
 	}
 
-	// Dynamic Model Resolution
-	uDevice := "cpu"
-	uSpeed := "smart"
-	if deps.Options != nil {
-		uDevice = deps.Options.Cognitive.UtilityDevice
-		uSpeed = deps.Options.Cognitive.UtilitySpeed
-	}
+	// Standardized Models
+	modelEngagement := "dex-engagement-model"
+	modelSummary := "dex-summary-model"
+	modelResponse := "dex-public-message"
 
-	modelEngagement := utils.ResolveModel("engagement", uDevice, uSpeed)
-	modelSummary := utils.ResolveModel("summary", uDevice, uSpeed)
-	modelResponse := utils.ResolveModel("public-message", "gpu", "smart") // Response always smart/gpu by default
-
-	// Model Options (Keep-Alive for fast-cpu utilities)
+	// Model Options
 	utilityOptions := map[string]interface{}{
 		"num_thread": runtime.NumCPU(),
-	}
-	if strings.HasSuffix(modelEngagement, "-fast-cpu") || strings.HasSuffix(modelSummary, "-fast-cpu") {
-		utilityOptions["keep_alive"] = -1
 	}
 
 	var decisionStr string
@@ -514,16 +504,16 @@ Rules:
 		decisionStr = "IGNORE"
 		engagementReason = "Quiet Mode Enabled (No Direct Mention)"
 	} else if mentionedBot {
-		log.Printf("Bot was mentioned, forcing engagement.")
+		log.Printf("Bot was mentioned, forcing engagement (Bypassing Model Hub engagement check).")
 		shouldEngage = true
 		decisionStr = "REPLY"
-		engagementReason = "Direct mention"
+		engagementReason = "Direct mention (Forced)"
 		responseModel = "dex-public-message"
 
-		// Still fetch context for telemetry and event completeness
-		evalHistory, _ = deps.Discord.FetchContext(channelID, 25)
-		prompt = "FORCED_BY_MENTION"
+		// Skip Model Hub check entirely for forced engagement
 		engagementRaw = "<MENTION_DETECTED/>"
+		prompt = "FORCED_BY_MENTION"
+		evalHistory = "" // Not needed for decision
 	} else if restrictedChannels[channelID] {
 		log.Printf("Channel %s is restricted (analysis only). Skipping engagement check.", channelID)
 		shouldEngage = false

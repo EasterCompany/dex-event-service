@@ -51,8 +51,6 @@ type OptionsConfig struct {
 
 // CognitiveOptions holds configuration for model placement and optimization
 type CognitiveOptions struct {
-	UtilityDevice string `json:"utility_device"` // "cpu" or "gpu"
-	UtilitySpeed  string `json:"utility_speed"`  // "fast" or "smart"
 }
 
 // DiscordOptions holds Discord-specific settings

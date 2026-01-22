@@ -116,16 +116,9 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		contextHistory, _ = deps.Discord.FetchContext(channelID, 25)
 	}
 
-	// VRAM Optimization
-	// Skip unloading if we hold the Voice Mode lock, as we want both models loaded.
-	holder, _ := deps.Redis.Get(ctx, "system:cognitive_lock").Result()
-	if holder != "Voice Mode" {
-		_ = deps.Model.UnloadAllModelsExcept(ctx, "dex-engagement-model")
-	}
-
 	// 1. Check Engagement
 	shouldEngage := false
-	engagementRaw := "N/A (Skipped)"
+	var engagementRaw string
 	engagementReason := ""
 
 	userCount, err := deps.Discord.GetVoiceChannelUserCount(channelID)
@@ -136,9 +129,10 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	// Optimization: If it's a 1-on-1 (just user and Dexter), FORCE engagement without inference.
 	if userCount > 0 && userCount <= 2 {
-		log.Printf("Forcing engagement because user count is low (count: %d). Skipping inference.", userCount)
+		log.Printf("Forcing engagement because user count is low (count: %d). Bypassing Model Hub engagement check.", userCount)
 		shouldEngage = true
 		engagementReason = fmt.Sprintf("Forced engagement: User count is %d (Low population)", userCount)
+		engagementRaw = "<LOW_POPULATION_DETECTED/>"
 	} else {
 		// More users present: Perform inference to see if Dexter was addressed.
 		prompt := fmt.Sprintf("Analyze if Dexter should respond to this message (from voice transcription). Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", contextHistory, transcription)
@@ -264,11 +258,6 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		finalMessages = append(finalMessages, messages...)
 
 		responseModel := "dex-transcription"
-
-		// VRAM Optimization
-		if holder != "Voice Mode" {
-			_ = deps.Model.UnloadAllModelsExcept(ctx, responseModel)
-		}
 
 		fullResponse := ""
 		options := map[string]interface{}{

@@ -34,20 +34,6 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	log.Printf("Selected greeting: %s", greeting)
 
-	// --- Voice Mode VRAM Prioritization ---
-	// Load the transcription model onto GPU first (Priority)
-	// Then load the engagement model (can overflow to CPU/RAM)
-	log.Printf("greeting-handler: Prioritizing Voice Mode models in VRAM...")
-
-	// Unload everything else to clear VRAM for transcription
-	_ = deps.Model.UnloadAllModelsExcept(ctx, "dex-transcription")
-
-	// Warm up transcription
-	_, _, _ = deps.Model.Generate("dex-transcription", "warmup", nil)
-
-	// Warm up engagement (will overflow if transcription took all VRAM)
-	_, _, _ = deps.Model.Generate("dex-engagement-model", "warmup", nil)
-
 	deps.Discord.UpdateBotStatus("Greeting...", "online", 0)
 
 	ttsPayload := map[string]string{"text": greeting, "language": "en"}

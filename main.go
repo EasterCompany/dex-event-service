@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -101,13 +100,6 @@ func main() {
 
 		// Perform startup cleanup
 		performStartupCleanup(ctx, redisClient)
-
-		// Perform cognitive warmup (Pre-load CPU utilities)
-		// We reload here so we have the latest options.
-		if opt, err := config.LoadOptions(); err == nil {
-			options = opt
-			go performCognitiveWarmup(ctx, options)
-		}
 	}
 
 	// Handle delete mode
@@ -230,7 +222,7 @@ func main() {
 	eventURL = getServiceURL("dex-event-service", "cs", "8082")
 	ttsURL = getServiceURL("dex-tts-service", "be", "8200")
 	webURL = getServiceURL("dex-web-service", "be", "8201")
-	modelHubURL = "http://127.0.0.1:8400" // Point to Hub (dex-model-service)
+	modelHubURL = getServiceURL("dex-model-service", "co", "8400")
 
 	// Initialize dependencies
 	deps := &internalHandlers.Dependencies{
@@ -272,21 +264,6 @@ func main() {
 
 	// API Endpoints
 	router.HandleFunc("/service", endpoints.ServiceHandler).Methods("GET")
-	router.HandleFunc("/debug/resolve-model", endpoints.DebugResolveModelHandler).Methods("GET")
-	router.HandleFunc("/debug/warmup", func(w http.ResponseWriter, r *http.Request) {
-		// Reload options to catch any changes made via CLI during tests
-		if opt, err := config.LoadOptions(); err == nil {
-			options = opt
-		}
-
-		if options != nil {
-			go performCognitiveWarmup(ctx, options)
-			w.WriteHeader(http.StatusAccepted)
-			_, _ = w.Write([]byte("Warmup triggered"))
-		} else {
-			http.Error(w, "Options not loaded", http.StatusInternalServerError)
-		}
-	}).Methods("POST")
 	router.HandleFunc("/events", endpoints.EventsHandler(redisClient)).Methods("POST", "GET", "DELETE")
 	router.HandleFunc("/events/{id}", endpoints.EventsHandler(redisClient)).Methods("GET", "PATCH", "DELETE")
 	router.HandleFunc("/chores", endpoints.ChoresHandler(redisClient)).Methods("GET", "POST")
@@ -517,53 +494,4 @@ func performStartupCleanup(ctx context.Context, rdb *redis.Client) {
 		}
 	}
 	log.Println("Startup cleanup completed.")
-}
-
-func performCognitiveWarmup(ctx context.Context, opts *config.OptionsConfig) {
-	uDevice := opts.Cognitive.UtilityDevice
-	uSpeed := opts.Cognitive.UtilitySpeed
-
-	// We only pre-load if in CPU mode to ensure RAM residency (Warm RAM Strategy)
-	if uDevice != "" && uDevice != "cpu" {
-		return
-	}
-
-	log.Printf("Cognitive Warmup: Pre-loading CPU utility models (Speed: %s)...", uSpeed)
-
-	utilities := []string{
-		"engagement",
-		"summary",
-		"scraper",
-		"commit",
-		"moderation",
-		"router",
-		"vision",
-		"transcription",
-	}
-
-	modelHubURL := "http://127.0.0.1:8400"
-	client := model.NewClient(modelHubURL, RedisClient)
-
-	// Trigger background load sequentially to avoid overwhelming the Hub
-	go func() {
-		for _, base := range utilities {
-			modelName := utils.ResolveModel(base, "cpu", uSpeed)
-			log.Printf("  Warming %s...", modelName)
-
-			// We use Generate with empty prompt and keep_alive: -1 to force load
-			options := map[string]interface{}{
-				"keep_alive": -1,
-				"num_thread": runtime.NumCPU(),
-			}
-			_, _, err := client.GenerateWithContext(ctx, modelName, "", nil, options)
-			if err != nil {
-				log.Printf("Warning: Failed to warmup model %s: %v", modelName, err)
-			} else {
-				log.Printf("✓ Model %s is now resident in RAM.", modelName)
-			}
-			// Small delay between loads to let system stabilize
-			time.Sleep(500 * time.Millisecond)
-		}
-		log.Println("Cognitive Warmup Complete.")
-	}()
 }

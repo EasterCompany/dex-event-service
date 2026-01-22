@@ -709,7 +709,7 @@ func checkService(service config.ServiceEntry, serviceType string, isPublic bool
 		report = checkProdStatus(baseReport)
 	case "os":
 		// Check for Model Hub services
-		if strings.Contains(strings.ToLower(service.ID), "model") || strings.Contains(strings.ToLower(service.ID), "ollama") {
+		if strings.Contains(strings.ToLower(service.ID), "model") {
 			report = checkModelHubStatus(baseReport)
 		} else if strings.Contains(strings.ToLower(service.ID), "cache") || strings.Contains(strings.ToLower(service.ID), "upstash") {
 			// Check for Redis cache services

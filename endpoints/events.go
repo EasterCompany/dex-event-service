@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/handlers"
 	"github.com/EasterCompany/dex-event-service/internal/discord"
 	"github.com/EasterCompany/dex-event-service/templates"
@@ -366,7 +367,16 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 					// we'll create a temporary one or ideally use a shared one.
 					// For now, we'll use the existing logic but wrapped in ReportProcess if possible.
 
-					discordSvcURL := "http://127.0.0.1:8300"
+					// Resolve Discord URL from service map
+					discordSvcURL := "http://127.0.0.1:8300" // Default
+					if sm, err := config.LoadServiceMap(); err == nil {
+						for _, s := range sm.Services["th"] {
+							if s.ID == "dex-discord-service" {
+								discordSvcURL = "http://127.0.0.1:" + s.Port
+								break
+							}
+						}
+					}
 					dClient := discord.NewClient(discordSvcURL, "")
 
 					// Map CLI status to machine outcome

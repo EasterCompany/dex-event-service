@@ -6,9 +6,9 @@ import (
 	"io"
 	"net/http"
 	"time"
-)
 
-const DefaultHubURL = "http://127.0.0.1:8400"
+	"github.com/EasterCompany/dex-event-service/config"
+)
 
 // ModelInfo reflects a single model entry returned by the /api/tags endpoint.
 type ModelInfo struct {
@@ -32,7 +32,17 @@ type ListModelsResponse struct {
 
 // ListHubModels retrieves all available models from the Model Hub.
 func ListHubModels() ([]ModelInfo, error) {
-	url := DefaultHubURL + "/model/list"
+	hubURL := "http://127.0.0.1:8400" // Fallback
+	if sm, err := config.LoadServiceMap(); err == nil {
+		for _, s := range sm.Services["co"] {
+			if s.ID == "dex-model-service" {
+				hubURL = "http://127.0.0.1:" + s.Port
+				break
+			}
+		}
+	}
+
+	url := hubURL + "/model/list"
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)

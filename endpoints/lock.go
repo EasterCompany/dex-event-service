@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/redis/go-redis/v9"
 )
@@ -120,7 +121,15 @@ func processPendingEvents(redisClient *redis.Client) {
 	// In `main.go` I saw `eventURL = getServiceURL(..., "8082")` but that was for discord client usage.
 	// `serviceDefinitions` in `dex-cli` says 8100.
 
-	targetURL := "http://127.0.0.1:8100/events"
+	targetURL := "http://127.0.0.1:8100/events" // Fallback
+	if sm, err := config.LoadServiceMap(); err == nil {
+		for _, s := range sm.Services["cs"] {
+			if s.ID == "dex-event-service" {
+				targetURL = "http://127.0.0.1:" + s.Port + "/events"
+				break
+			}
+		}
+	}
 
 	for {
 		// Pop one event
