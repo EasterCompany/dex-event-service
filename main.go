@@ -310,6 +310,7 @@ func main() {
 	router.HandleFunc("/web/history", endpoints.WebHistoryHandler).Methods("GET", "POST")
 	router.HandleFunc("/system/status", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }).Methods("GET", "HEAD")
 	router.HandleFunc("/roadmap", endpoints.RoadmapHandler(redisClient)).Methods("GET", "POST", "PATCH", "DELETE")
+	router.HandleFunc("/roadmap/stats", endpoints.GetRoadmapStatsHandler()).Methods("GET")
 	router.HandleFunc("/roadmap/{id}", endpoints.RoadmapHandler(redisClient)).Methods("GET", "PATCH", "DELETE")
 
 	srv := &http.Server{

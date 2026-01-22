@@ -130,7 +130,6 @@ type ModelReport struct {
 // SystemMonitorResponse is the top-level response for the system monitor endpoint
 type SystemMonitorResponse struct {
 	Services []types.ServiceReport `json:"services"`
-	Models   []ModelReport         `json:"models"`
 	Whisper  *WhisperStatusReport  `json:"whisper,omitempty"`
 	XTTS     *XTTSStatusReport     `json:"xtts,omitempty"`
 }
@@ -191,21 +190,23 @@ func GetSystemMonitorSnapshot(isPublic bool) *SystemMonitorResponse {
 		// Return empty or error state if we can't load config
 		return &SystemMonitorResponse{
 			Services: []types.ServiceReport{},
-			Models:   []ModelReport{},
 		}
 	}
 
 	var serviceReports []types.ServiceReport
 
 	// Define service type order for consistent sorting
+	// cli, front end, core, backend, third party, cognitive, models (md), other (prd)
 	typeOrder := map[string]int{
-		"fe":  0,
-		"be":  1,
+		"cli": 0,
+		"fe":  1,
 		"cs":  2,
-		"th":  3,
-		"prd": 4,
-		"os":  5,
-		"cli": 6,
+		"be":  3,
+		"th":  4,
+		"co":  5,
+		"md":  6,
+		"prd": 7,
+		"os":  8,
 	}
 
 	// Get sorted group keys to ensure consistent order
@@ -235,13 +236,20 @@ func GetSystemMonitorSnapshot(isPublic bool) *SystemMonitorResponse {
 			return servicesInGroup[i].ID < servicesInGroup[j].ID
 		})
 		for _, serviceDef := range servicesInGroup {
+			id := strings.ToLower(serviceDef.ID)
+			// HIDE unwanted services from all snapshots
+			if id == "local-model-0" || id == "local-ollama-0" || id == "dex-cli" || id == "local-cache-0" {
+				continue
+			}
+
 			report := checkService(serviceDef, group, isPublic)
 			serviceReports = append(serviceReports, report)
 		}
 	}
 
-	// Get model reports
-	modelReports := checkModelsStatus()
+	// Get model reports and merge into services
+	modelReports := checkModelsAsServiceReports()
+	serviceReports = append(serviceReports, modelReports...)
 
 	// Get whisper status report
 	whisperReport := checkWhisperStatus()
@@ -251,7 +259,6 @@ func GetSystemMonitorSnapshot(isPublic bool) *SystemMonitorResponse {
 
 	return &SystemMonitorResponse{
 		Services: serviceReports,
-		Models:   modelReports,
 		Whisper:  whisperReport,
 		XTTS:     xttsReport,
 	}
@@ -267,7 +274,8 @@ type DashboardSnapshot struct {
 	CognitiveEvents  []types.Event          `json:"cognitive_events"`
 	ModerationEvents []types.Event          `json:"moderation_events"`
 	Alerts           []types.Event          `json:"alerts"`
-	Blueprints       []types.Event          `json:"blueprints"`
+	GitHubIssues     []utils.GitHubIssue    `json:"github_issues"`
+	OpenIssueCount   int                    `json:"open_issue_count"`
 	Contacts         *ContactsResponse      `json:"contacts"`
 	Profiles         map[string]interface{} `json:"profiles"`
 	AgentStatus      map[string]interface{} `json:"agent_status"`
@@ -298,7 +306,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	// 1. Monitor State
 	monitor := GetSystemMonitorSnapshot(true)
 
-	// Filter services for public consumption
+	// Filter services for public consumption (some are already filtered in snapshot)
 	var filteredServices []types.ServiceReport
 	for _, service := range monitor.Services {
 		id := strings.ToLower(service.ID)
@@ -308,7 +316,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 			continue
 		}
 
-		if id == "local-cache-0" || id == "local-model-0" || id == "upstash-redis-rw" || id == "easter-company" {
+		if id == "upstash-redis-rw" || id == "easter-company" {
 			continue
 		}
 		filteredServices = append(filteredServices, service)
@@ -360,8 +368,9 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	// 4. Sanitized Alerts
 	alerts := getSanitizedEvents(ctx, "events:type:system.notification.generated", 50)
 
-	// 4b. Sanitized Blueprints (Limit to 4 for public)
-	blueprints := getSanitizedEvents(ctx, "events:type:system.blueprint.generated", 4)
+	// 4b. GitHub Issues for Roadmap
+	githubIssues, _ := utils.ListGitHubIssues()
+	openIssueCount := len(githubIssues)
 
 	// 5. Public Contacts & Profiles (Owen & Dexter only)
 	owenID := "313071000877137920"
@@ -525,7 +534,8 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 		CognitiveEvents:  cognitive,
 		ModerationEvents: moderation,
 		Alerts:           alerts,
-		Blueprints:       blueprints,
+		GitHubIssues:     githubIssues,
+		OpenIssueCount:   openIssueCount,
 		Contacts:         contacts,
 		Profiles:         profiles,
 		AgentStatus:      agentStatus,
@@ -645,51 +655,47 @@ func fetchSystemHardwareInfo(ctx context.Context) ([]byte, error) {
 	return output, nil
 }
 
-// checkModelsStatus reports on all models currently downloaded in the Hub (Ollama).
-func checkModelsStatus() []ModelReport {
+// checkModelsAsServiceReports reports on all models currently downloaded in the Hub (Ollama) as ServiceReports.
+func checkModelsAsServiceReports() []types.ServiceReport {
 	downloadedModels, err := utils.ListHubModels()
 	if err != nil {
-		return []ModelReport{} // Hub is likely offline
+		return []types.ServiceReport{} // Hub is likely offline
 	}
 
-	// Filter redundant ":latest" tags if a specific tag already exists for the SAME model.
-	// e.g. if we have "gemma3:12b" and "gemma3:12b:latest", we only show "gemma3:12b".
-	// But we MUST keep "gemma3:1b" and "gemma3:12b" as distinct entries.
+	// Filter redundant ":latest" tags
 	finalModels := make(map[string]utils.ModelInfo)
-
 	for _, model := range downloadedModels {
 		cleanName := strings.TrimSuffix(model.Name, ":latest")
-
 		existing, exists := finalModels[cleanName]
 		if !exists {
 			finalModels[cleanName] = model
 		} else {
-			// If we have a conflict, prefer the one that DOESN'T have ":latest" in its raw name
 			if strings.HasSuffix(existing.Name, ":latest") && !strings.HasSuffix(model.Name, ":latest") {
 				finalModels[cleanName] = model
 			}
 		}
 	}
 
-	// Now, create the final reports from the filtered map.
-	var reports []ModelReport
+	var reports []types.ServiceReport
 	for _, model := range finalModels {
-		report := ModelReport{
-			Name:   model.Name,
-			Status: "Downloaded",
-			Size:   model.Size,
+		report := types.ServiceReport{
+			ID:        model.Name,
+			ShortName: strings.TrimSuffix(model.Name, ":latest"),
+			Type:      "md",
+			Status:    "online",
+			Memory:    fmt.Sprintf("%.2f GB", float64(model.Size)/1e9),
+			Uptime:    "∞",
 		}
 		if strings.HasPrefix(model.Name, "dex-") {
-			report.Type = "custom"
+			report.HealthMessage = "Custom Dexter Model"
 		} else {
-			report.Type = "base"
+			report.HealthMessage = "Base Neural Model"
 		}
 		reports = append(reports, report)
 	}
 
-	// Sort reports by name for consistent order
 	sort.Slice(reports, func(i, j int) bool {
-		return reports[i].Name < reports[j].Name
+		return reports[i].ID < reports[j].ID
 	})
 
 	return reports
