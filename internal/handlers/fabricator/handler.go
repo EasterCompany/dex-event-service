@@ -57,10 +57,10 @@ func NewFabricatorHandler(redis *redis.Client, modelClient *model.Client, discor
 				"reporter":  "Reporter",
 			},
 			Cooldowns: map[string]int{
-				"review":    300, // 5 minutes
-				"issue":     300, // 5 minutes
-				"construct": 300, // 5 minutes
-				"reporter":  300, // 5 minutes
+				"review":    1800, // 30 minutes
+				"issue":     1800, // 30 minutes
+				"construct": 3600, // 1 hour
+				"reporter":  3600, // 1 hour
 			},
 			IdleRequirement: 300,
 		},
@@ -146,9 +146,12 @@ func (h *FabricatorHandler) checkAndFabricate() {
 	}
 
 	now := time.Now().Unix()
-	lastRun, _ := h.RedisClient.Get(ctx, "fabricator:last_run:review").Int64()
-	if now-lastRun < int64(h.Config.Cooldowns["review"]) {
-		return
+	// Confirm that an agent can only run IF ALL PROTOCOLS are READY
+	for protocol, cooldown := range h.Config.Cooldowns {
+		lastRun, _ := h.RedisClient.Get(ctx, fmt.Sprintf("fabricator:last_run:%s", protocol)).Int64()
+		if now-lastRun < int64(cooldown) {
+			return
+		}
 	}
 
 	if h.IsActuallyBusy(ctx, h.Config.ProcessID) {
@@ -194,22 +197,46 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 		initialHash = strings.TrimSpace(string(out))
 	}
 
+	// TIER 0: REVIEW
 	h.RedisClient.Set(ctx, "fabricator:active_tier", "review", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Review Protocol (Tier 0)")
 	reviewOut, err := h.PerformReview(ctx)
 	runLogs.WriteString(fmt.Sprintf("### TIER 0: REVIEW\nStatus: %v\nOutput: %s\n\n", err == nil, reviewOut))
+
+	// No work check: skip waterfall and don't trigger cooldown
+	if strings.Contains(reviewOut, "No alerts found") || strings.Contains(reviewOut, "NO ISSUE") {
+		utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
+		h.RedisClient.Del(ctx, "fabricator:active_tier")
+		log.Printf("[%s] Waterfall aborted: No issues found during review.", HandlerName)
+		return
+	}
 	h.RedisClient.Set(ctx, "fabricator:last_run:review", time.Now().Unix(), 0)
 
+	// TIER 1: ISSUE
 	h.RedisClient.Set(ctx, "fabricator:active_tier", "issue", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Issue Protocol (Tier 1)")
 	issueOut, err := h.PerformIssue(ctx)
 	runLogs.WriteString(fmt.Sprintf("### TIER 1: ISSUE\nStatus: %v\nOutput: %s\n\n", err == nil, issueOut))
+
+	if strings.Contains(issueOut, "No open issues found") {
+		utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
+		h.RedisClient.Del(ctx, "fabricator:active_tier")
+		log.Printf("[%s] Waterfall aborted: No issues found to target.", HandlerName)
+		return
+	}
 	h.RedisClient.Set(ctx, "fabricator:last_run:issue", time.Now().Unix(), 0)
 
+	// TIER 2: CONSTRUCT
 	h.RedisClient.Set(ctx, "fabricator:active_tier", "construct", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Construct Protocol (Tier 2)")
 	constructOut, err := h.PerformConstruct(ctx)
 	runLogs.WriteString(fmt.Sprintf("### TIER 2: CONSTRUCT\nStatus: %v\nOutput: %s\n\n", err == nil, constructOut))
+
+	if strings.Contains(constructOut, "No open issues found") {
+		utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
+		h.RedisClient.Del(ctx, "fabricator:active_tier")
+		return
+	}
 	h.RedisClient.Set(ctx, "fabricator:last_run:construct", time.Now().Unix(), 0)
 
 	// Check for changes and trigger auto-build
