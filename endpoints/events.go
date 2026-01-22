@@ -33,6 +33,7 @@ func matchesEventFilters(eventData json.RawMessage, filters map[string]string) b
 	// Parse event data into a generic map
 	var eventMap map[string]interface{}
 	if err := json.Unmarshal(eventData, &eventMap); err != nil {
+		log.Printf("[Filter] Failed to unmarshal event data: %v", err)
 		return false // If we can't parse it, it doesn't match
 	}
 
@@ -85,6 +86,7 @@ func matchesEventFilters(eventData json.RawMessage, filters map[string]string) b
 		}
 
 		if !matchFound {
+			log.Printf("[Filter] REJECTED: field %s (value: '%s') did not match %s", fieldPath, actualValueStr, expectedValue)
 			return false
 		}
 	}
@@ -283,6 +285,7 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 		// Parse event JSON to validate against template
 		var eventData map[string]interface{}
 		if err := json.Unmarshal(req.Event, &eventData); err != nil {
+			log.Printf("[Event] Failed to unmarshal event data: %v", err)
 			http.Error(w, fmt.Sprintf("Invalid event JSON: %v", err), http.StatusBadRequest)
 			return
 		}
@@ -290,15 +293,19 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 		// Extract event type
 		eventTypeRaw, hasType := eventData["type"]
 		if !hasType {
+			log.Printf("[Event] Missing 'type' field in event: %s", string(req.Event))
 			http.Error(w, "Event must have a 'type' field", http.StatusBadRequest)
 			return
 		}
 
 		eventType, ok := eventTypeRaw.(string)
 		if !ok {
+			log.Printf("[Event] 'type' field is not a string: %v", eventTypeRaw)
 			http.Error(w, "Event 'type' field must be a string", http.StatusBadRequest)
 			return
 		}
+
+		log.Printf("[Event] Processing event %s", eventType)
 
 		// --- COGNITIVE IDLE TIMER LOGIC ---
 		// We track "Cognitive Idle Time" separately from raw "Last Event Time".
@@ -407,12 +414,14 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 			}
 		}
 
+		log.Printf("[Event] Validating event %s against templates...", eventType)
 		// Validate event against template
 		validationErrors := templates.Validate(eventType, eventData)
 		if len(validationErrors) > 0 {
 			// Build error message
 			errorMsg := "Event validation failed:\n"
 			for _, err := range validationErrors {
+				log.Printf("[Event] Validation FAILED for %s: %v", eventType, err)
 				errorMsg += fmt.Sprintf("  - %s\n", err.Error())
 			}
 			http.Error(w, errorMsg, http.StatusBadRequest)
@@ -514,6 +523,7 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 					return
 				}
 			}
+			log.Printf("[Event] Triggering explicit handler '%s' for event %s", req.Handler, eventID)
 			handlersToExecute = append(handlersToExecute, *config)
 		} else {
 			// 2. If no specific handler is requested, find all default handlers for the event type
@@ -527,6 +537,16 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 					// No filters defined, always matches
 					handlersToExecute = append(handlersToExecute, h)
 				}
+			}
+
+			if len(handlersToExecute) > 0 {
+				hNames := []string{}
+				for _, h := range handlersToExecute {
+					hNames = append(hNames, h.Name)
+				}
+				log.Printf("[Event] Triggering handlers %v for event %s (%s)", hNames, eventID, eventType)
+			} else {
+				log.Printf("[Event] No handlers found for event %s (%s)", eventID, eventType)
 			}
 		}
 
