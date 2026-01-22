@@ -467,7 +467,7 @@ Output ONLY the token.`, contextHistory, transcription)
 			if len(contextEventIDs) >= 10 {
 				go func() {
 					log.Printf("Housekeeping: Triggering background context summary update for %s", channelID)
-					smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Model, channelID, summaryModel, smartcontext.CachedSummary{}, nil, nil)
+					smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Model, deps.Discord, channelID, summaryModel, smartcontext.CachedSummary{}, nil, nil)
 				}()
 			} else {
 				log.Printf("Housekeeping: Skipping summary update (Raw buffer size %d is below threshold)", len(contextEventIDs))

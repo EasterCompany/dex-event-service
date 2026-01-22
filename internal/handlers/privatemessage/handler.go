@@ -555,7 +555,7 @@ Rules:
 			analysisModel := modelSummary
 
 			// 1. Context Housekeeping (Summarize if needed)
-			smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Model, channelID, analysisModel, smartcontext.CachedSummary{}, nil, utilityOptions)
+			smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Model, deps.Discord, channelID, analysisModel, smartcontext.CachedSummary{}, nil, utilityOptions)
 
 			// 2. Signal Extraction for Profiling
 			// For analysis we still use text block

@@ -8,9 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EasterCompany/dex-event-service/internal/discord"
 	"github.com/EasterCompany/dex-event-service/internal/model"
 	"github.com/EasterCompany/dex-event-service/templates"
 	"github.com/EasterCompany/dex-event-service/types"
+	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -26,7 +28,6 @@ type CachedSummary struct {
 
 // GetMessages fetches history using a hybrid "Lazy Summary" approach.
 // It combines a cached long-term summary with recent raw messages.
-// If the raw buffer grows too large (based on contextLimit), it triggers a background summarization.
 func GetMessages(ctx context.Context, redisClient *redis.Client, modelClient *model.Client, channelID string, summaryModel string, contextLimit int, options map[string]interface{}) ([]model.Message, []string, error) {
 	// Default to 6000 chars (~1500 tokens) if limit is not provided
 	if contextLimit <= 0 {
@@ -69,14 +70,10 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, modelClient *mo
 
 	// 5. Filter: Keep only events NEWER than the summary
 	var activeContextEvents []types.Event
-	var rawBufferTextLen int
 
 	if summary.LastEventID == "" {
 		// No summary? Use all events.
 		activeContextEvents = events
-		for _, e := range events {
-			rawBufferTextLen += len(e.Event)
-		}
 	} else {
 		// Find the cutoff point
 
@@ -93,31 +90,17 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, modelClient *mo
 			// Gap detected or summary is very old.
 			// We treat the summary as "general background" and use all 50 raw events.
 			activeContextEvents = events
-			rawBufferTextLen = 0
-			for _, e := range events {
-				rawBufferTextLen += len(e.Event)
-			}
 		} else {
 			// Overlap detected. Filter duplicates.
 			appending := false
 			for _, evt := range events {
 				if appending {
 					activeContextEvents = append(activeContextEvents, evt)
-					rawBufferTextLen += len(evt.Event)
 				} else if evt.ID == summary.LastEventID {
 					appending = true
 				}
 			}
 		}
-	}
-
-	// 6. Trigger Background Summarization if Buffer is Full
-	// We check if raw buffer is large AND we aren't already summarizing
-	if summaryModel != "" && rawBufferTextLen > contextLimit {
-		// Trigger background update using the raw events we have
-		go func() {
-			UpdateSummary(context.Background(), redisClient, modelClient, channelID, summaryModel, summary, events, options)
-		}()
 	}
 
 	// 7. Build Message List
@@ -198,7 +181,15 @@ func Get(ctx context.Context, redisClient *redis.Client, modelClient *model.Clie
 }
 
 // UpdateSummary performs the summarization task
-func UpdateSummary(ctx context.Context, rdb *redis.Client, client *model.Client, channelID string, model string, currentSummary CachedSummary, newEvents []types.Event, options map[string]interface{}) {
+func UpdateSummary(ctx context.Context, rdb *redis.Client, client *model.Client, discordClient *discord.Client, channelID string, model string, currentSummary CachedSummary, newEvents []types.Event, options map[string]interface{}) {
+	// 1. Acquire Lock (debounce)
+	lockKey := "context:summary:lock:" + channelID
+	locked, err := rdb.SetNX(ctx, lockKey, "1", 2*time.Minute).Result()
+	if err != nil || !locked {
+		return // Already summarizing
+	}
+	defer rdb.Del(ctx, lockKey)
+
 	// If currentSummary is empty (LastEventID is empty), try to load it from Redis
 	if currentSummary.LastEventID == "" {
 		summaryKey := "context:summary:" + channelID
@@ -228,14 +219,6 @@ func UpdateSummary(ctx context.Context, rdb *redis.Client, client *model.Client,
 		}
 	}
 
-	// 1. Acquire Lock (debounce)
-	lockKey := "context:summary:lock:" + channelID
-	locked, err := rdb.SetNX(ctx, lockKey, "1", 30*time.Second).Result()
-	if err != nil || !locked {
-		return // Already summarizing
-	}
-	defer rdb.Del(ctx, lockKey)
-
 	// 2. Prepare Data
 	if len(newEvents) < 15 {
 		return // Not enough data to justify a summary yet
@@ -259,17 +242,25 @@ func UpdateSummary(ctx context.Context, rdb *redis.Client, client *model.Client,
 		}
 	}
 
-	// Only summarize if we have a decent batch of new info (e.g. 10 turns)
-	if newCount < 10 {
+	// Only summarize if we have a decent batch of new info (e.g. 15 turns) to avoid frequent summaries
+	if newCount < 15 {
 		return
 	}
 
+	// 3. Acquire Cognitive Lock & Report Process
+	processID := "system-context-summary-" + channelID
+	utils.AcquireCognitiveLock(ctx, rdb, "Context Summary", processID, discordClient)
+	utils.ReportProcess(ctx, rdb, discordClient, processID, "Summarizing context...")
+	defer utils.ClearProcess(ctx, rdb, discordClient, processID)
+	defer utils.ReleaseCognitiveLock(ctx, rdb, "Context Summary")
+
 	// We want to summarize the *older* portion of the events.
-	// We summarize everything except the last 5 messages to keep them fresh in the raw buffer for next time.
-	eventsToSummarize := newEvents[:len(newEvents)-5]
-	if len(eventsToSummarize) == 0 {
+	// We keep only the last 6 messages (approx 3 turns) fresh in the raw buffer.
+	keepCount := 6
+	if len(newEvents) <= keepCount {
 		return
 	}
+	eventsToSummarize := newEvents[:len(newEvents)-keepCount]
 	lastEvent := eventsToSummarize[len(eventsToSummarize)-1]
 
 	// Check if this lastEvent is actually newer than what we already have
@@ -290,14 +281,15 @@ func UpdateSummary(ctx context.Context, rdb *redis.Client, client *model.Client,
 		model = "dex-summary-model"
 	}
 
-	// 3. Generate
+	// 4. Generate
 	newText, _, err := client.GenerateWithContext(ctx, model, prompt, nil, options)
 	if err != nil {
 		log.Printf("Failed to update context summary for %s: %v", channelID, err)
+		utils.RecordProcessOutcome(ctx, rdb, processID, "error")
 		return
 	}
 
-	// 4. Save
+	// 5. Save (Persist for 7 days)
 	newSummary := CachedSummary{
 		Text:        strings.TrimSpace(newText),
 		LastEventID: lastEvent.ID,
@@ -305,8 +297,9 @@ func UpdateSummary(ctx context.Context, rdb *redis.Client, client *model.Client,
 	}
 
 	bytes, _ := json.Marshal(newSummary)
-	rdb.Set(ctx, "context:summary:"+channelID, bytes, 24*time.Hour)
+	rdb.Set(ctx, "context:summary:"+channelID, bytes, 7*24*time.Hour)
 
+	utils.RecordProcessOutcome(ctx, rdb, processID, "success")
 	log.Printf("Updated context summary for channel %s (Head: %s)", channelID, lastEvent.ID)
 }
 

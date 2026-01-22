@@ -472,8 +472,12 @@ func performStartupCleanup(ctx context.Context, rdb *redis.Client) {
 		log.Printf("Failed to reset cognitive timer: %v", err)
 	}
 
-	// 4. Clear Guardian State
+	// 4. Clear Guardian State and Summary Locks
 	rdb.Del(ctx, "guardian:active_tier")
+	iterLocks := rdb.Scan(ctx, 0, "context:summary:lock:*", 0).Iterator()
+	for iterLocks.Next(ctx) {
+		rdb.Del(ctx, iterLocks.Val())
+	}
 
 	// 5. Clear Logs
 	home, err := os.UserHomeDir()
