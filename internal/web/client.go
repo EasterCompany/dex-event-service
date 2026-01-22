@@ -27,6 +27,7 @@ type MetadataResponse struct {
 	Description string `json:"description,omitempty"`
 	ImageURL    string `json:"image_url,omitempty"`
 	Content     string `json:"content,omitempty"`
+	Summary     string `json:"summary,omitempty"`
 	ContentType string `json:"content_type,omitempty"`
 	Provider    string `json:"provider,omitempty"`
 	Error       string `json:"error,omitempty"`
@@ -37,15 +38,19 @@ type WebViewResponse struct {
 	URL            string `json:"url"`
 	Title          string `json:"title,omitempty"`
 	Content        string `json:"content,omitempty"`         // Rendered HTML content
+	Summary        string `json:"summary,omitempty"`         // Generated summary
 	Screenshot     string `json:"screenshot,omitempty"`      // Base64 encoded screenshot
 	ScreenshotPath string `json:"screenshot_path,omitempty"` // Local path to screenshot
 	Error          string `json:"error,omitempty"`
 }
 
-func (c *Client) FetchMetadata(linkURL string) (*MetadataResponse, error) {
+func (c *Client) FetchMetadata(linkURL string, summary bool) (*MetadataResponse, error) {
 	reqURL := fmt.Sprintf("%s/metadata?url=%s", c.BaseURL, url.QueryEscape(linkURL))
+	if summary {
+		reqURL += "&summary=true"
+	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 60 * time.Second} // Increased timeout for possible summary generation
 	resp, err := client.Get(reqURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call web service: %w", err)
@@ -66,7 +71,7 @@ func (c *Client) FetchMetadata(linkURL string) (*MetadataResponse, error) {
 }
 
 // FetchWebView calls the /webview endpoint of dex-web-service to get headless browser data.
-func (c *Client) FetchWebView(linkURL string) (*WebViewResponse, error) {
+func (c *Client) FetchWebView(linkURL string, summary bool) (*WebViewResponse, error) {
 	// Create temp path for screenshot
 	tmpDir := "/tmp/dexter/images"
 	_ = os.MkdirAll(tmpDir, 0777)
@@ -74,9 +79,12 @@ func (c *Client) FetchWebView(linkURL string) (*WebViewResponse, error) {
 	screenshotPath := filepath.Join(tmpDir, filename)
 
 	reqURL := fmt.Sprintf("%s/webview?url=%s&output_path=%s", c.BaseURL, url.QueryEscape(linkURL), url.QueryEscape(screenshotPath))
+	if summary {
+		reqURL += "&summary=true"
+	}
 
 	// Webview calls can take longer due to browser startup and page rendering
-	client := &http.Client{Timeout: 45 * time.Second} // Increased timeout
+	client := &http.Client{Timeout: 90 * time.Second} // Increased timeout for browser + summary
 	resp, err := client.Get(reqURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call web view service: %w", err)

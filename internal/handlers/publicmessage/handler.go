@@ -145,7 +145,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 			if decision == "VISUAL" {
 				utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Viewing link...")
-				webView, fetchErr = deps.Web.FetchWebView(foundURL)
+				webView, fetchErr = deps.Web.FetchWebView(foundURL, true)
 				if fetchErr == nil && webView != nil {
 					if err := utils.StoreWebHistory(deps.Redis, webView, foundURL); err != nil {
 						log.Printf("Failed to store web history: %v", err)
@@ -155,11 +155,11 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					log.Printf("Failed to fetch web view for %s: %v, falling back to STATIC", foundURL, fetchErr)
 					// Fallback to static if webview fails
 					utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Analyzing link...")
-					meta, fetchErr = deps.Web.FetchMetadata(foundURL)
+					meta, fetchErr = deps.Web.FetchMetadata(foundURL, true)
 				}
 			} else {
 				utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Analyzing link...")
-				meta, fetchErr = deps.Web.FetchMetadata(foundURL)
+				meta, fetchErr = deps.Web.FetchMetadata(foundURL, true)
 			}
 
 			if fetchErr != nil {
@@ -176,16 +176,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				currentImageURL = ""             // Screenshot is handled separately
 				currentContentType = "text/html" // General type for rendered content
 				currentProvider = "webview"      // Indicate source
-
-				// Generate summary from rendered HTML
-				if webView.Content != "" {
-					contentToSummarize := webView.Content
-					if len(contentToSummarize) > 12000 { // Max summary length
-						contentToSummarize = contentToSummarize[:12000]
-					}
-					currentSummary, _, _ = deps.Ollama.Generate("dex-scraper-model", contentToSummarize, nil)
-					currentSummary = strings.TrimSpace(currentSummary)
-				}
+				currentSummary = webView.Summary // Use summary from web service
 
 				// Add screenshot as virtual attachment
 				if webView.Screenshot != "" {
@@ -208,16 +199,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				currentImageURL = meta.ImageURL
 				currentContentType = meta.ContentType
 				currentProvider = meta.Provider
-
-				// Generate summary from static content
-				if meta.Content != "" {
-					contentToSummarize := meta.Content
-					if len(contentToSummarize) > 12000 {
-						contentToSummarize = contentToSummarize[:12000]
-					}
-					currentSummary, _, _ = deps.Ollama.Generate("dex-scraper-model", contentToSummarize, nil)
-					currentSummary = strings.TrimSpace(currentSummary)
-				}
+				currentSummary = meta.Summary // Use summary from web service
 			}
 
 			// Check for explicit text in link metadata

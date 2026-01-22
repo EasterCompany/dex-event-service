@@ -92,21 +92,13 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		if !strings.HasPrefix(foundURL, "https://discord.com/attachments/") {
 			utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Analyzing link...")
 			log.Printf("Found external URL in message: %s", foundURL)
-			meta, err := deps.Web.FetchMetadata(foundURL)
+			meta, err := deps.Web.FetchMetadata(foundURL, true)
 			if err != nil {
 				log.Printf("Failed to fetch metadata for %s: %v", foundURL, err)
 				continue
 			}
 
-			var summary string
-			if meta.Content != "" {
-				contentToSummarize := meta.Content
-				if len(contentToSummarize) > 12000 {
-					contentToSummarize = contentToSummarize[:12000]
-				}
-				summary, _, _ = deps.Ollama.Generate("dex-scraper-model", contentToSummarize, nil)
-				summary = strings.TrimSpace(summary)
-			}
+			summary := meta.Summary
 			// Check for explicit text in link metadata
 			if meta.Title != "" || meta.Description != "" {
 				modPrompt := fmt.Sprintf("Analyze this link metadata:\n\nTitle: %s\nDescription: %s\nURL: %s", meta.Title, meta.Description, foundURL)
