@@ -10,7 +10,7 @@ func GetTemplates() map[string]EventTemplate {
 	return map[string]EventTemplate{
 		"system.cognitive.model_inference": {
 			Description: "A neural model was inferenced",
-			Format:      "Model Inference: {model} ({method})",
+			Format:      "Model Inference: {model} ({method}) - {duration_ms}ms",
 			Fields: map[string]FieldSpec{
 				"model": {
 					Type:        "string",
@@ -22,20 +22,20 @@ func GetTemplates() map[string]EventTemplate {
 					Required:    true,
 					Description: "Method (generate, chat, etc.)",
 				},
-				"duration": {
-					Type:        "string",
+				"eval_count": {
+					Type:        "number",
 					Required:    false,
-					Description: "Duration of the load operation",
+					Description: "Number of tokens generated",
 				},
-				"success": {
-					Type:        "boolean",
+				"prompt_eval_count": {
+					Type:        "number",
 					Required:    false,
-					Description: "Whether the load was successful",
+					Description: "Number of tokens in prompt",
 				},
-				"error": {
-					Type:        "string",
+				"duration_ms": {
+					Type:        "number",
 					Required:    false,
-					Description: "Error message if failed",
+					Description: "Duration of inference in milliseconds",
 				},
 			},
 		},

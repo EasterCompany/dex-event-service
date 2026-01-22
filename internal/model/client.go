@@ -113,11 +113,6 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message) (Me
 }
 
 func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []Message, options map[string]interface{}) (Message, error) {
-	c.emit("system.cognitive.model_inference", map[string]interface{}{
-		"model":  model,
-		"method": "chat",
-	})
-
 	// Convert options to RawMessage for pass-through
 	optsBytes, _ := json.Marshal(options)
 
@@ -164,11 +159,24 @@ func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []M
 		var simpleResp map[string]string
 		if err2 := json.Unmarshal(body, &simpleResp); err2 == nil {
 			if val, ok := simpleResp["response"]; ok {
+				c.emit("system.cognitive.model_inference", map[string]interface{}{
+					"model":  model,
+					"method": "chat",
+				})
 				return Message{Role: "assistant", Content: val}, nil
 			}
 		}
 		return Message{}, fmt.Errorf("failed to unmarshal hub response: %v. Body: %s", err, string(body))
 	}
+
+	c.emit("system.cognitive.model_inference", map[string]interface{}{
+		"model":             model,
+		"method":            "chat",
+		"eval_count":        response.EvalCount,
+		"prompt_eval_count": response.PromptEvalCount,
+		"duration_ms":       response.TotalDuration / 1000000, // ns to ms
+	})
+
 	return response.Message, nil
 }
 
@@ -223,9 +231,6 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []Messag
 		// Try to parse as Ollama ChatResponse
 		var chunk ChatResponse
 		if err := json.Unmarshal(line, &chunk); err == nil {
-			if chunk.Message.Content != "" {
-				callback(chunk.Message.Content)
-			}
 			if chunk.Done {
 				stats.EvalCount = chunk.EvalCount
 				stats.PromptEvalCount = chunk.PromptEvalCount
@@ -233,6 +238,14 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []Messag
 				stats.LoadDuration = time.Duration(chunk.LoadDuration)
 				stats.PromptEvalDuration = time.Duration(chunk.PromptEvalDuration)
 				stats.EvalDuration = time.Duration(chunk.EvalDuration)
+
+				c.emit("system.cognitive.model_inference", map[string]interface{}{
+					"model":             model,
+					"method":            "chat-stream",
+					"eval_count":        chunk.EvalCount,
+					"prompt_eval_count": chunk.PromptEvalCount,
+					"duration_ms":       chunk.TotalDuration / 1000000,
+				})
 				break
 			}
 		}
@@ -247,11 +260,6 @@ func (c *Client) Generate(model, prompt string, images []string) (string, Genera
 }
 
 func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, images []string, options map[string]interface{}) (string, GenerationStats, error) {
-	c.emit("system.cognitive.model_inference", map[string]interface{}{
-		"model":  model,
-		"method": "generate",
-	})
-
 	// Convert options
 	optsBytes, _ := json.Marshal(options)
 
@@ -294,11 +302,23 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 		var simpleResp map[string]string
 		if err2 := json.Unmarshal(body, &simpleResp); err2 == nil {
 			if val, ok := simpleResp["response"]; ok {
+				c.emit("system.cognitive.model_inference", map[string]interface{}{
+					"model":  model,
+					"method": "generate",
+				})
 				return val, GenerationStats{}, nil
 			}
 		}
 		return "", GenerationStats{}, err
 	}
+
+	c.emit("system.cognitive.model_inference", map[string]interface{}{
+		"model":             model,
+		"method":            "generate",
+		"eval_count":        response.EvalCount,
+		"prompt_eval_count": response.PromptEvalCount,
+		"duration_ms":       response.TotalDuration / 1000000, // ns to ms
+	})
 
 	stats := GenerationStats{
 		EvalCount:          response.EvalCount,
@@ -371,6 +391,14 @@ func (c *Client) GenerateStream(model, prompt string, images []string, options m
 				stats.LoadDuration = time.Duration(chunk.LoadDuration)
 				stats.PromptEvalDuration = time.Duration(chunk.PromptEvalDuration)
 				stats.EvalDuration = time.Duration(chunk.EvalDuration)
+
+				c.emit("system.cognitive.model_inference", map[string]interface{}{
+					"model":             model,
+					"method":            "generate-stream",
+					"eval_count":        chunk.EvalCount,
+					"prompt_eval_count": chunk.PromptEvalCount,
+					"duration_ms":       chunk.TotalDuration / 1000000,
+				})
 				break
 			}
 		}
