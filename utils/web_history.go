@@ -43,6 +43,42 @@ func StoreWebHistory(redis *redis.Client, resp *web.WebViewResponse, url string)
 	return StoreWebHistoryItem(redis, item)
 }
 
+func StoreMetadataHistory(redis *redis.Client, resp *web.MetadataResponse, url string) error {
+	if redis == nil {
+		return fmt.Errorf("redis client is nil")
+	}
+
+	// Use Title or URL as title
+	title := resp.Title
+	if title == "" {
+		title = url
+	}
+
+	// Use Summary or Description as content
+	content := resp.Summary
+	if content == "" {
+		content = resp.Description
+	}
+	if content == "" {
+		content = resp.Content
+	}
+
+	// Truncate if needed
+	if len(content) > 50000 {
+		content = content[:50000] + "...(truncated)"
+	}
+
+	item := WebHistoryItem{
+		URL:        url,
+		Title:      title,
+		Timestamp:  time.Now().Unix(),
+		Screenshot: resp.ImageURL, // Store OG image as "screenshot" for preview in list if possible
+		Content:    content,
+	}
+
+	return StoreWebHistoryItem(redis, item)
+}
+
 func StoreWebHistoryItem(redis *redis.Client, item WebHistoryItem) error {
 	if redis == nil {
 		return fmt.Errorf("redis client is nil")

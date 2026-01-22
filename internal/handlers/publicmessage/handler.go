@@ -160,6 +160,11 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			} else {
 				utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Analyzing link...")
 				meta, fetchErr = deps.Web.FetchMetadata(foundURL, true)
+				if fetchErr == nil && meta != nil {
+					if err := utils.StoreMetadataHistory(deps.Redis, meta, foundURL); err != nil {
+						log.Printf("Failed to store web history: %v", err)
+					}
+				}
 			}
 
 			if fetchErr != nil {
