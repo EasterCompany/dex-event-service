@@ -43,12 +43,15 @@ func NewAnalyzerAgent(redis *redis.Client, modelClient *model.Client, discord *d
 			Name:      "Analyzer",
 			ProcessID: AnalyzerProcessID,
 			Models: map[string]string{
+				"summary":   "dex-analyzer-summary",
 				"synthesis": "dex-analyzer-synthesis",
 			},
 			ProtocolAliases: map[string]string{
+				"summary":   "Summary",
 				"synthesis": "Synthesis",
 			},
 			Cooldowns: map[string]int{
+				"summary":   21600, // 6 hours
 				"synthesis": 43200, // 12 hours
 			},
 			IdleRequirement:            300, // 5 minutes idle (matched with Guardian)
@@ -101,9 +104,98 @@ func (h *AnalyzerAgent) runWorker() {
 				continue
 			}
 
-			// 2. Perform Synthesis
+			// 2. Run Protocols
+			h.PerformSummary(h.ctx)
 			h.PerformSynthesis(h.ctx)
 		}
+	}
+}
+
+func (h *AnalyzerAgent) PerformSummary(ctx context.Context) {
+	if utils.IsSystemPaused(ctx, h.RedisClient) {
+		log.Printf("[%s] Summary skipped: System is paused.", h.Config.Name)
+		return
+	}
+
+	// Strict Protocol Cooldown Check
+	lastRun, _ := h.RedisClient.Get(ctx, "analyzer:last_run:summary").Int64()
+	if time.Now().Unix()-lastRun < int64(h.Config.Cooldowns["summary"]) {
+		return
+	}
+
+	// Busy Check (Prevent Queueing)
+	if h.IsActuallyBusy(ctx, h.Config.ProcessID) {
+		return
+	}
+
+	log.Printf("[%s] Starting Summary Protocol...", h.Config.Name)
+
+	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
+	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+
+	userSet := make(map[string]bool)
+	iter := h.RedisClient.Scan(ctx, 0, "user:profile:*", 0).Iterator()
+	for iter.Next(ctx) {
+		key := iter.Val()
+		targetUserID := strings.TrimPrefix(key, "user:profile:")
+		if targetUserID != "" {
+			userSet[targetUserID] = true
+		}
+	}
+	userSet["dexter"] = true
+
+	var usersToProcess []string
+	for uid := range userSet {
+		usersToProcess = append(usersToProcess, uid)
+	}
+
+	if len(usersToProcess) == 0 {
+		return
+	}
+
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Summary Batch")
+	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
+
+	for _, targetUserID := range usersToProcess {
+		cooldownKey := fmt.Sprintf("agent:%s:summary:cooldown:%s", h.Config.Name, targetUserID)
+		if h.RedisClient.Get(ctx, cooldownKey).Val() != "" {
+			continue
+		}
+		h.processUserSummary(ctx, targetUserID, cooldownKey)
+	}
+
+	h.RedisClient.Set(ctx, "analyzer:last_run:summary", time.Now().Unix(), 0)
+	log.Printf("[%s] Summary batch complete.", h.Config.Name)
+}
+
+func (h *AnalyzerAgent) processUserSummary(ctx context.Context, targetUserID string, cooldownKey string) {
+	log.Printf("[%s] Starting summary for user %s", h.Config.Name, targetUserID)
+
+	h.RedisClient.Set(ctx, "analyzer:active_tier", "summary", 0)
+	defer h.RedisClient.Set(ctx, "analyzer:active_tier", "", 0)
+
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, fmt.Sprintf("Summarizing User: %s", targetUserID))
+
+	// Gather Context
+	input := h.gatherHistoryContext(ctx, targetUserID)
+	historyFound := !strings.Contains(input, "No interaction history found") && !strings.Contains(input, "No recent system events")
+
+	if historyFound {
+		sessionID := fmt.Sprintf("summary-%s-%d", targetUserID, time.Now().Unix())
+		// Temporary override EnforceJSON for text summary
+		h.Config.EnforceJSON = false
+		results, _, err := h.RunCognitiveLoop(ctx, h, "summary", h.Config.Models["summary"], sessionID, "Summarize user behavior concisely.", input, 1)
+
+		if err == nil && len(results) > 0 {
+			history, _ := h.ChatManager.LoadHistory(ctx, sessionID)
+			if len(history) > 0 {
+				summary := history[len(history)-1].Content
+				h.RedisClient.Set(ctx, "user:summary:"+targetUserID, summary, 48*time.Hour)
+			}
+			h.RedisClient.Set(ctx, cooldownKey, "1", time.Duration(h.Config.Cooldowns["summary"])*time.Second)
+		}
+	} else {
+		h.RedisClient.Set(ctx, cooldownKey, "1", 4*time.Hour)
 	}
 }
 
@@ -175,14 +267,12 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID string, cooldownKey string) {
 	startTime := time.Now()
 	log.Printf("[%s] Starting synthesis for user %s", h.Config.Name, targetUserID)
-	// ... (trimmed for context, I will provide the full function structure in the next step)
 
 	// Set active tier for frontend visibility
 	h.RedisClient.Set(ctx, "analyzer:active_tier", "synthesis", 0)
 	defer h.RedisClient.Set(ctx, "analyzer:active_tier", "", 0)
 
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, fmt.Sprintf("Analyzing User: %s", targetUserID))
-	// No defer clear here, because we want the process to stay visible during the batch
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, fmt.Sprintf("Synthesizing Dossier: %s", targetUserID))
 
 	p, err := LoadProfile(ctx, h.RedisClient, targetUserID)
 	if err != nil {
@@ -194,16 +284,17 @@ func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID s
 	// Initial save of the integrity-checked profile
 	_ = saveProfile(ctx, h.RedisClient, p)
 
-	// 2. Gather Context
-	input := h.gatherHistoryContext(ctx, targetUserID)
-	historyFound := !strings.Contains(input, "No interaction history found") && !strings.Contains(input, "No recent system events")
+	// 2. Load Summary
+	summary, _ := h.RedisClient.Get(ctx, "user:summary:"+targetUserID).Result()
+	summaryFound := summary != ""
 
 	var auditID string
 
-	if historyFound {
+	if summaryFound {
 		// 3. AI STEP: Run Cognitive Loop
 		sessionID := fmt.Sprintf("synthesis-%s-%d", targetUserID, time.Now().Unix())
-		results, aid, err := h.RunCognitiveLoop(ctx, h, "synthesis", h.Config.Models["synthesis"], sessionID, h.buildSynthesisPrompt(p), input, 1)
+		h.Config.EnforceJSON = true
+		results, aid, err := h.RunCognitiveLoop(ctx, h, "synthesis", h.Config.Models["synthesis"], sessionID, h.buildSynthesisPrompt(p), "### LATEST INTERACTION SUMMARY\n\n"+summary, 1)
 		auditID = aid
 
 		if err == nil && len(results) > 0 {
@@ -235,15 +326,15 @@ func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID s
 		}
 	} else {
 		// 4. SKIP AI: Just post a "Maintenance" audit
-		log.Printf("[%s] No history for %s. Skipping AI synthesis.", h.Config.Name, targetUserID)
+		log.Printf("[%s] No summary for %s. Skipping AI synthesis.", h.Config.Name, targetUserID)
 
 		audit := agent.AuditPayload{
 			Type:         "system.analysis.audit",
 			AgentName:    h.Config.Name,
 			Tier:         "Maintenance",
 			Model:        "automated-integrity-check",
-			InputContext: input,
-			RawOutput:    "AI Synthesis skipped: No recent interaction history. Performed automated integrity check and data enrichment.",
+			InputContext: "No summary found in Redis.",
+			RawOutput:    "AI Synthesis skipped: No recent interaction summary found. Performed automated integrity check and data enrichment.",
 			Status:       "SUCCESS",
 			Success:      true,
 			Timestamp:    time.Now().Unix(),
@@ -258,7 +349,7 @@ func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID s
 		h.RedisClient.Set(ctx, cooldownKey, "1", 4*time.Hour)
 	}
 
-	log.Printf("[%s] Synthesis completed for user %s (Audit: %s, AI: %v)", h.Config.Name, targetUserID, auditID, historyFound)
+	log.Printf("[%s] Synthesis completed for user %s (Audit: %s, AI: %v)", h.Config.Name, targetUserID, auditID, summaryFound)
 }
 
 func (h *AnalyzerAgent) gatherHistoryContext(ctx context.Context, userID string) string {
@@ -427,13 +518,13 @@ You are profiling YOURSELF (Dexter).
 	}
 
 	return fmt.Sprintf(`You are the Analyzer, an advanced biographical synthesis engine.
-Your task is to refine and update a User's Dossier based on their historical behavior.
+Your task is to refine and update a User's Dossier based on the latest interaction summary provided in the context.
 %s
 ### CURRENT PROFILE DATA (JSON):
 %s
 
 ### INSTRUCTIONS:
-1. Refine the profile. Be granular and clinical.
+1. Refine the profile using the information in the Interaction Summary. Be granular and clinical.
 2. CRITICAL: Follow the exact JSON schema provided. 
    - "attributes" MUST be an ARRAY of objects: [{"key": "string", "value": "string", "confidence": float}]
    - "dossier.social" MUST be an ARRAY of objects: [{"name": "string", "relation": "string", "trust": "string"}]

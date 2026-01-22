@@ -142,9 +142,14 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 	analyzerActive, _ := rdb.Get(ctx, "analyzer:active_tier").Result()
 	analyzerProtocols := make(map[string]ProtocolStatus)
 
+	// Summary (Every 6 hours = 21600s)
+	analyzerProtocols["summary"] = calculateProtocolStatus(
+		ctx, rdb, analyzerActive, "summary", 21600, "dex-analyzer-summary", "analyzer",
+	)
+
 	// Synthesis (Every 12 hours = 43200s)
 	analyzerProtocols["synthesis"] = calculateProtocolStatus(
-		ctx, rdb, analyzerActive, "synthesis", 43200, "dex-master", "analyzer",
+		ctx, rdb, analyzerActive, "synthesis", 43200, "dex-analyzer-synthesis", "analyzer",
 	)
 
 	resp.Agents["analyzer"] = AgentState{
@@ -367,6 +372,13 @@ func ResetAgentHandler(redisClient *redis.Client) http.HandlerFunc {
 			redisClient.Set(ctx, "fabricator:last_run:construct", 0, utils.DefaultTTL)
 		case "reporter":
 			redisClient.Set(ctx, "fabricator:last_run:reporter", 0, utils.DefaultTTL)
+		case "summary":
+			redisClient.Set(ctx, "analyzer:last_run:summary", 0, utils.DefaultTTL)
+			// Clear per-user summary cooldowns
+			iter := redisClient.Scan(ctx, 0, "agent:Analyzer:summary:cooldown:*", 0).Iterator()
+			for iter.Next(ctx) {
+				redisClient.Del(ctx, iter.Val())
+			}
 		case "synthesis":
 			redisClient.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
 			// Clear per-user cooldowns
@@ -383,11 +395,12 @@ func ResetAgentHandler(redisClient *redis.Client) http.HandlerFunc {
 			redisClient.Set(ctx, "fabricator:last_run:issue", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "fabricator:last_run:construct", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "fabricator:last_run:reporter", 0, utils.DefaultTTL)
+			redisClient.Set(ctx, "analyzer:last_run:summary", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "system:last_cognitive_event", 0, 0)
 
 			// Clear per-user cooldowns
-			iter := redisClient.Scan(ctx, 0, "agent:Analyzer:cooldown:*", 0).Iterator()
+			iter := redisClient.Scan(ctx, 0, "agent:Analyzer:*", 0).Iterator()
 			for iter.Next(ctx) {
 				redisClient.Del(ctx, iter.Val())
 			}
