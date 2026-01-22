@@ -466,7 +466,6 @@ Rules:
 
 	// Standardized Models
 	modelEngagement := "dex-engagement-model"
-	modelSummary := "dex-summary-model"
 	modelResponse := "dex-public-message"
 
 	// Model Options
@@ -830,12 +829,9 @@ Output ONLY the token.`, evalHistory, content)
 
 		// --- 3. Async Tasks (Housekeeping & Profiling) ---
 		go func() {
-			analysisModel := modelSummary
+			analysisModel := "dex-summary-model"
 
-			// 1. Context Housekeeping (Summarize if needed)
-			smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Model, deps.Discord, channelID, analysisModel, smartcontext.CachedSummary{}, nil, utilityOptions)
-
-			// 2. Signal Extraction for User Profiling
+			// 1. Signal Extraction for User Profiling
 			// For analysis we still use text block
 			historyText := ""
 			for _, m := range messages {

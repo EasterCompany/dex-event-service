@@ -276,7 +276,7 @@ func UpdateSummary(ctx context.Context, rdb *redis.Client, client *model.Client,
 	}
 
 	if model == "" {
-		model = "dex-summary-model"
+		model = "dex-courier-compressor"
 	}
 
 	// 4. Generate
