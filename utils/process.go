@@ -33,10 +33,18 @@ func IsSystemPaused(ctx context.Context, redisClient *redis.Client) bool {
 
 // IsSystemBusy checks if the system is currently running a heavy agent protocol.
 // If ignoreVoiceMode is true, it will not consider the "Voice Mode" or "voice-mode" lock as busy.
-func IsSystemBusy(ctx context.Context, redisClient *redis.Client, ignoreVoiceMode bool) bool {
+// If testID is non-empty, it bypasses the global cognitive lock (used for simulations).
+func IsSystemBusy(ctx context.Context, redisClient *redis.Client, ignoreVoiceMode bool, testID string) bool {
 	if redisClient == nil {
 		return false
 	}
+
+	// Simulations (events with test_id) are allowed to bypass the cognitive lock
+	// because they are often running WHILE the system is locked for validation.
+	if testID != "" {
+		return false
+	}
+
 	// 1. Check for global cognitive lock
 	holder, _ := redisClient.Get(ctx, CognitiveLockKey).Result()
 	if holder != "" {

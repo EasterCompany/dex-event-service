@@ -55,6 +55,14 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	channelID, _ := input.EventData["channel_id"].(string)
 	userID, _ := input.EventData["user_id"].(string)
 
+	// Robust test_id extraction
+	testID, _ := input.EventData["test_id"].(string)
+	if testID == "" {
+		if meta, ok := input.EventData["metadata"].(map[string]interface{}); ok {
+			testID, _ = meta["test_id"].(string)
+		}
+	}
+
 	// --- 0. Reload Options Dynamically ---
 	if opt, err := config.LoadOptions(); err == nil {
 		deps.Options = opt
@@ -317,7 +325,7 @@ Rules:
 	}
 
 	// 0.5. Busy Check (Single Serving AI)
-	if utils.IsSystemBusy(ctx, deps.Redis, false) {
+	if utils.IsSystemBusy(ctx, deps.Redis, false, testID) {
 		log.Printf("System is busy with background tasks. Dexter is dipping out of this DM.")
 		return types.HandlerOutput{Success: true}, nil
 	}

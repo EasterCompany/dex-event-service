@@ -81,6 +81,14 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	serverID, _ := input.EventData["server_id"].(string)
 	serverName, _ := input.EventData["server_name"].(string)
 
+	// Robust test_id extraction
+	testID, _ := input.EventData["test_id"].(string)
+	if testID == "" {
+		if meta, ok := input.EventData["metadata"].(map[string]interface{}); ok {
+			testID, _ = meta["test_id"].(string)
+		}
+	}
+
 	// 0. Claim Check (Anti-Race-Condition)
 	// If this event was already included in a previous response's context window, skip it.
 	if claimed, _ := deps.Redis.Get(ctx, "handled:event:"+input.EventID).Result(); claimed == "1" {
@@ -99,7 +107,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	}
 
 	// 0.6 Busy Check (Single Serving AI)
-	if utils.IsSystemBusy(ctx, deps.Redis, true) {
+	if utils.IsSystemBusy(ctx, deps.Redis, true, testID) {
 		log.Printf("System is busy with background tasks. Dexter is dipping out of this voice conversation.")
 		return types.HandlerOutput{Success: true}, nil
 	}
