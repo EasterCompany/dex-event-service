@@ -32,11 +32,12 @@ func NewClient(url string, rdb *redis.Client) *Client {
 
 // ModelRequest represents the standard request format for the Model Hub
 type ModelRequest struct {
-	Model    string          `json:"model"`
-	Prompt   string          `json:"prompt,omitempty"`
-	Messages []Message       `json:"messages,omitempty"`
-	Stream   bool            `json:"stream"`
-	Options  json.RawMessage `json:"options,omitempty"` // Pass through options opaque
+	Model     string          `json:"model"`
+	Prompt    string          `json:"prompt,omitempty"`
+	Messages  []Message       `json:"messages,omitempty"`
+	Stream    bool            `json:"stream"`
+	Options   json.RawMessage `json:"options,omitempty"` // Pass through options opaque
+	ChannelID string          `json:"channel_id,omitempty"`
 }
 
 func (c *Client) SetEventCallback(callback func(eventType string, data map[string]interface{})) {
@@ -109,20 +110,21 @@ func (c *Client) emit(eventType string, data map[string]interface{}) {
 }
 
 func (c *Client) Chat(ctx context.Context, model string, messages []Message) (Message, error) {
-	return c.ChatWithOptions(ctx, model, messages, map[string]interface{}{
+	return c.ChatWithChannel(ctx, model, messages, "", map[string]interface{}{
 		"num_thread": runtime.NumCPU(),
 	})
 }
 
-func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []Message, options map[string]interface{}) (Message, error) {
+func (c *Client) ChatWithChannel(ctx context.Context, model string, messages []Message, channelID string, options map[string]interface{}) (Message, error) {
 	// Convert options to RawMessage for pass-through
 	optsBytes, _ := json.Marshal(options)
 
 	reqBody := ModelRequest{
-		Model:    model,
-		Messages: messages,
-		Stream:   false,
-		Options:  optsBytes,
+		Model:     model,
+		Messages:  messages,
+		Stream:    false,
+		Options:   optsBytes,
+		ChannelID: channelID,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -190,15 +192,24 @@ func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []M
 	return Message{Role: "assistant", Content: content}, nil
 }
 
+func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []Message, options map[string]interface{}) (Message, error) {
+	return c.ChatWithChannel(ctx, model, messages, "", options)
+}
+
 func (c *Client) ChatStream(ctx context.Context, model string, messages []Message, options map[string]interface{}, callback func(string)) (GenerationStats, error) {
+	return c.ChatStreamWithChannel(ctx, model, messages, "", options, callback)
+}
+
+func (c *Client) ChatStreamWithChannel(ctx context.Context, model string, messages []Message, channelID string, options map[string]interface{}, callback func(string)) (GenerationStats, error) {
 	// Convert options to RawMessage for pass-through
 	optsBytes, _ := json.Marshal(options)
 
 	reqBody := ModelRequest{
-		Model:    model,
-		Messages: messages,
-		Stream:   true,
-		Options:  optsBytes,
+		Model:     model,
+		Messages:  messages,
+		Stream:    true,
+		Options:   optsBytes,
+		ChannelID: channelID,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {

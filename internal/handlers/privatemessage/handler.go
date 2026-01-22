@@ -484,9 +484,10 @@ Rules:
 			"repeat_penalty": 1.3,
 		}
 		lastUpdate := time.Now()
-		stats, err := deps.Model.ChatStream(ctx, responseModel, finalMessages, options, func(chunk string) {
+		stats, err := deps.Model.ChatStreamWithChannel(ctx, responseModel, finalMessages, channelID, options, func(chunk string) {
 			fullResponse += chunk
 
+			// Throttle updates to Discord (max 4 per second)
 			if time.Since(lastUpdate) > 250*time.Millisecond {
 				denormalizedResponse := fullResponse
 				if len(userMap) > 0 {

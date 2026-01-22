@@ -346,11 +346,11 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		fullResponseBuilder := strings.Builder{}
 		currentBuffer := strings.Builder{}
 
-		_, err = deps.Model.ChatStream(ctx, responseModel, finalMessages, options, func(token string) {
+		// Execute ChatStream
+		stats, err := deps.Model.ChatStreamWithChannel(ctx, responseModel, finalMessages, channelID, options, func(token string) {
 			fullResponseBuilder.WriteString(token)
 
 			currentBuffer.WriteString(token)
-
 			// Check for sentence delimiters
 			// Simple heuristic: . ? ! followed by space or newline, or just newline
 			// We optimize for speed, so splitting on simple punctuation is key.
@@ -435,6 +435,9 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				"response_model": responseModel,
 				"response_raw":   fullResponse,
 				"raw_input":      fmt.Sprintf("%v", finalMessages),
+				"eval_count":     stats.EvalCount,
+				"prompt_count":   stats.PromptEvalCount,
+				"duration_ms":    stats.TotalDuration.Milliseconds(),
 			}
 
 			if err := emitEvent(deps.EventServiceURL, botResponseEventData); err != nil {
