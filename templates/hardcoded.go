@@ -1027,6 +1027,28 @@ func GetTemplates() map[string]EventTemplate {
 			},
 		},
 
+		"system.process.registered": {
+			Description: "A background process was registered",
+			Format:      "Process {process_id} started: {state}",
+			Fields: map[string]FieldSpec{
+				"process_id": {Type: "string", Required: true},
+				"pid":        {Type: "number", Required: false},
+				"status":     {Type: "string", Required: true},
+				"state":      {Type: "string", Required: true},
+				"timestamp":  {Type: "number", Required: true},
+			},
+		},
+
+		"system.process.unregistered": {
+			Description: "A background process was unregistered",
+			Format:      "Process {process_id} completed",
+			Fields: map[string]FieldSpec{
+				"process_id": {Type: "string", Required: true},
+				"status":     {Type: "string", Required: true},
+				"timestamp":  {Type: "number", Required: true},
+			},
+		},
+
 		"system.diagnostic.ping": {
 			Description: "A synthetic diagnostic ping to verify system health",
 			Format:      "Diagnostic Ping: {ping_id} from {source}",
