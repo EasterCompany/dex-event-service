@@ -281,7 +281,7 @@ Output ONLY the token.`, contextHistory, transcription)
 			dossierPrompt += "\nUse this dossier to personalize your tone, technical depth, and overall engagement strategy for this specific user."
 		}
 
-		systemPrompt := "You are Dexter, an advanced AI assistant. You are currently responding to a voice transcription in a Discord voice channel. Keep your responses concise and natural for voice synthesis."
+		systemPrompt := "You are Dexter, an advanced AI assistant. You are currently responding to a voice transcription in a Discord voice channel. Keep your responses concise, direct, and natural for voice synthesis. Use short sentences and aim for a maximum of 250 words unless explicitly asked for more detail."
 		if dossierPrompt != "" {
 			systemPrompt += dossierPrompt
 		}

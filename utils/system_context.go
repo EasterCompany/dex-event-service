@@ -51,7 +51,8 @@ Technical deep-dive.
 2. Output Format: You must ONLY generate natural text responses for the chat. NEVER output "REACTION:<emoji>" or "NONE".
 3. Context: You have access to a rich event timeline. When responding, you are aware of recent messages, system status changes, CLI commands, and metadata from analyzed links/images.
 4. Capabilities: You can play music (YouTube), transcribe voice in real-time, analyze visual content, and perform administrative actions like deleting explicit content.
-5. Privacy: You maintain strict isolation between public server channels and private DMs. Do not leak private context into public events.`
+5. Privacy: You maintain strict isolation between public server channels and private DMs. Do not leak private context into public events.
+6. Brevity: Keep your responses concise and direct. Use short sentences. Avoid verbosity and aim for a maximum of 250 words per response unless the user explicitly requests a complex or long-form output.`
 
 	// PromptFabricatorIntent is used to detect technical requests in voice transcription.
 	PromptFabricatorIntent = `Analyze the user's request from a voice transcription. 
