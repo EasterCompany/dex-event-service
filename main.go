@@ -277,6 +277,7 @@ func main() {
 	router.HandleFunc("/processes", endpoints.HandleProcessRegistration).Methods("POST")
 	router.HandleFunc("/processes/{id}", endpoints.HandleProcessUnregistration).Methods("DELETE")
 	router.HandleFunc("/logs", endpoints.LogsHandler).Methods("GET", "DELETE")
+	router.HandleFunc("/cleanup/alerts", endpoints.CleanupAlertsHandler).Methods("DELETE", "GET")
 	router.HandleFunc("/agent/status", endpoints.GetAgentStatusHandler(redisClient)).Methods("GET")
 	router.HandleFunc("/agent/pause", endpoints.HandlePauseSystem(redisClient)).Methods("POST")
 	router.HandleFunc("/agent/resume", endpoints.HandleResumeSystem(redisClient)).Methods("POST")

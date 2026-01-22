@@ -1393,3 +1393,55 @@ func GetSystemOptionsSnapshot() map[string]interface{} {
 	}
 	return res
 }
+
+// CleanupAlertsHandler deletes alerts from the timeline based on a title prefix
+func CleanupAlertsHandler(w http.ResponseWriter, r *http.Request) {
+	if redisClient == nil {
+		http.Error(w, "Redis client not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	prefix := r.URL.Query().Get("prefix")
+	if prefix == "" {
+		http.Error(w, "prefix parameter required", http.StatusBadRequest)
+		return
+	}
+
+	ctx := context.Background()
+	// Fetch all structural alert IDs
+	ids, err := redisClient.ZRevRange(ctx, "events:type:system.notification.generated", 0, -1).Result()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch alerts: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	deletedCount := 0
+	for _, id := range ids {
+		val, err := redisClient.Get(ctx, "event:"+id).Result()
+		if err != nil {
+			continue
+		}
+
+		var event types.Event
+		if err := json.Unmarshal([]byte(val), &event); err == nil {
+			var ed map[string]interface{}
+			if err := json.Unmarshal(event.Event, &ed); err == nil {
+				title, _ := ed["title"].(string)
+				if strings.HasPrefix(title, prefix) {
+					// Delete from all relevant indexes
+					redisClient.Del(ctx, "event:"+id)
+					redisClient.ZRem(ctx, "events:timeline", id)
+					redisClient.ZRem(ctx, "events:type:system.notification.generated", id)
+					redisClient.ZRem(ctx, "events:service:"+event.Service, id)
+					deletedCount++
+				}
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"deleted": deletedCount,
+	})
+}
