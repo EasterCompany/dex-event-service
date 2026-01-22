@@ -40,13 +40,13 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	log.Printf("greeting-handler: Prioritizing Voice Mode models in VRAM...")
 
 	// Unload everything else to clear VRAM for transcription
-	_ = deps.Ollama.UnloadAllModelsExcept(ctx, "dex-transcription")
+	_ = deps.Model.UnloadAllModelsExcept(ctx, "dex-transcription")
 
 	// Warm up transcription
-	_, _, _ = deps.Ollama.Generate("dex-transcription", "warmup", nil)
+	_, _, _ = deps.Model.Generate("dex-transcription", "warmup", nil)
 
 	// Warm up engagement (will overflow if transcription took all VRAM)
-	_, _, _ = deps.Ollama.Generate("dex-engagement-model", "warmup", nil)
+	_, _, _ = deps.Model.Generate("dex-engagement-model", "warmup", nil)
 
 	deps.Discord.UpdateBotStatus("Greeting...", "online", 0)
 

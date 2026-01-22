@@ -17,6 +17,14 @@ type ServiceReport struct {
 	Memory        string        `json:"memory"`
 }
 
+// GetHost returns the "domain:port" combination.
+func (s *ServiceReport) GetHost() string {
+	if s.Port == "" {
+		return s.Domain
+	}
+	return s.Domain + ":" + s.Port
+}
+
 // LogReport for a single service
 type LogReport struct {
 	ID   string   `json:"id"`

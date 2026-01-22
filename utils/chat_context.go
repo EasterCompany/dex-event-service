@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/model"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -28,17 +28,17 @@ func NewChatContextManager(r *redis.Client) *ChatContextManager {
 }
 
 // LoadHistory retrieves the chat history for a specific tier/session.
-func (m *ChatContextManager) LoadHistory(ctx context.Context, sessionID string) ([]ollama.Message, error) {
+func (m *ChatContextManager) LoadHistory(ctx context.Context, sessionID string) ([]model.Message, error) {
 	key := ChatHistoryKeyPrefix + sessionID
 	data, err := m.Redis.Get(ctx, key).Result()
 	if err == redis.Nil {
-		return []ollama.Message{}, nil
+		return []model.Message{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	var history []ollama.Message
+	var history []model.Message
 	if err := json.Unmarshal([]byte(data), &history); err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func (m *ChatContextManager) LoadHistory(ctx context.Context, sessionID string) 
 }
 
 // SaveHistory updates the chat history in Redis and resets the TTL ("Attention Span").
-func (m *ChatContextManager) SaveHistory(ctx context.Context, sessionID string, history []ollama.Message) error {
+func (m *ChatContextManager) SaveHistory(ctx context.Context, sessionID string, history []model.Message) error {
 	key := ChatHistoryKeyPrefix + sessionID
 	data, err := json.Marshal(history)
 	if err != nil {
@@ -58,7 +58,7 @@ func (m *ChatContextManager) SaveHistory(ctx context.Context, sessionID string, 
 }
 
 // AppendMessage adds a single message to history and saves it.
-func (m *ChatContextManager) AppendMessage(ctx context.Context, sessionID string, msg ollama.Message) error {
+func (m *ChatContextManager) AppendMessage(ctx context.Context, sessionID string, msg model.Message) error {
 	history, err := m.LoadHistory(ctx, sessionID)
 	if err != nil {
 		return err
@@ -73,7 +73,7 @@ func (m *ChatContextManager) AppendMessage(ctx context.Context, sessionID string
 		systemPrompt := history[0]
 		// Keep last 19
 		recent := history[len(history)-19:]
-		history = append([]ollama.Message{systemPrompt}, recent...)
+		history = append([]model.Message{systemPrompt}, recent...)
 	}
 
 	return m.SaveHistory(ctx, sessionID, history)

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/model"
 )
 
 // MessageSignals contains the analytical breakdown of a single user message.
@@ -21,12 +21,12 @@ type MessageSignals struct {
 }
 
 // Extract uses an LLM to analyze message content and return structured signals.
-func Extract(ctx context.Context, client *ollama.Client, model string, content string, history string) (*MessageSignals, string, error) {
+func Extract(ctx context.Context, client *model.Client, model string, content string, history string) (*MessageSignals, string, error) {
 	return ExtractWithContext(ctx, client, model, content, history, nil)
 }
 
 // ExtractWithContext uses an LLM to analyze message content with additional model options.
-func ExtractWithContext(ctx context.Context, client *ollama.Client, model string, content string, history string, options map[string]interface{}) (*MessageSignals, string, error) {
+func ExtractWithContext(ctx context.Context, client *model.Client, model string, content string, history string, options map[string]interface{}) (*MessageSignals, string, error) {
 	prompt := fmt.Sprintf(`Analyze the following user message within the provided context.
 Provide a granular analytical breakdown in JSON format.
 

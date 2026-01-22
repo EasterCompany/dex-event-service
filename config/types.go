@@ -42,15 +42,15 @@ type ServiceCredentials struct {
 
 // OptionsConfig represents the structure of options.json
 type OptionsConfig struct {
-	Editor  string         `json:"editor"`
-	Theme   string         `json:"theme"`
-	Logging bool           `json:"logging"`
-	Discord DiscordOptions `json:"discord"`
-	Ollama  OllamaOptions  `json:"ollama"`
+	Editor    string           `json:"editor"`
+	Theme     string           `json:"theme"`
+	Logging   bool             `json:"logging"`
+	Discord   DiscordOptions   `json:"discord"`
+	Cognitive CognitiveOptions `json:"cognitive"`
 }
 
-// OllamaOptions holds configuration for model placement and optimization
-type OllamaOptions struct {
+// CognitiveOptions holds configuration for model placement and optimization
+type CognitiveOptions struct {
 	UtilityDevice string `json:"utility_device"` // "cpu" or "gpu"
 	UtilitySpeed  string `json:"utility_speed"`  // "fast" or "smart"
 }

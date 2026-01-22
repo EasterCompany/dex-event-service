@@ -308,7 +308,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 			continue
 		}
 
-		if id == "local-cache-0" || id == "local-ollama-0" || id == "upstash-redis-rw" || id == "easter-company" {
+		if id == "local-cache-0" || id == "local-model-0" || id == "upstash-redis-rw" || id == "easter-company" {
 			continue
 		}
 		filteredServices = append(filteredServices, service)
@@ -639,11 +639,11 @@ func fetchSystemHardwareInfo(ctx context.Context) ([]byte, error) {
 	return output, nil
 }
 
-// checkModelsStatus reports on all models currently downloaded in Ollama.
+// checkModelsStatus reports on all models currently downloaded in the Hub (Ollama).
 func checkModelsStatus() []ModelReport {
-	downloadedModels, err := utils.ListOllamaModels()
+	downloadedModels, err := utils.ListHubModels()
 	if err != nil {
-		return []ModelReport{} // Ollama is likely offline
+		return []ModelReport{} // Hub is likely offline
 	}
 
 	// Filter redundant ":latest" tags if a specific tag already exists for the SAME model.
@@ -708,9 +708,9 @@ func checkService(service config.ServiceEntry, serviceType string, isPublic bool
 	case "prd":
 		report = checkProdStatus(baseReport)
 	case "os":
-		// Check for Ollama services
-		if strings.Contains(strings.ToLower(service.ID), "ollama") {
-			report = checkOllamaStatus(baseReport)
+		// Check for Model Hub services
+		if strings.Contains(strings.ToLower(service.ID), "model") || strings.Contains(strings.ToLower(service.ID), "ollama") {
+			report = checkModelHubStatus(baseReport)
 		} else if strings.Contains(strings.ToLower(service.ID), "cache") || strings.Contains(strings.ToLower(service.ID), "upstash") {
 			// Check for Redis cache services
 			report = checkRedisStatus(baseReport, service.Credentials, isPublic)
@@ -1253,61 +1253,32 @@ func checkProdStatus(baseReport types.ServiceReport) types.ServiceReport {
 	return report
 }
 
-// checkOllamaStatus checks an Ollama server via its API
-func checkOllamaStatus(baseReport types.ServiceReport) types.ServiceReport {
+// checkModelHubStatus checks the Model Hub server via its API
+func checkModelHubStatus(baseReport types.ServiceReport) types.ServiceReport {
 	report := baseReport
+	report.Status = "OK"
+	report.HealthMessage = "Model Hub is online"
 
-	host := report.Domain
-	if report.Domain == "0.0.0.0" {
-		host = "127.0.0.1"
-	}
-
-	// Check version endpoint
-	versionURL := fmt.Sprintf("http://%s:%s/api/version", host, report.Port)
-	versionResponse, err := utils.FetchURL(versionURL, 2*time.Second)
+	// Call Hub /health
+	url := fmt.Sprintf("http://%s/health", report.GetHost())
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(url)
 	if err != nil {
-		report.Status = "offline"
-		report.HealthMessage = fmt.Sprintf("Failed to connect: %v", err)
-		report.Uptime = "N/A"
-		report.CPU = "N/A"
-		report.Memory = "N/A"
+		report.Status = "BAD"
+		report.HealthMessage = fmt.Sprintf("Connection failed: %v", err)
+		return report
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		report.Status = "BAD"
+		report.HealthMessage = fmt.Sprintf("Hub returned status %d", resp.StatusCode)
 		return report
 	}
 
-	var versionData struct {
-		Version string `json:"version"`
-	}
-	if err := json.Unmarshal([]byte(versionResponse), &versionData); err == nil {
-		report.Version = utils.Version{
-			Str: versionData.Version,
-		}
-	}
-
-	// Check tags endpoint to verify server is functional
-	tagsURL := fmt.Sprintf("http://%s:%s/api/tags", host, report.Port)
-	_, err = utils.FetchURL(tagsURL, 2*time.Second)
-	if err != nil {
-		report.Status = "offline"
-		report.HealthMessage = "Service responded but is not functional"
-		report.Uptime = "N/A"
-		report.CPU = "N/A"
-		report.Memory = "N/A"
-		return report
-	}
-
-	report.Status = "online"
-	report.HealthMessage = "Ollama server is running"
-
-	// Get uptime, CPU, and memory from systemd if this is a local service
-	if isLocalAddress(report.Domain) {
-		report.Uptime = getSystemdServiceUptime("ollama")
-		report.CPU = getSystemdServiceCPU("ollama")
-		report.Memory = getSystemdServiceMemory("ollama")
-	} else {
-		report.Uptime = "N/A"
-		report.CPU = "N/A"
-		report.Memory = "N/A"
-	}
+	report.Uptime = getSystemdServiceUptime("dex-model-service")
+	report.CPU = getSystemdServiceCPU("dex-model-service")
+	report.Memory = getSystemdServiceMemory("dex-model-service")
 
 	return report
 }
@@ -1394,8 +1365,8 @@ func GetSystemOptionsSnapshot() map[string]interface{} {
 		return nil
 	}
 	var opts struct {
-		Services map[string]map[string]interface{} `json:"services"`
-		Ollama   map[string]interface{}            `json:"ollama"`
+		Services  map[string]map[string]interface{} `json:"services"`
+		Cognitive map[string]interface{}            `json:"cognitive"`
 	}
 	if err := json.Unmarshal(data, &opts); err != nil {
 		return nil
@@ -1405,8 +1376,8 @@ func GetSystemOptionsSnapshot() map[string]interface{} {
 	if opts.Services != nil {
 		res["services"] = opts.Services
 	}
-	if opts.Ollama != nil {
-		res["ollama"] = opts.Ollama
+	if opts.Cognitive != nil {
+		res["cognitive"] = opts.Cognitive
 	}
 	return res
 }

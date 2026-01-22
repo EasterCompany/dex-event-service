@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/model"
 	"github.com/EasterCompany/dex-event-service/templates"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/redis/go-redis/v9"
@@ -27,7 +27,7 @@ type CachedSummary struct {
 // GetMessages fetches history using a hybrid "Lazy Summary" approach.
 // It combines a cached long-term summary with recent raw messages.
 // If the raw buffer grows too large (based on contextLimit), it triggers a background summarization.
-func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Client, channelID string, summaryModel string, contextLimit int, options map[string]interface{}) ([]ollama.Message, []string, error) {
+func GetMessages(ctx context.Context, redisClient *redis.Client, modelClient *model.Client, channelID string, summaryModel string, contextLimit int, options map[string]interface{}) ([]model.Message, []string, error) {
 	// Default to 6000 chars (~1500 tokens) if limit is not provided
 	if contextLimit <= 0 {
 		contextLimit = 6000
@@ -47,7 +47,7 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 	}
 
 	if len(eventIDs) == 0 {
-		return []ollama.Message{}, []string{}, nil
+		return []model.Message{}, []string{}, nil
 	}
 
 	// 3. Resolve Events
@@ -116,17 +116,17 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 	if summaryModel != "" && rawBufferTextLen > contextLimit {
 		// Trigger background update using the raw events we have
 		go func() {
-			UpdateSummary(context.Background(), redisClient, ollamaClient, channelID, summaryModel, summary, events, options)
+			UpdateSummary(context.Background(), redisClient, modelClient, channelID, summaryModel, summary, events, options)
 		}()
 	}
 
 	// 7. Build Message List
-	var messages []ollama.Message
+	var messages []model.Message
 	var contextEventIDs []string
 
 	// Inject Summary System Message
 	if summary.Text != "" {
-		messages = append(messages, ollama.Message{
+		messages = append(messages, model.Message{
 			Role:    "system",
 			Content: fmt.Sprintf("CONTEXT SUMMARY (Conversation so far):\n%s", summary.Text),
 		})
@@ -165,7 +165,7 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 				content = fmt.Sprintf("[%s] %s", name, content)
 			}
 
-			messages = append(messages, ollama.Message{
+			messages = append(messages, model.Message{
 				Role:    role,
 				Content: content,
 				Name:    name,
@@ -177,8 +177,8 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, ollamaClient *o
 }
 
 // Get fetches context for non-chat scenarios (returns string)
-func Get(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Client, channelID string, summaryModel string, contextLimit int) (string, error) {
-	msgs, _, err := GetMessages(ctx, redisClient, ollamaClient, channelID, summaryModel, contextLimit, nil)
+func Get(ctx context.Context, redisClient *redis.Client, modelClient *model.Client, channelID string, summaryModel string, contextLimit int) (string, error) {
+	msgs, _, err := GetMessages(ctx, redisClient, modelClient, channelID, summaryModel, contextLimit, nil)
 	if err != nil {
 		return "", err
 	}
@@ -195,7 +195,7 @@ func Get(ctx context.Context, redisClient *redis.Client, ollamaClient *ollama.Cl
 }
 
 // UpdateSummary performs the summarization task
-func UpdateSummary(ctx context.Context, rdb *redis.Client, client *ollama.Client, channelID string, model string, currentSummary CachedSummary, newEvents []types.Event, options map[string]interface{}) {
+func UpdateSummary(ctx context.Context, rdb *redis.Client, client *model.Client, channelID string, model string, currentSummary CachedSummary, newEvents []types.Event, options map[string]interface{}) {
 	// If currentSummary is empty (LastEventID is empty), try to load it from Redis
 	if currentSummary.LastEventID == "" {
 		summaryKey := "context:summary:" + channelID

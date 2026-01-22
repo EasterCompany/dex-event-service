@@ -1,4 +1,4 @@
-package ollama
+package model
 
 import (
 	"bufio"
@@ -15,7 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const DefaultURL = "http://127.0.0.1:8400"
+const DefaultHubURL = "http://127.0.0.1:8400"
 
 type Client struct {
 	BaseURL       string
@@ -25,7 +25,7 @@ type Client struct {
 
 func NewClient(url string, rdb *redis.Client) *Client {
 	if url == "" {
-		url = DefaultURL
+		url = DefaultHubURL
 	}
 	return &Client{BaseURL: url, Redis: rdb}
 }
@@ -416,7 +416,7 @@ func (c *Client) ListRunningModels(ctx context.Context) ([]ProcessModel, error) 
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ollama ps returned status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("hub ps returned status: %d", resp.StatusCode)
 	}
 
 	var response ProcessResponse

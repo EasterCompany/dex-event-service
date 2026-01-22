@@ -10,7 +10,7 @@ import (
 
 	"github.com/EasterCompany/dex-event-service/internal/agent"
 	"github.com/EasterCompany/dex-event-service/internal/discord"
-	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/model"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/google/uuid"
@@ -31,14 +31,14 @@ type ImaginatorHandler struct {
 	cancel        context.CancelFunc
 }
 
-func NewImaginatorHandler(redis *redis.Client, ollama *ollama.Client, discord *discord.Client) *ImaginatorHandler {
+func NewImaginatorHandler(redis *redis.Client, modelClient *model.Client, discord *discord.Client) *ImaginatorHandler {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ImaginatorHandler{
 		BaseAgent: agent.BaseAgent{
-			RedisClient:  redis,
-			OllamaClient: ollama,
-			ChatManager:  utils.NewChatContextManager(redis),
-			StopTokens:   []string{"<NO_BLUEPRINT/>", "<IGNORE_ALERT/>"},
+			RedisClient: redis,
+			ModelClient: modelClient,
+			ChatManager: utils.NewChatContextManager(redis),
+			StopTokens:  []string{"<NO_BLUEPRINT/>", "<IGNORE_ALERT/>"},
 		},
 		Config: agent.AgentConfig{
 			Name:      "Imaginator",

@@ -19,7 +19,7 @@ import (
 
 	"github.com/EasterCompany/dex-event-service/internal/handlers"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/profiler"
-	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/model"
 	"github.com/EasterCompany/dex-event-service/internal/smartcontext"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
@@ -110,7 +110,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	// Fetch context
 	summaryModel := "dex-summary-model"
 	contextLimit := 12000
-	contextHistory, err := smartcontext.Get(ctx, deps.Redis, deps.Ollama, channelID, summaryModel, contextLimit)
+	contextHistory, err := smartcontext.Get(ctx, deps.Redis, deps.Model, channelID, summaryModel, contextLimit)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch context from smartcontext: %v, falling back to legacy", err)
 		contextHistory, _ = deps.Discord.FetchContext(channelID, 25)
@@ -120,7 +120,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	// Skip unloading if we hold the Voice Mode lock, as we want both models loaded.
 	holder, _ := deps.Redis.Get(ctx, "system:cognitive_lock").Result()
 	if holder != "Voice Mode" {
-		_ = deps.Ollama.UnloadAllModelsExcept(ctx, "dex-engagement-model")
+		_ = deps.Model.UnloadAllModelsExcept(ctx, "dex-engagement-model")
 	}
 
 	// 1. Check Engagement
@@ -142,7 +142,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	} else {
 		// More users present: Perform inference to see if Dexter was addressed.
 		prompt := fmt.Sprintf("Analyze if Dexter should respond to this message (from voice transcription). Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", contextHistory, transcription)
-		engagementRaw, _, err = deps.Ollama.Generate("dex-engagement-model", prompt, nil)
+		engagementRaw, _, err = deps.Model.Generate("dex-engagement-model", prompt, nil)
 		if err != nil {
 			log.Printf("Engagement check failed: %v", err)
 			return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
@@ -216,7 +216,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		// Fetch messages for Chat API
 		// LAZY SUMMARIZATION: Pass empty summaryModel to GetMessages to suppress background summarization
 		// during the latency-critical response phase. We will trigger it manually at the end.
-		messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, "", contextLimit, nil)
+		messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Model, channelID, "", contextLimit, nil)
 		if err != nil {
 			log.Printf("Warning: Failed to fetch messages context: %v", err)
 		}
@@ -258,7 +258,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			systemPrompt += dossierPrompt
 		}
 
-		finalMessages := []ollama.Message{
+		finalMessages := []model.Message{
 			{Role: "system", Content: systemPrompt},
 		}
 		finalMessages = append(finalMessages, messages...)
@@ -267,7 +267,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 		// VRAM Optimization
 		if holder != "Voice Mode" {
-			_ = deps.Ollama.UnloadAllModelsExcept(ctx, responseModel)
+			_ = deps.Model.UnloadAllModelsExcept(ctx, responseModel)
 		}
 
 		fullResponse := ""
@@ -354,7 +354,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		fullResponseBuilder := strings.Builder{}
 		currentBuffer := strings.Builder{}
 
-		_, err = deps.Ollama.ChatStream(ctx, responseModel, finalMessages, options, func(token string) {
+		_, err = deps.Model.ChatStream(ctx, responseModel, finalMessages, options, func(token string) {
 			fullResponseBuilder.WriteString(token)
 
 			currentBuffer.WriteString(token)
@@ -457,7 +457,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			if len(contextEventIDs) >= 10 {
 				go func() {
 					log.Printf("Housekeeping: Triggering background context summary update for %s", channelID)
-					smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Ollama, channelID, summaryModel, smartcontext.CachedSummary{}, nil, nil)
+					smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Model, channelID, summaryModel, smartcontext.CachedSummary{}, nil, nil)
 				}()
 			} else {
 				log.Printf("Housekeeping: Skipping summary update (Raw buffer size %d is below threshold)", len(contextEventIDs))

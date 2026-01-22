@@ -79,7 +79,7 @@ Your task is to provide a verbose, technical, and professional response that:
 
 User Request: %s`, reason, content)
 
-		explanation, _, _ := deps.Ollama.Generate(utils.ResolveModel("public-message", "gpu", "smart"), explanationPrompt, nil)
+		explanation, _, _ := deps.Model.Generate(utils.ResolveModel("public-message", "gpu", "smart"), explanationPrompt, nil)
 
 		if explanation == "" {
 

@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/model"
 )
 
 // AnalysisResult represents a standardized report from any agent.
@@ -58,7 +58,7 @@ type Agent interface {
 
 // CognitiveModule defines the shared logic for chat loops and parsing.
 type CognitiveModule interface {
-	ChatWithRetry(ctx context.Context, model string, history []ollama.Message, prompt string) ([]AnalysisResult, string, error)
+	ChatWithRetry(ctx context.Context, modelName string, history []model.Message, prompt string) ([]AnalysisResult, string, error)
 }
 
 // AuditPayload represents the comprehensive data captured for every agent run.
@@ -71,7 +71,7 @@ type AuditPayload struct {
 	RawOutput     string           `json:"raw_output"`
 	ParsedResults []AnalysisResult `json:"parsed_results"`
 	Corrections   []Correction     `json:"corrections,omitempty"`  // History of corrections given
-	ChatHistory   []ollama.Message `json:"chat_history,omitempty"` // Turn-by-turn history
+	ChatHistory   []model.Message  `json:"chat_history,omitempty"` // Turn-by-turn history
 	Error         string           `json:"error,omitempty"`
 	Duration      string           `json:"duration"`
 	Timestamp     int64            `json:"timestamp"`

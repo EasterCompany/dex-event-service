@@ -13,7 +13,7 @@ import (
 
 	"github.com/EasterCompany/dex-event-service/internal/agent"
 	"github.com/EasterCompany/dex-event-service/internal/discord"
-	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/model"
 	"github.com/EasterCompany/dex-event-service/internal/web"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
@@ -35,14 +35,14 @@ type GuardianHandler struct {
 	cancel        context.CancelFunc
 }
 
-func NewGuardianHandler(redis *redis.Client, ollama *ollama.Client, discord *discord.Client, web *web.Client, options interface{}) *GuardianHandler {
+func NewGuardianHandler(redis *redis.Client, modelClient *model.Client, discord *discord.Client, web *web.Client, options interface{}) *GuardianHandler {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &GuardianHandler{
 		BaseAgent: agent.BaseAgent{
-			RedisClient:  redis,
-			OllamaClient: ollama,
-			ChatManager:  utils.NewChatContextManager(redis),
-			StopTokens:   []string{"<NO_ALERT/>", "<NO_BLUEPRINT/>", "<NO_ISSUES/>"},
+			RedisClient: redis,
+			ModelClient: modelClient,
+			ChatManager: utils.NewChatContextManager(redis),
+			StopTokens:  []string{"<NO_ALERT/>", "<NO_BLUEPRINT/>", "<NO_ISSUES/>"},
 		},
 		Config: agent.AgentConfig{
 			Name:      "Guardian",

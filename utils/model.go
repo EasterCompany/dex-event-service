@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const DefaultOllamaURL = "http://127.0.0.1:11434"
+const DefaultHubURL = "http://127.0.0.1:8400"
 
 // ModelInfo reflects a single model entry returned by the /api/tags endpoint.
 type ModelInfo struct {
@@ -30,9 +30,9 @@ type ListModelsResponse struct {
 	Models []ModelInfo `json:"models"`
 }
 
-// ListOllamaModels retrieves all available models from the Ollama API.
-func ListOllamaModels() ([]ModelInfo, error) {
-	url := DefaultOllamaURL + "/api/tags"
+// ListHubModels retrieves all available models from the Model Hub.
+func ListHubModels() ([]ModelInfo, error) {
+	url := DefaultHubURL + "/model/list"
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -41,12 +41,12 @@ func ListOllamaModels() ([]ModelInfo, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to Ollama at %s: %w", url, err)
+		return nil, fmt.Errorf("failed to connect to Hub at %s: %w", url, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ollama API request failed (status %d)", resp.StatusCode)
+		return nil, fmt.Errorf("hub API request failed (status %d)", resp.StatusCode)
 	}
 
 	data, err := io.ReadAll(resp.Body)

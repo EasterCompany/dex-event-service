@@ -21,7 +21,7 @@ import (
 	"github.com/EasterCompany/dex-event-service/handlers"
 	"github.com/EasterCompany/dex-event-service/internal/discord"
 	internalHandlers "github.com/EasterCompany/dex-event-service/internal/handlers"
-	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/model"
 	"github.com/EasterCompany/dex-event-service/internal/web"
 	"github.com/EasterCompany/dex-event-service/middleware"
 	"github.com/EasterCompany/dex-event-service/types"
@@ -214,7 +214,7 @@ func main() {
 	}
 
 	// Resolve Service URLs
-	var discordURL, eventURL, ttsURL, webURL, ollamaURL string
+	var discordURL, eventURL, ttsURL, webURL, modelHubURL string
 
 	// Helper to find service URL
 	getServiceURL := func(id, category string, defaultPort string) string {
@@ -230,12 +230,12 @@ func main() {
 	eventURL = getServiceURL("dex-event-service", "cs", "8082")
 	ttsURL = getServiceURL("dex-tts-service", "be", "8200")
 	webURL = getServiceURL("dex-web-service", "be", "8201")
-	ollamaURL = "http://127.0.0.1:8400" // Point to Hub (dex-model-service)
+	modelHubURL = "http://127.0.0.1:8400" // Point to Hub (dex-model-service)
 
 	// Initialize dependencies
 	deps := &internalHandlers.Dependencies{
 		Redis:           redisClient,
-		Ollama:          ollama.NewClient(ollamaURL, redisClient),
+		Model:           model.NewClient(modelHubURL, redisClient),
 		Discord:         discord.NewClient(discordURL, eventURL),
 		Web:             web.NewClient(webURL),
 		Config:          serviceMap,
@@ -244,8 +244,8 @@ func main() {
 		TTSServiceURL:   ttsURL,
 	}
 
-	// Set EventCallback for Ollama to record model loads/unloads
-	deps.Ollama.SetEventCallback(func(eventType string, data map[string]interface{}) {
+	// Set EventCallback for Model Hub to record model loads/unloads
+	deps.Model.SetEventCallback(func(eventType string, data map[string]interface{}) {
 		// Create an internal event
 		event := types.Event{
 			ID:        strconv.FormatInt(time.Now().UnixNano(), 10),
@@ -520,8 +520,8 @@ func performStartupCleanup(ctx context.Context, rdb *redis.Client) {
 }
 
 func performCognitiveWarmup(ctx context.Context, opts *config.OptionsConfig) {
-	uDevice := opts.Ollama.UtilityDevice
-	uSpeed := opts.Ollama.UtilitySpeed
+	uDevice := opts.Cognitive.UtilityDevice
+	uSpeed := opts.Cognitive.UtilitySpeed
 
 	// We only pre-load if in CPU mode to ensure RAM residency (Warm RAM Strategy)
 	if uDevice != "" && uDevice != "cpu" {
@@ -541,25 +541,25 @@ func performCognitiveWarmup(ctx context.Context, opts *config.OptionsConfig) {
 		"transcription",
 	}
 
-	ollamaURL := "http://127.0.0.1:11434"
-	client := ollama.NewClient(ollamaURL, RedisClient)
+	modelHubURL := "http://127.0.0.1:8400"
+	client := model.NewClient(modelHubURL, RedisClient)
 
-	// Trigger background load sequentially to avoid overwhelming Ollama
+	// Trigger background load sequentially to avoid overwhelming the Hub
 	go func() {
 		for _, base := range utilities {
-			model := utils.ResolveModel(base, "cpu", uSpeed)
-			log.Printf("  Warming %s...", model)
+			modelName := utils.ResolveModel(base, "cpu", uSpeed)
+			log.Printf("  Warming %s...", modelName)
 
 			// We use Generate with empty prompt and keep_alive: -1 to force load
 			options := map[string]interface{}{
 				"keep_alive": -1,
 				"num_thread": runtime.NumCPU(),
 			}
-			_, _, err := client.GenerateWithContext(ctx, model, "", nil, options)
+			_, _, err := client.GenerateWithContext(ctx, modelName, "", nil, options)
 			if err != nil {
-				log.Printf("Warning: Failed to warmup model %s: %v", model, err)
+				log.Printf("Warning: Failed to warmup model %s: %v", modelName, err)
 			} else {
-				log.Printf("✓ Model %s is now resident in RAM.", model)
+				log.Printf("✓ Model %s is now resident in RAM.", modelName)
 			}
 			// Small delay between loads to let system stabilize
 			time.Sleep(500 * time.Millisecond)

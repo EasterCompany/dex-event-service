@@ -5,7 +5,7 @@ import (
 
 	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/internal/discord"
-	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/model"
 	"github.com/EasterCompany/dex-event-service/internal/web"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/redis/go-redis/v9"
@@ -13,7 +13,7 @@ import (
 
 type Dependencies struct {
 	Redis             *redis.Client
-	Ollama            *ollama.Client
+	Model             *model.Client
 	Discord           *discord.Client
 	Web               *web.Client
 	Config            *config.ServiceMapConfig

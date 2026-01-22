@@ -10,7 +10,7 @@ import (
 	"github.com/EasterCompany/dex-event-service/internal/agent"
 	"github.com/EasterCompany/dex-event-service/internal/chores"
 	"github.com/EasterCompany/dex-event-service/internal/discord"
-	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/model"
 	"github.com/EasterCompany/dex-event-service/internal/web"
 	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/redis/go-redis/v9"
@@ -31,14 +31,14 @@ type CourierHandler struct {
 	cancel        context.CancelFunc
 }
 
-func NewCourierHandler(redis *redis.Client, ollama *ollama.Client, discord *discord.Client, web *web.Client, options interface{}) *CourierHandler {
+func NewCourierHandler(redis *redis.Client, modelClient *model.Client, discord *discord.Client, web *web.Client, options interface{}) *CourierHandler {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &CourierHandler{
 		BaseAgent: agent.BaseAgent{
-			RedisClient:  redis,
-			OllamaClient: ollama,
-			ChatManager:  utils.NewChatContextManager(redis),
-			StopTokens:   []string{"<NO_NEW_DATA/>", "<NO_RESULTS/>"},
+			RedisClient: redis,
+			ModelClient: modelClient,
+			ChatManager: utils.NewChatContextManager(redis),
+			StopTokens:  []string{"<NO_NEW_DATA/>", "<NO_RESULTS/>"},
 		},
 		Config: agent.AgentConfig{
 			Name:      "Courier",
@@ -253,7 +253,7 @@ func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([
 	queryPrompt := fmt.Sprintf("Current Date: %s. You are an intelligence officer. Generate a search query for: %s.\n\nRULES:\n1. Use natural language keywords + date ranges if needed.\n2. AVOID complex 'site:' operators or long boolean strings as they often break the search engine.\n3. Target RECENT events (last 48h) for daily news.\n4. Output ONLY the query string.", now, task.NaturalInstruction)
 
 	// Quick one-off chat for query optimization
-	queryResp, err := h.OllamaClient.Chat(ctx, queryModel, []ollama.Message{{Role: "user", Content: queryPrompt}})
+	queryResp, err := h.ModelClient.Chat(ctx, queryModel, []model.Message{{Role: "user", Content: queryPrompt}})
 	searchQuery := task.NaturalInstruction
 	if err == nil {
 		searchQuery = strings.Trim(queryResp.Content, "\" \n\r")

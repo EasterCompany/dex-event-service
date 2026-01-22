@@ -163,7 +163,7 @@ func initBackgroundHandlers() {
 		if handlerConfig.IsBackgroundWorker {
 			switch handlerConfig.Name {
 			case guardian.HandlerName:
-				guardianHandler := guardian.NewGuardianHandler(dependencies.Redis, dependencies.Ollama, dependencies.Discord, dependencies.Web, dependencies.Options)
+				guardianHandler := guardian.NewGuardianHandler(dependencies.Redis, dependencies.Model, dependencies.Discord, dependencies.Web, dependencies.Options)
 				if err := guardianHandler.Init(context.Background()); err != nil {
 					log.Printf("ERROR: Failed to initialize guardian handler: %v", err)
 					continue
@@ -186,7 +186,7 @@ func initBackgroundHandlers() {
 
 				log.Printf("Background handler '%s' started.", handlerConfig.Name)
 			case imaginator.HandlerName:
-				imaginatorHandler := imaginator.NewImaginatorHandler(dependencies.Redis, dependencies.Ollama, dependencies.Discord)
+				imaginatorHandler := imaginator.NewImaginatorHandler(dependencies.Redis, dependencies.Model, dependencies.Discord)
 				if err := imaginatorHandler.Init(context.Background()); err != nil {
 					log.Printf("ERROR: Failed to initialize imaginator handler: %v", err)
 					continue
@@ -194,7 +194,7 @@ func initBackgroundHandlers() {
 				runningBackgroundHandlers[handlerConfig.Name] = imaginatorHandler
 				log.Printf("Background handler '%s' started.", handlerConfig.Name)
 			case profiler.AnalyzerHandlerName:
-				analyzerAgent := profiler.NewAnalyzerAgent(dependencies.Redis, dependencies.Ollama, dependencies.Discord)
+				analyzerAgent := profiler.NewAnalyzerAgent(dependencies.Redis, dependencies.Model, dependencies.Discord)
 				if err := analyzerAgent.Init(context.Background()); err != nil {
 					log.Printf("ERROR: Failed to initialize analyzer agent: %v", err)
 					continue
@@ -209,7 +209,7 @@ func initBackgroundHandlers() {
 
 				log.Printf("Background handler '%s' started.", handlerConfig.Name)
 			case fabricator.HandlerName:
-				fabricatorHandler := fabricator.NewFabricatorHandler(dependencies.Redis, dependencies.Ollama, dependencies.Discord)
+				fabricatorHandler := fabricator.NewFabricatorHandler(dependencies.Redis, dependencies.Model, dependencies.Discord)
 				if dependencies.TTSServiceURL != "" {
 					fabricatorHandler.TTSServiceURL = dependencies.TTSServiceURL
 				}
@@ -227,7 +227,7 @@ func initBackgroundHandlers() {
 
 				log.Printf("Background handler '%s' started.", handlerConfig.Name)
 			case courier.HandlerName:
-				courierHandler := courier.NewCourierHandler(dependencies.Redis, dependencies.Ollama, dependencies.Discord, dependencies.Web, dependencies.Options)
+				courierHandler := courier.NewCourierHandler(dependencies.Redis, dependencies.Model, dependencies.Discord, dependencies.Web, dependencies.Options)
 				if err := courierHandler.Init(context.Background()); err != nil {
 					log.Printf("ERROR: Failed to initialize courier handler: %v", err)
 					continue

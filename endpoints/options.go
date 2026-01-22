@@ -108,10 +108,10 @@ func handleGetSystemOptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// We parse both services and ollama
+	// We parse both services and cognitive
 	var opts struct {
-		Services map[string]map[string]interface{} `json:"services"`
-		Ollama   map[string]interface{}            `json:"ollama"`
+		Services  map[string]map[string]interface{} `json:"services"`
+		Cognitive map[string]interface{}            `json:"cognitive"`
 	}
 	if err := json.Unmarshal(data, &opts); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to parse options.json: %v", err), http.StatusInternalServerError)
@@ -125,10 +125,10 @@ func handleGetSystemOptions(w http.ResponseWriter, r *http.Request) {
 	} else {
 		response["services"] = make(map[string]interface{})
 	}
-	if opts.Ollama != nil {
-		response["ollama"] = opts.Ollama
+	if opts.Cognitive != nil {
+		response["cognitive"] = opts.Cognitive
 	} else {
-		response["ollama"] = make(map[string]interface{})
+		response["cognitive"] = make(map[string]interface{})
 	}
 
 	_ = json.NewEncoder(w).Encode(response)

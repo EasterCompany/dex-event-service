@@ -16,7 +16,7 @@ import (
 
 	"github.com/EasterCompany/dex-event-service/internal/agent"
 	"github.com/EasterCompany/dex-event-service/internal/discord"
-	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/model"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/redis/go-redis/v9"
@@ -37,16 +37,16 @@ type FabricatorHandler struct {
 	cancel        context.CancelFunc
 }
 
-func NewFabricatorHandler(redis *redis.Client, ollama *ollama.Client, discord *discord.Client) *FabricatorHandler {
+func NewFabricatorHandler(redis *redis.Client, modelClient *model.Client, discord *discord.Client) *FabricatorHandler {
 	// Find TTS service URL from service map or use default
 	ttsURL := "http://127.0.0.1:8200"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	return &FabricatorHandler{
 		BaseAgent: agent.BaseAgent{
-			RedisClient:  redis,
-			OllamaClient: ollama,
-			ChatManager:  utils.NewChatContextManager(redis),
+			RedisClient: redis,
+			ModelClient: modelClient,
+			ChatManager: utils.NewChatContextManager(redis),
 		},
 		Config: agent.AgentConfig{
 			Name:      "Fabricator",
@@ -204,7 +204,7 @@ func (h *FabricatorHandler) PerformVoiceFabrication(ctx context.Context, transcr
 	summary := "I encountered an error while trying to implement your request."
 	if success {
 		summaryPrompt := fmt.Sprintf("Summarize the following technical changes into a single, natural sentence for voice reporting.\n\nOutput:\n%s", output)
-		summary, _, _ = h.OllamaClient.Generate("dex-summary-model", summaryPrompt, nil)
+		summary, _, _ = h.ModelClient.Generate("dex-summary-model", summaryPrompt, nil)
 		if summary == "" {
 			summary = "I've completed the requested changes and verified the build."
 		}

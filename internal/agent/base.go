@@ -9,20 +9,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/model"
 	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/redis/go-redis/v9"
 )
 
 // BaseAgent provides shared utilities for all agents.
 type BaseAgent struct {
-	RedisClient  *redis.Client
-	OllamaClient *ollama.Client
-	ChatManager  *utils.ChatContextManager
-	StopTokens   []string
+	RedisClient *redis.Client
+	ModelClient *model.Client
+	ChatManager *utils.ChatContextManager
+	StopTokens  []string
 }
 
-func (b *BaseAgent) isHeavyModel(model string) bool {
+func (b *BaseAgent) isHeavyModel(modelName string) bool {
 	// Explicit heavy models
 	heavyModels := map[string]bool{
 		"dex-courier-researcher":      true,
@@ -33,12 +33,12 @@ func (b *BaseAgent) isHeavyModel(model string) bool {
 		"dex-public-message":          true,
 		"dex-transcription":           true,
 	}
-	if heavyModels[model] {
+	if heavyModels[modelName] {
 		return true
 	}
 
 	// Check for size indicators in name
-	lower := strings.ToLower(model)
+	lower := strings.ToLower(modelName)
 	if strings.Contains(lower, "27b") || strings.Contains(lower, "70b") || strings.Contains(lower, "llama4") {
 		return true
 	}
@@ -136,7 +136,7 @@ func (b *BaseAgent) CleanJSON(s string) string {
 
 // RunCognitiveLoop executes the 3-attempt chat process with retry logic.
 // It ALWAYS produces a system.analysis.audit event regardless of outcome.
-func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName, model, sessionID, systemPrompt, inputContext string, limit int) (results []AnalysisResult, auditEventID string, lastError error) {
+func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName, modelName, sessionID, systemPrompt, inputContext string, limit int) (results []AnalysisResult, auditEventID string, lastError error) {
 	startTime := time.Now()
 	agentConfig := agent.GetConfig()
 
@@ -155,16 +155,16 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 	inputContext = taskHeader + inputContext
 
 	// VRAM Optimization for heavy models
-	if b.isHeavyModel(model) {
-		log.Printf("VRAM Optimization: Unloading other models for heavy lifter %s...", model)
-		if err := b.OllamaClient.UnloadAllModelsExcept(ctx, model); err != nil {
+	if b.isHeavyModel(modelName) {
+		log.Printf("VRAM Optimization: Unloading other models for heavy lifter %s...", modelName)
+		if err := b.ModelClient.UnloadAllModelsExcept(ctx, modelName); err != nil {
 			log.Printf("Warning: VRAM optimization failed: %v", err)
 		}
 	}
 
 	var allCorrections []Correction
 	var rawOutput string
-	var currentTurnHistory []ollama.Message
+	var currentTurnHistory []model.Message
 	attempts := 0
 	success := false
 
@@ -184,7 +184,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 			Type:          "system.analysis.audit",
 			AgentName:     agentConfig.Name,
 			Tier:          protocolAlias,
-			Model:         model,
+			Model:         modelName,
 			InputContext:  inputContext,
 			RawOutput:     rawOutput,
 			ParsedResults: results,
@@ -209,28 +209,28 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 	chatHistory, _ := b.ChatManager.LoadHistory(ctx, sessionID)
 	if systemPrompt != "" {
 		if len(chatHistory) == 0 || chatHistory[0].Role != "system" {
-			chatHistory = append([]ollama.Message{{Role: "system", Content: systemPrompt}}, chatHistory...)
+			chatHistory = append([]model.Message{{Role: "system", Content: systemPrompt}}, chatHistory...)
 		} else {
 			chatHistory[0].Content = systemPrompt
 		}
 	}
 
-	newUserMsg := ollama.Message{Role: "user", Content: inputContext}
+	newUserMsg := model.Message{Role: "user", Content: inputContext}
 	currentTurnHistory = append(chatHistory, newUserMsg)
 
 	maxRetries := 5
 
 	for i := 0; i < maxRetries; i++ {
 		attempts++
-		b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":attempts")
+		b.RedisClient.Incr(ctx, "system:metrics:model:"+modelName+":attempts")
 
 		tCtx, cancel := context.WithTimeout(ctx, 60*time.Minute)
-		respMsg, err := b.OllamaClient.Chat(tCtx, model, currentTurnHistory)
+		respMsg, err := b.ModelClient.Chat(tCtx, modelName, currentTurnHistory)
 		cancel()
 
 		if err != nil {
 			lastError = err
-			b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":failures")
+			b.RedisClient.Incr(ctx, "system:metrics:model:"+modelName+":failures")
 			continue
 		}
 
@@ -304,10 +304,10 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 		// Handle Rejection or Success
 		if len(currentAttemptCorrections) > 0 {
 			allCorrections = append(allCorrections, currentAttemptCorrections...)
-			b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":failures")
+			b.RedisClient.Incr(ctx, "system:metrics:model:"+modelName+":failures")
 
 			feedback := b.BuildFeedbackPrompt(currentAttemptCorrections, agentConfig)
-			feedbackMsg := ollama.Message{
+			feedbackMsg := model.Message{
 				Role:    "user",
 				Content: feedback,
 			}
@@ -322,7 +322,7 @@ func (b *BaseAgent) RunCognitiveLoop(ctx context.Context, agent Agent, tierName,
 		return
 	}
 
-	b.RedisClient.Incr(ctx, "system:metrics:model:"+model+":absolute_failures")
+	b.RedisClient.Incr(ctx, "system:metrics:model:"+modelName+":absolute_failures")
 	lastError = fmt.Errorf("max retries reached or cognitive failure: %v", lastError)
 	return
 }

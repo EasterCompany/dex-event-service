@@ -17,7 +17,7 @@ import (
 	"github.com/EasterCompany/dex-event-service/internal/analysis"
 	"github.com/EasterCompany/dex-event-service/internal/handlers"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/profiler"
-	"github.com/EasterCompany/dex-event-service/internal/ollama"
+	"github.com/EasterCompany/dex-event-service/internal/model"
 	"github.com/EasterCompany/dex-event-service/internal/smartcontext"
 	"github.com/EasterCompany/dex-event-service/types"
 	"github.com/EasterCompany/dex-event-service/utils"
@@ -107,7 +107,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			if meta.Title != "" || meta.Description != "" {
 				modPrompt := fmt.Sprintf("Analyze this link metadata:\n\nTitle: %s\nDescription: %s\nURL: %s", meta.Title, meta.Description, foundURL)
 
-				isExplicitRaw, _, err := deps.Ollama.Generate("dex-moderation-model", modPrompt, nil)
+				isExplicitRaw, _, err := deps.Model.Generate("dex-moderation-model", modPrompt, nil)
 				if err == nil && strings.Contains(isExplicitRaw, "<EXPLICIT_CONTENT_DETECTED/>") {
 					log.Printf("EXPLICIT LINK TEXT DETECTED: %s. Deleting message...", foundURL)
 
@@ -240,7 +240,7 @@ Rules:
 2. If the image contains non-sexual nudity (classical art, statues, medical context), memes, cartoons, or is otherwise safe, provide a concise visual description.
 3. DO NOT flag memes or common internet GIFs as explicit unless they depict actual sexual acts.
 4. Treat screenshots of pornographic websites or links to explicit galleries as Rule 1.`
-					description, _, err = deps.Ollama.Generate("dex-vision", prompt, []string{base64Img})
+					description, _, err = deps.Model.Generate("dex-vision", prompt, []string{base64Img})
 					if err != nil {
 						log.Printf("Vision model failed for %s: %v", filename, err)
 						continue
@@ -336,8 +336,8 @@ Rules:
 	uDevice := "cpu"
 	uSpeed := "smart"
 	if deps.Options != nil {
-		uDevice = deps.Options.Ollama.UtilityDevice
-		uSpeed = deps.Options.Ollama.UtilitySpeed
+		uDevice = deps.Options.Cognitive.UtilityDevice
+		uSpeed = deps.Options.Cognitive.UtilitySpeed
 	}
 
 	modelEngagement := utils.ResolveModel("engagement", uDevice, uSpeed)
@@ -374,7 +374,7 @@ Output EXACTLY one of the following tokens:
 
 Output ONLY the token.`, evalHistory, content)
 
-	engagementRaw, _, err = deps.Ollama.GenerateWithContext(ctx, modelEngagement, prompt, nil, utilityOptions)
+	engagementRaw, _, err = deps.Model.GenerateWithContext(ctx, modelEngagement, prompt, nil, utilityOptions)
 	decisionStr := "IGNORE"
 
 	if err == nil {
@@ -414,7 +414,7 @@ Output ONLY the token.`, evalHistory, content)
 
 	// Fetch Context (Hybrid Lazy Summary) - Disable automatic background summarization during thinking phase
 	contextLimit := 24000
-	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Ollama, channelID, "", contextLimit, utilityOptions)
+	messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Model, channelID, "", contextLimit, utilityOptions)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch messages context: %v", err)
 	}
@@ -496,7 +496,7 @@ Output ONLY the token.`, evalHistory, content)
 		deps.Discord.TriggerTyping(channelID)
 
 		// VRAM Optimization
-		_ = deps.Ollama.UnloadAllModelsExcept(ctx, responseModel)
+		_ = deps.Model.UnloadAllModelsExcept(ctx, responseModel)
 
 		if deps.Redis != nil {
 			deps.Redis.Expire(context.Background(), lockKey, 60*time.Second)
@@ -526,11 +526,11 @@ Output ONLY the token.`, evalHistory, content)
 		systemPrompt := utils.GetBaseSystemPrompt() + dossierPrompt
 
 		// Final construction of chat messages
-		finalMessages := []ollama.Message{
+		finalMessages := []model.Message{
 			{Role: "system", Content: systemPrompt},
 		}
 		finalMessages = append(finalMessages, messages...)
-		finalMessages = append(finalMessages, ollama.Message{Role: "user", Content: content})
+		finalMessages = append(finalMessages, model.Message{Role: "user", Content: content})
 
 		streamMessageID, err := deps.Discord.InitStream(channelID, utils.GetLoadingMessage())
 		if err != nil {
@@ -542,7 +542,7 @@ Output ONLY the token.`, evalHistory, content)
 		options := map[string]interface{}{
 			"repeat_penalty": 1.3,
 		}
-		stats, err := deps.Ollama.ChatStream(ctx, responseModel, finalMessages, options, func(chunk string) {
+		stats, err := deps.Model.ChatStream(ctx, responseModel, finalMessages, options, func(chunk string) {
 			fullResponse += chunk
 
 			denormalizedResponse := fullResponse
@@ -604,7 +604,7 @@ Output ONLY the token.`, evalHistory, content)
 			analysisModel := modelSummary
 
 			// 1. Context Housekeeping (Summarize if needed)
-			smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Ollama, channelID, analysisModel, smartcontext.CachedSummary{}, nil, utilityOptions)
+			smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Model, channelID, analysisModel, smartcontext.CachedSummary{}, nil, utilityOptions)
 
 			// 2. Signal Extraction for Profiling
 			// For analysis we still use text block
@@ -612,7 +612,7 @@ Output ONLY the token.`, evalHistory, content)
 			for _, m := range messages {
 				historyText += fmt.Sprintf("%s: %s\n", m.Role, m.Content)
 			}
-			signals, raw, err := analysis.ExtractWithContext(context.Background(), deps.Ollama, analysisModel, content, historyText, utilityOptions)
+			signals, raw, err := analysis.ExtractWithContext(context.Background(), deps.Model, analysisModel, content, historyText, utilityOptions)
 			if err != nil {
 				log.Printf("Signal extraction failed: %v", err)
 				return
