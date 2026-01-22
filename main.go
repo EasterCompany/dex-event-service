@@ -300,6 +300,12 @@ func main() {
 		}
 		return handlers.FabricatorTrigger()
 	})).Methods("POST")
+	router.HandleFunc("/agent/courier/compressor/run", endpoints.RunCourierCompressorHandler(redisClient, func() error {
+		if handlers.CourierTrigger == nil {
+			return fmt.Errorf("courier handler not initialized")
+		}
+		return handlers.CourierTrigger()
+	})).Methods("POST")
 	router.HandleFunc("/cli/execute", endpoints.HandleCLIExecute).Methods("POST")
 	router.HandleFunc("/web/history", endpoints.WebHistoryHandler).Methods("GET", "POST")
 	router.HandleFunc("/system/status", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }).Methods("GET", "HEAD")

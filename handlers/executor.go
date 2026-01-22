@@ -61,6 +61,9 @@ var (
 
 	// FabricatorTrigger is a global hook for the API to call the background worker logic
 	FabricatorTrigger func() error
+
+	// CourierTrigger is a global hook for the API to call the background worker logic (compression)
+	CourierTrigger func() error
 )
 
 type job struct {
@@ -233,6 +236,12 @@ func initBackgroundHandlers() {
 					continue
 				}
 				runningBackgroundHandlers[handlerConfig.Name] = courierHandler
+
+				// Wire up the trigger
+				CourierTrigger = func() error {
+					return courierHandler.PerformCompression(context.Background())
+				}
+
 				log.Printf("Background handler '%s' started.", handlerConfig.Name)
 			default:
 				log.Printf("WARNING: Unknown background handler '%s'. Not started.", handlerConfig.Name)

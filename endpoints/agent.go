@@ -178,6 +178,11 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 		ctx, rdb, courierActive, "researcher", 300, "dex-scraper", "courier",
 	)
 
+	// Compressor (5 min cooldown)
+	courierProtocols["compressor"] = calculateProtocolStatus(
+		ctx, rdb, courierActive, "compressor", 300, "dex-courier-compressor", "courier",
+	)
+
 	resp.Agents["courier"] = AgentState{
 		ActiveProtocol: courierActive,
 		Protocols:      courierProtocols,
@@ -341,6 +346,8 @@ func ResetAgentHandler(redisClient *redis.Client) http.HandlerFunc {
 			redisClient.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
 			// Reset the cognitive idle timer as well, so it triggers immediately if conditions met
 			redisClient.Set(ctx, "system:last_cognitive_event", 0, 0)
+		case "compressor":
+			redisClient.Set(ctx, "courier:last_run:compressor", 0, utils.DefaultTTL)
 		case "sentry":
 			redisClient.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
 		case "alert_review":
@@ -357,6 +364,7 @@ func ResetAgentHandler(redisClient *redis.Client) http.HandlerFunc {
 		case "all":
 			// Reset everything
 			redisClient.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
+			redisClient.Set(ctx, "courier:last_run:compressor", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "imaginator:last_run:alert_review", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "fabricator:last_run:construction", 0, utils.DefaultTTL)
