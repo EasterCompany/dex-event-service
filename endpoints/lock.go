@@ -80,17 +80,20 @@ func IsEventLocked(req types.CreateEventRequest) bool {
 
 	// Always allow privileged services
 	if allowedServices[req.Service] {
+		log.Printf("[Lock] ALLOWED: Service %s is privileged", req.Service)
 		return false
 	}
 
 	// Always allow events with explicit test_id
 	var eventData map[string]interface{}
 	if err := json.Unmarshal(req.Event, &eventData); err == nil {
-		if _, ok := eventData["test_id"]; ok {
+		if tid, ok := eventData["test_id"]; ok && tid != "" {
+			log.Printf("[Lock] ALLOWED: Event has test_id: %v", tid)
 			return false
 		}
 	}
 
+	log.Printf("[Lock] BLOCKED: Service %s, Event: %s", req.Service, string(req.Event))
 	return true
 }
 
