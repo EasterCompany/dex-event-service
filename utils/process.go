@@ -34,14 +34,15 @@ func IsSystemPaused(ctx context.Context, redisClient *redis.Client) bool {
 // IsSystemBusy checks if the system is currently running a heavy agent protocol.
 // If ignoreVoiceMode is true, it will not consider the "Voice Mode" or "voice-mode" lock as busy.
 // If testID is non-empty, it bypasses the global cognitive lock (used for simulations).
-func IsSystemBusy(ctx context.Context, redisClient *redis.Client, ignoreVoiceMode bool, testID string) bool {
+func IsSystemBusy(ctx context.Context, redisClient *redis.Client, ignoreVoiceMode bool, processID string) bool {
 	if redisClient == nil {
 		return false
 	}
 
 	// Simulations (events with test_id) are allowed to bypass the cognitive lock
 	// because they are often running WHILE the system is locked for validation.
-	if testID != "" {
+	// We check for "test-" prefix in processID which is used by dex-test-service
+	if strings.HasPrefix(processID, "test-") || processID == "dex-test-service" || processID == "dex-cli" {
 		return false
 	}
 
@@ -75,6 +76,11 @@ func IsSystemBusy(ctx context.Context, redisClient *redis.Client, ignoreVoiceMod
 // If the lock is held, it will wait (poll) until it becomes available.
 func AcquireCognitiveLock(ctx context.Context, redisClient *redis.Client, agentName string, processID string, discordClient *discord.Client) {
 	if redisClient == nil {
+		return
+	}
+
+	// Simulations and CLI are allowed to bypass the lock
+	if strings.HasPrefix(processID, "test-") || processID == "dex-test-service" || processID == "dex-cli" {
 		return
 	}
 

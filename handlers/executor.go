@@ -17,6 +17,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	internalHandlers "github.com/EasterCompany/dex-event-service/internal/handlers"
+	"github.com/EasterCompany/dex-event-service/internal/handlers/architect"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/courier"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/fabricator"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/greeting"
@@ -188,9 +189,14 @@ func initBackgroundHandlers() {
 				}
 
 				log.Printf("Background handler '%s' started.", handlerConfig.Name)
-			case "architect-handler":
-				// Placeholder for future Architect agent protocols
-				log.Printf("Background handler '%s' started (Empty).", handlerConfig.Name)
+			case architect.HandlerName:
+				architectHandler := architect.NewArchitectHandler(dependencies.Redis, dependencies.Model, dependencies.Discord)
+				if err := architectHandler.Init(context.Background()); err != nil {
+					log.Printf("ERROR: Failed to initialize architect handler: %v", err)
+					continue
+				}
+				runningBackgroundHandlers[handlerConfig.Name] = architectHandler
+				log.Printf("Background handler '%s' started.", handlerConfig.Name)
 			case profiler.AnalyzerHandlerName:
 				analyzerAgent := profiler.NewAnalyzerAgent(dependencies.Redis, dependencies.Model, dependencies.Discord)
 				if err := analyzerAgent.Init(context.Background()); err != nil {

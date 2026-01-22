@@ -159,6 +159,25 @@ func (h *FabricatorHandler) checkAndFabricate() {
 }
 
 func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
+	if err := h.verifySafety(); err != nil {
+		log.Printf("[%s] Aborting waterfall due to safety check failure: %v", HandlerName, err)
+
+		// Report failure to front-end (cooldown 1h)
+		cooldownKey := "fabricator:safety_alert_cooldown"
+		if h.RedisClient.Get(ctx, cooldownKey).Val() == "" {
+			payload := map[string]interface{}{
+				"title":    "Fabricator Safety Alert",
+				"body":     fmt.Sprintf("Fabricator disabled: %v. Please ensure root repository (~/EasterCompany/.git) and GitHub CLI are correctly configured.", err),
+				"category": "error",
+				"priority": "high",
+				"type":     "system.notification.generated",
+			}
+			_, _ = utils.SendEvent(ctx, h.RedisClient, HandlerName, "system.notification.generated", payload)
+			h.RedisClient.Set(ctx, cooldownKey, "1", 1*time.Hour)
+		}
+		return
+	}
+
 	log.Printf("[%s] Starting Fabricator Waterfall Run", HandlerName)
 
 	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
@@ -166,6 +185,14 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 
 	var runLogs strings.Builder
 	runLogs.WriteString(fmt.Sprintf("Run started at %s\n\n", time.Now().Format(time.RFC3339)))
+
+	// Capture initial commit hash to detect changes
+	homeDir, _ := os.UserHomeDir()
+	workingDir := filepath.Join(homeDir, "EasterCompany")
+	initialHash := ""
+	if out, err := exec.Command("git", "rev-parse", "HEAD").Output(); err == nil {
+		initialHash = strings.TrimSpace(string(out))
+	}
 
 	h.RedisClient.Set(ctx, "fabricator:active_tier", "review", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Review Protocol (Tier 0)")
@@ -184,6 +211,25 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 	constructOut, err := h.PerformConstruct(ctx)
 	runLogs.WriteString(fmt.Sprintf("### TIER 2: CONSTRUCT\nStatus: %v\nOutput: %s\n\n", err == nil, constructOut))
 	h.RedisClient.Set(ctx, "fabricator:last_run:construct", time.Now().Unix(), 0)
+
+	// Check for changes and trigger auto-build
+	currentHash := ""
+	if out, err := exec.Command("git", "rev-parse", "HEAD").Output(); err == nil {
+		currentHash = strings.TrimSpace(string(out))
+	}
+
+	if initialHash != "" && currentHash != "" && initialHash != currentHash {
+		log.Printf("[%s] Changes detected (%s -> %s). Triggering auto-build.", HandlerName, initialHash, currentHash)
+		runLogs.WriteString("### AUTO-REBUILD\nChanges detected. System is re-building.\n\n")
+		buildCmd := exec.Command("dex", "build", "--source", "--force")
+		buildCmd.Dir = workingDir
+		if out, err := buildCmd.CombinedOutput(); err != nil {
+			log.Printf("ERROR: Auto-rebuild failed: %v\nOutput: %s", err, string(out))
+			runLogs.WriteString(fmt.Sprintf("Build FAILED: %v\n", err))
+		} else {
+			runLogs.WriteString("Build SUCCESSFUL.\n")
+		}
+	}
 
 	h.RedisClient.Set(ctx, "fabricator:active_tier", "reporter", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Reporter Protocol (Tier 3)")
@@ -240,6 +286,20 @@ func (h *FabricatorHandler) PerformReview(ctx context.Context) (string, error) {
 	title := "System Stability Issue (Automated Review)"
 	body := report
 
+	// Heuristic: Check if report specifies a repo
+	if strings.Contains(report, "REPOSITORY:") {
+		lines := strings.Split(report, "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "REPOSITORY:") {
+				foundRepo := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "REPOSITORY:"))
+				if foundRepo != "" {
+					repo = foundRepo
+					break
+				}
+			}
+		}
+	}
+
 	homeDir, _ := os.UserHomeDir()
 	workingDir := filepath.Join(homeDir, "EasterCompany")
 
@@ -257,75 +317,166 @@ func (h *FabricatorHandler) PerformIssue(ctx context.Context) (string, error) {
 	homeDir, _ := os.UserHomeDir()
 	workingDir := filepath.Join(homeDir, "EasterCompany")
 
-	cmd := exec.Command("gh", "issue", "list", "--repo", "EasterCompany/EasterCompany", "--state", "open", "--sort", "created", "--direction", "asc", "--limit", "1", "--json", "number,title,body")
+	// 1. Get list of all repos (root + submodules)
+	repos := []string{"EasterCompany/EasterCompany"}
+	cmd := exec.Command("git", "submodule", "foreach", "--quiet", "git remote get-url origin")
 	cmd.Dir = workingDir
 	out, err := cmd.Output()
-	if err != nil {
-		return string(out), err
+	if err == nil {
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "github.com") {
+				parts := strings.Split(strings.TrimSuffix(line, ".git"), "github.com/")
+				if len(parts) > 1 {
+					repos = append(repos, parts[1])
+				}
+			}
+		}
 	}
 
-	var issues []map[string]interface{}
-	if err := json.Unmarshal(out, &issues); err != nil || len(issues) == 0 {
+	// 2. Fetch oldest issue across all repos
+	type IssueInfo struct {
+		Repo   string
+		Number int
+		Title  string
+		Body   string
+	}
+	var oldestIssue *IssueInfo
+
+	for _, repo := range repos {
+		cmd = exec.Command("gh", "issue", "list", "--repo", repo, "--state", "open", "--sort", "created", "--direction", "asc", "--limit", "1", "--json", "number,title,body")
+		cmd.Dir = workingDir
+		out, err = cmd.Output()
+		if err != nil {
+			continue
+		}
+
+		var issues []map[string]interface{}
+		if err := json.Unmarshal(out, &issues); err == nil && len(issues) > 0 {
+			issue := issues[0]
+			num := int(issue["number"].(float64))
+			if oldestIssue == nil {
+				oldestIssue = &IssueInfo{Repo: repo, Number: num, Title: issue["title"].(string), Body: issue["body"].(string)}
+			}
+		}
+	}
+
+	if oldestIssue == nil {
 		return "No open issues found.", nil
 	}
 
-	issue := issues[0]
-	issueNum := fmt.Sprintf("%v", issue["number"])
-	issueTitle := fmt.Sprintf("%v", issue["title"])
+	issueNum := fmt.Sprintf("%d", oldestIssue.Number)
+	repo := oldestIssue.Repo
 
 	comment := "Dexter has targeted this issue for autonomous investigation."
-	cmd = exec.Command("gh", "issue", "comment", issueNum, "--repo", "EasterCompany/EasterCompany", "--body", comment)
+	cmd = exec.Command("gh", "issue", "comment", issueNum, "--repo", repo, "--body", comment)
 	cmd.Dir = workingDir
 	_ = cmd.Run()
 
-	prompt := fmt.Sprintf("Issue #%s: %s\n\nBody: %s\n\nObjective: Investigate the codebase and create a detailed implementation plan. Do not modify any code.", issueNum, issueTitle, issue["body"])
+	prompt := fmt.Sprintf("Issue #%s: %s\n\nBody: %s\n\nObjective: Investigate the codebase and create a detailed implementation plan. Do not modify any code.", issueNum, oldestIssue.Title, oldestIssue.Body)
 	report, _, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["issue"], prompt, nil, nil)
 	if err != nil {
 		return "", err
 	}
 
-	cmd = exec.Command("gh", "issue", "comment", issueNum, "--repo", "EasterCompany/EasterCompany", "--body", "### Autonomous Investigation Report\n\n"+report)
+	cmd = exec.Command("gh", "issue", "comment", issueNum, "--repo", repo, "--body", "### Autonomous Investigation Report\n\n"+report)
 	cmd.Dir = workingDir
 	_ = cmd.Run()
 
-	return "Investigation complete for Issue #" + issueNum, nil
+	return fmt.Sprintf("Investigation complete for Issue #%s in %s", issueNum, repo), nil
 }
 
 func (h *FabricatorHandler) PerformConstruct(ctx context.Context) (string, error) {
 	homeDir, _ := os.UserHomeDir()
 	workingDir := filepath.Join(homeDir, "EasterCompany")
 
-	cmd := exec.Command("gh", "issue", "list", "--repo", "EasterCompany/EasterCompany", "--state", "open", "--sort", "created", "--direction", "asc", "--limit", "1", "--json", "number,title,body")
+	// 1. Get list of all repos (root + submodules)
+	repos := []string{"EasterCompany/EasterCompany"}
+	cmd := exec.Command("git", "submodule", "foreach", "--quiet", "git remote get-url origin")
 	cmd.Dir = workingDir
 	out, err := cmd.Output()
-	if err != nil {
-		return string(out), err
+	if err == nil {
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "github.com") {
+				parts := strings.Split(strings.TrimSuffix(line, ".git"), "github.com/")
+				if len(parts) > 1 {
+					repos = append(repos, parts[1])
+				}
+			}
+		}
 	}
 
-	var issues []map[string]interface{}
-	if err := json.Unmarshal(out, &issues); err != nil || len(issues) == 0 {
+	// 2. Fetch oldest issue across all repos
+	type IssueInfo struct {
+		Repo   string
+		Number int
+		Title  string
+		Body   string
+	}
+	var oldestIssue *IssueInfo
+
+	for _, repo := range repos {
+		cmd = exec.Command("gh", "issue", "list", "--repo", repo, "--state", "open", "--sort", "created", "--direction", "asc", "--limit", "1", "--json", "number,title,body")
+		cmd.Dir = workingDir
+		out, err = cmd.Output()
+		if err != nil {
+			continue
+		}
+
+		var issues []map[string]interface{}
+		if err := json.Unmarshal(out, &issues); err == nil && len(issues) > 0 {
+			issue := issues[0]
+			num := int(issue["number"].(float64))
+			if oldestIssue == nil {
+				oldestIssue = &IssueInfo{Repo: repo, Number: num, Title: issue["title"].(string), Body: issue["body"].(string)}
+			}
+		}
+	}
+
+	if oldestIssue == nil {
 		return "No open issues found.", nil
 	}
 
-	issue := issues[0]
-	issueNum := fmt.Sprintf("%v", issue["number"])
+	issueNum := fmt.Sprintf("%d", oldestIssue.Number)
+	repo := oldestIssue.Repo
 
-	prompt := fmt.Sprintf("IMPLEMENT FIX for Issue #%s: %s\n\nObjective: Apply the necessary changes to the codebase. You are in YOLO mode. Verify with builds/tests.", issueNum, issue["title"])
+	prompt := fmt.Sprintf("IMPLEMENT FIX for Issue #%s: %s in %s\n\nObjective: Apply the necessary changes to the codebase. You are in YOLO mode. Verify with builds/tests. REQUIREMENTS: Changes must pass `dex fmt`, `dex lint`, and `dex build --source --force --dry-run` before completion.", issueNum, oldestIssue.Title, repo)
 	result, _, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["construct"], prompt, nil, nil)
 	if err != nil {
 		return "", err
 	}
 
+	// Post-fabrication verification
+	log.Printf("[%s] Verification phase starting for Issue #%s", HandlerName, issueNum)
+
+	// Perform dry-run build to verify integrity
+	buildCmd := exec.Command("dex", "build", "--source", "--force", "--dry-run")
+	buildCmd.Dir = workingDir
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		return fmt.Sprintf("Construction FAILED verification: %v\nOutput: %s", err, string(out)), err
+	}
+
 	closingComment := "Dexter has implemented and verified the fix for this issue. Closing.\n\n### Implementation Summary\n" + result
-	cmd = exec.Command("gh", "issue", "comment", issueNum, "--repo", "EasterCompany/EasterCompany", "--body", closingComment)
+	cmd = exec.Command("gh", "issue", "comment", issueNum, "--repo", repo, "--body", closingComment)
 	cmd.Dir = workingDir
 	_ = cmd.Run()
 
-	cmd = exec.Command("gh", "issue", "close", issueNum, "--repo", "EasterCompany/EasterCompany")
+	cmd = exec.Command("gh", "issue", "close", issueNum, "--repo", repo)
 	cmd.Dir = workingDir
 	_ = cmd.Run()
 
-	return "Issue #" + issueNum + " closed.", nil
+	// Automatic Re-build and Deploy if changes detected
+	log.Printf("[%s] Auto-rebuild phase starting...", HandlerName)
+	rebuildCmd := exec.Command("dex", "build", "--source", "--force")
+	rebuildCmd.Dir = workingDir
+	if out, err := rebuildCmd.CombinedOutput(); err != nil {
+		log.Printf("ERROR: Auto-rebuild failed: %v\nOutput: %s", err, string(out))
+	} else {
+		log.Printf("[%s] Auto-rebuild and deploy complete.", HandlerName)
+	}
+
+	return fmt.Sprintf("Issue #%s in %s closed and system re-built.", issueNum, repo), nil
 }
 
 func (h *FabricatorHandler) PerformReporter(ctx context.Context, logs string) (string, error) {

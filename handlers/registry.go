@@ -54,6 +54,11 @@ var handlerConfigs = map[string]types.HandlerConfig{
 		IsBackgroundWorker: true,
 		Timeout:            0, // Managed by its own internal loop
 	},
+	"architect-handler": {
+		Name:               "architect-handler",
+		IsBackgroundWorker: true,
+		Timeout:            0,
+	},
 	"fabricator-handler": {
 		Name:               "fabricator-handler",
 		IsBackgroundWorker: true,
