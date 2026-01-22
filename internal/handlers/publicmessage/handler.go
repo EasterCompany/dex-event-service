@@ -534,8 +534,7 @@ Your task is to decide how Dexter should engage with the current message in the 
 Output EXACTLY one of the following tokens:
 - "IGNORE": No action.
 - "REACTION:<emoji>": React with a single emoji.
-- "ENGAGE_FAST": Quick response for simple banter/social.
-- "ENGAGE": Full response for complex topics.
+- "ENGAGE": Generate a full text response.
 
 Output ONLY the token.`, evalHistory, content)
 
@@ -547,13 +546,9 @@ Output ONLY the token.`, evalHistory, content)
 			engagementRaw = strings.TrimSpace(engagementRaw)
 			upperRaw := strings.ToUpper(engagementRaw)
 
-			if strings.Contains(upperRaw, "ENGAGE_REGULAR") || strings.Contains(upperRaw, "ENGAGE") || strings.Contains(upperRaw, "<ENGAGE/>") {
+			if strings.Contains(upperRaw, "ENGAGE") || strings.Contains(upperRaw, "<ENGAGE/>") {
 				shouldEngage = true
-				decisionStr = "ENGAGE_REGULAR"
-				responseModel = modelResponse
-			} else if strings.Contains(upperRaw, "ENGAGE_FAST") {
-				shouldEngage = true
-				decisionStr = "ENGAGE_FAST"
+				decisionStr = "ENGAGE"
 				responseModel = modelResponse
 			} else if strings.Contains(upperRaw, "REACTION:") || strings.Contains(upperRaw, "REACT:") {
 				shouldEngage = false
@@ -600,7 +595,7 @@ Output ONLY the token.`, evalHistory, content)
 
 			if strings.Contains(upperRaw, "ENGAGE") || strings.Contains(upperRaw, "<ENGAGE/>") {
 				shouldEngage = true
-				decisionStr = "ENGAGE_FAST"
+				decisionStr = "ENGAGE"
 				responseModel = modelResponse
 			} else if strings.Contains(upperRaw, "REACTION:") || strings.Contains(upperRaw, "REACT:") {
 				shouldEngage = false
