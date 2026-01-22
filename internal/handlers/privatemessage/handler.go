@@ -481,14 +481,18 @@ Rules:
 		options := map[string]interface{}{
 			"repeat_penalty": 1.3,
 		}
+		lastUpdate := time.Now()
 		stats, err := deps.Model.ChatStream(ctx, responseModel, finalMessages, options, func(chunk string) {
 			fullResponse += chunk
 
-			denormalizedResponse := fullResponse
-			if len(userMap) > 0 {
-				denormalizedResponse = utils.DenormalizeMentions(fullResponse, userMap)
+			if time.Since(lastUpdate) > 250*time.Millisecond {
+				denormalizedResponse := fullResponse
+				if len(userMap) > 0 {
+					denormalizedResponse = utils.DenormalizeMentions(fullResponse, userMap)
+				}
+				deps.Discord.UpdateStream(channelID, streamMessageID, denormalizedResponse)
+				lastUpdate = time.Now()
 			}
-			deps.Discord.UpdateStream(channelID, streamMessageID, denormalizedResponse)
 		})
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
