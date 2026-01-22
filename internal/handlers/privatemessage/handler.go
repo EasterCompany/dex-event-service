@@ -392,6 +392,8 @@ Rules:
 		"engagement_raw":   engagementRaw,
 		"input_prompt":     prompt,
 		"context_history":  evalHistory,
+		"context_len":      len(evalHistory),
+		"prompt_len":       len(prompt),
 	}
 
 	if err := emitEvent(deps.EventServiceURL, engagementEventData); err != nil {

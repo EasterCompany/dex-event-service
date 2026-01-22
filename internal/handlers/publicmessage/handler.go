@@ -670,6 +670,8 @@ Output ONLY the token.`, evalHistory, content)
 		"engagement_raw":   engagementRaw,
 		"input_prompt":     prompt,
 		"context_history":  evalHistory,
+		"context_len":      len(evalHistory),
+		"prompt_len":       len(prompt),
 		"test_id":          testID,
 	}
 

@@ -119,6 +119,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	// 1. Check Engagement
 	shouldEngage := false
 	var engagementRaw string
+	var prompt string
 	engagementReason := ""
 
 	userCount, err := deps.Discord.GetVoiceChannelUserCount(channelID)
@@ -133,9 +134,10 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		shouldEngage = true
 		engagementReason = fmt.Sprintf("Forced engagement: User count is %d (Low population)", userCount)
 		engagementRaw = "<LOW_POPULATION_DETECTED/>"
+		prompt = "FORCED_BY_POPULATION"
 	} else {
 		// More users present: Perform inference to see if Dexter was addressed.
-		prompt := fmt.Sprintf("Analyze if Dexter should respond to this message (from voice transcription). Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", contextHistory, transcription)
+		prompt = fmt.Sprintf("Analyze if Dexter should respond to this message (from voice transcription). Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", contextHistory, transcription)
 		engagementRaw, _, err = deps.Model.Generate("dex-engagement-model", prompt, nil)
 		if err != nil {
 			log.Printf("Engagement check failed: %v", err)
@@ -163,6 +165,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		"message_content":  transcription,
 		"timestamp":        time.Now().Unix(),
 		"engagement_model": "dex-engagement-model",
+		"input_prompt":     prompt,
 		"context_history":  contextHistory,
 		"engagement_raw":   engagementRaw,
 		"user_count":       userCount,

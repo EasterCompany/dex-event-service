@@ -561,14 +561,20 @@ func getSanitizedEvents(ctx context.Context, key string, count int) []types.Even
 		// SANITIZATION: Strip heavy fields for public payload
 		var eventData map[string]interface{}
 		if err := json.Unmarshal(event.Event, &eventData); err == nil {
+			eventType, _ := eventData["type"].(string)
+
 			// Remove fields not needed for display
-			delete(eventData, "raw_input")
-			delete(eventData, "raw_output")
-			delete(eventData, "chat_history")
-			delete(eventData, "context_history")
-			delete(eventData, "engagement_raw")
-			delete(eventData, "response_raw")
-			delete(eventData, "base64_preview")
+			// PRESERVATION: Keep debug fields for engagement decisions to allow architectural visibility
+			if eventType != "engagement.decision" {
+				delete(eventData, "raw_input")
+				delete(eventData, "raw_output")
+				delete(eventData, "chat_history")
+				delete(eventData, "context_history")
+				delete(eventData, "engagement_raw")
+				delete(eventData, "response_raw")
+				delete(eventData, "base64_preview")
+				delete(eventData, "input_prompt") // Also strip my new field
+			}
 
 			// Strip base64 from attachments
 			if attachments, ok := eventData["attachments"].([]interface{}); ok {
