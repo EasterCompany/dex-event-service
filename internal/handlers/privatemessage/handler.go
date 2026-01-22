@@ -503,8 +503,13 @@ Rules:
 		}
 
 		finalResponse := fullResponse
+		if finalResponse == "" {
+			log.Printf("Warning: Model %s generated an EMPTY response.", responseModel)
+			finalResponse = "I'm sorry, I encountered an issue generating a response. Please try again."
+		}
+
 		if len(userMap) > 0 {
-			finalResponse = utils.DenormalizeMentions(fullResponse, userMap)
+			finalResponse = utils.DenormalizeMentions(finalResponse, userMap)
 		}
 		finalMessageID, _ := deps.Discord.CompleteStream(channelID, streamMessageID, finalResponse)
 		log.Printf("Generated response: %s", fullResponse)

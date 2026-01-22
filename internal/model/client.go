@@ -53,14 +53,15 @@ type GenerateRequest struct {
 }
 
 type GenerateResponse struct {
-	Response           string `json:"response"`
-	Done               bool   `json:"done"`
-	EvalCount          int    `json:"eval_count,omitempty"`
-	PromptEvalCount    int    `json:"prompt_eval_count,omitempty"`
-	TotalDuration      int64  `json:"total_duration,omitempty"`
-	LoadDuration       int64  `json:"load_duration,omitempty"`
-	PromptEvalDuration int64  `json:"prompt_eval_duration,omitempty"`
-	EvalDuration       int64  `json:"eval_duration,omitempty"`
+	Response           string  `json:"response"`
+	Message            Message `json:"message"` // Fallback
+	Done               bool    `json:"done"`
+	EvalCount          int     `json:"eval_count,omitempty"`
+	PromptEvalCount    int     `json:"prompt_eval_count,omitempty"`
+	TotalDuration      int64   `json:"total_duration,omitempty"`
+	LoadDuration       int64   `json:"load_duration,omitempty"`
+	PromptEvalDuration int64   `json:"prompt_eval_duration,omitempty"`
+	EvalDuration       int64   `json:"eval_duration,omitempty"`
 }
 
 type Message struct {
@@ -82,6 +83,7 @@ type ChatRequest struct {
 type ChatResponse struct {
 	Model              string  `json:"model"`
 	Message            Message `json:"message"`
+	Response           string  `json:"response"` // Dedicated spoke fallback
 	Done               bool    `json:"done"`
 	EvalCount          int     `json:"eval_count,omitempty"`
 	PromptEvalCount    int     `json:"prompt_eval_count,omitempty"`
@@ -150,8 +152,6 @@ func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []M
 		return Message{}, fmt.Errorf("hub returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	// The dedicated service returns the raw Ollama/Llama response stream or body.
-	// For Chat (non-stream), it returns the Ollama ChatResponse JSON.
 	body, _ := io.ReadAll(resp.Body)
 	var response ChatResponse
 	if err := json.Unmarshal(body, &response); err != nil {
@@ -169,6 +169,16 @@ func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []M
 		return Message{}, fmt.Errorf("failed to unmarshal hub response: %v. Body: %s", err, string(body))
 	}
 
+	content := response.Message.Content
+	if content == "" {
+		content = response.Response
+	}
+
+	// Safety: If still empty, log warning
+	if content == "" {
+		log.Printf("Warning: Model %s returned empty content in ChatWithOptions", model)
+	}
+
 	c.emit("system.cognitive.model_inference", map[string]interface{}{
 		"model":             model,
 		"method":            "chat",
@@ -177,7 +187,7 @@ func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []M
 		"duration_ms":       response.TotalDuration / 1000000, // ns to ms
 	})
 
-	return response.Message, nil
+	return Message{Role: "assistant", Content: content}, nil
 }
 
 func (c *Client) ChatStream(ctx context.Context, model string, messages []Message, options map[string]interface{}, callback func(string)) (GenerationStats, error) {
@@ -219,6 +229,8 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []Messag
 
 	stats := GenerationStats{}
 	reader := bufio.NewReader(resp.Body)
+	receivedAnyContent := false
+
 	for {
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
@@ -228,9 +240,23 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []Messag
 			return stats, err
 		}
 
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+
 		// Try to parse as Ollama ChatResponse
 		var chunk ChatResponse
 		if err := json.Unmarshal(line, &chunk); err == nil {
+			content := chunk.Message.Content
+			if content == "" {
+				content = chunk.Response
+			}
+
+			if content != "" {
+				callback(content)
+				receivedAnyContent = true
+			}
+
 			if chunk.Done {
 				stats.EvalCount = chunk.EvalCount
 				stats.PromptEvalCount = chunk.PromptEvalCount
@@ -248,8 +274,15 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []Messag
 				})
 				break
 			}
+		} else {
+			log.Printf("ChatStream: Failed to unmarshal chunk from %s: %v. Raw: %s", model, err, string(line))
 		}
 	}
+
+	if !receivedAnyContent {
+		log.Printf("Warning: Model %s returned NO content chunks in ChatStream", model)
+	}
+
 	return stats, nil
 }
 
