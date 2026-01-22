@@ -29,10 +29,6 @@ type CachedSummary struct {
 // GetMessages fetches history using a hybrid "Lazy Summary" approach.
 // It combines a cached long-term summary with recent raw messages.
 func GetMessages(ctx context.Context, redisClient *redis.Client, modelClient *model.Client, channelID string, summaryModel string, contextLimit int, options map[string]interface{}) ([]model.Message, []string, error) {
-	// Default to 6000 chars (~1500 tokens) if limit is not provided
-	if contextLimit <= 0 {
-		contextLimit = 6000
-	}
 	var summary CachedSummary
 	summaryKey := "context:summary:" + channelID
 	val, err := redisClient.Get(ctx, summaryKey).Result()
