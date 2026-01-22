@@ -967,6 +967,16 @@ func GetTemplates() map[string]EventTemplate {
 					Required:    false,
 					Description: "Raw output from response model",
 				},
+				"context_len": {
+					Type:        "number",
+					Required:    false,
+					Description: "Length of context provided",
+				},
+				"prompt_len": {
+					Type:        "number",
+					Required:    false,
+					Description: "Length of prompt provided",
+				},
 			},
 		},
 
