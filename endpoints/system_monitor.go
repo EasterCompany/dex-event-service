@@ -238,7 +238,7 @@ func GetSystemMonitorSnapshot(isPublic bool) *SystemMonitorResponse {
 		for _, serviceDef := range servicesInGroup {
 			id := strings.ToLower(serviceDef.ID)
 			// HIDE unwanted services from all snapshots
-			if id == "local-model-0" || id == "local-ollama-0" || id == "dex-cli" || id == "local-cache-0" {
+			if id == "local-model-0" || id == "local-ollama-0" || id == "dex-cli" || id == "local-cache-0" || id == "easter-company-root" {
 				continue
 			}
 
