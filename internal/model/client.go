@@ -113,7 +113,7 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message) (Me
 }
 
 func (c *Client) ChatWithOptions(ctx context.Context, model string, messages []Message, options map[string]interface{}) (Message, error) {
-	c.emit("system.cognitive.model_load", map[string]interface{}{
+	c.emit("system.cognitive.model_inference", map[string]interface{}{
 		"model":  model,
 		"method": "chat",
 	})
@@ -247,7 +247,7 @@ func (c *Client) Generate(model, prompt string, images []string) (string, Genera
 }
 
 func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, images []string, options map[string]interface{}) (string, GenerationStats, error) {
-	c.emit("system.cognitive.model_load", map[string]interface{}{
+	c.emit("system.cognitive.model_inference", map[string]interface{}{
 		"model":  model,
 		"method": "generate",
 	})

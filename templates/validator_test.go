@@ -167,16 +167,17 @@ func TestGetTemplateList(t *testing.T) {
 	// Need to import types to use the constants
 	eventTypes := GetTemplateList()
 
-	if len(eventTypes) != 41 {
+	if len(eventTypes) != 42 {
 
-		t.Errorf("Expected 41 event types, got %d", len(eventTypes))
+		t.Errorf("Expected 42 event types, got %d", len(eventTypes))
 
 	}
 
 	expectedTypes := map[string]bool{
 
-		"system.cognitive.model_load":   true,
-		"system.cognitive.model_unload": true,
+		"system.cognitive.model_load":      true,
+		"system.cognitive.model_inference": true,
+		"system.cognitive.model_unload":    true,
 
 		"message_received": true,
 

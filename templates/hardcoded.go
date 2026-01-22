@@ -8,9 +8,9 @@ import (
 // All templates are hardcoded and versioned with the application
 func GetTemplates() map[string]EventTemplate {
 	return map[string]EventTemplate{
-		"system.cognitive.model_load": {
-			Description: "A cognitive model was loaded into memory",
-			Format:      "Loaded model: {model} ({method})",
+		"system.cognitive.model_inference": {
+			Description: "A neural model was inferenced",
+			Format:      "Model Inference: {model} ({method})",
 			Fields: map[string]FieldSpec{
 				"model": {
 					Type:        "string",
@@ -20,7 +20,7 @@ func GetTemplates() map[string]EventTemplate {
 				"method": {
 					Type:        "string",
 					Required:    true,
-					Description: "Method used to load (generate, chat, etc.)",
+					Description: "Method (generate, chat, etc.)",
 				},
 				"duration": {
 					Type:        "string",
@@ -36,6 +36,23 @@ func GetTemplates() map[string]EventTemplate {
 					Type:        "string",
 					Required:    false,
 					Description: "Error message if failed",
+				},
+			},
+		},
+
+		"system.cognitive.model_load": {
+			Description: "A neural model was loaded on-demand",
+			Format:      "Model Loaded: {model} ({method})",
+			Fields: map[string]FieldSpec{
+				"model": {
+					Type:        "string",
+					Required:    true,
+					Description: "Name of the model",
+				},
+				"method": {
+					Type:        "string",
+					Required:    true,
+					Description: "Method (on-demand, manual)",
 				},
 			},
 		},
