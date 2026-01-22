@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
+	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/internal/discord"
 	"github.com/EasterCompany/dex-event-service/internal/model"
 	"github.com/EasterCompany/dex-event-service/templates"
@@ -297,6 +299,22 @@ func UpdateSummary(ctx context.Context, rdb *redis.Client, client *model.Client,
 
 	utils.RecordProcessOutcome(ctx, rdb, processID, "success")
 	log.Printf("Updated context summary for channel %s (Head: %s)", channelID, lastEvent.ID)
+
+	// --- 6. Notify Response Service to reload context ---
+	if sm, err := config.LoadServiceMap(); err == nil {
+		for _, s := range sm.Services["co"] {
+			if s.ID == "dex-response-model-service" {
+				reloadURL := fmt.Sprintf("http://127.0.0.1:%s/reload?channel_id=%s", s.Port, channelID)
+				go func() {
+					resp, err := http.Get(reloadURL)
+					if err == nil {
+						_ = resp.Body.Close()
+					}
+				}()
+				break
+			}
+		}
+	}
 }
 
 // cleanEventText provides a human-friendly version of the event log

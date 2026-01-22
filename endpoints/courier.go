@@ -8,9 +8,12 @@ import (
 )
 
 // RunCourierCompressorHandler triggers the courier compressor protocols manually.
-func RunCourierCompressorHandler(redisClient *redis.Client, trigger func() error) http.HandlerFunc {
+func RunCourierCompressorHandler(redisClient *redis.Client, trigger func(bool, string) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if err := trigger(); err != nil {
+		force := r.URL.Query().Get("force") == "true"
+		channelID := r.URL.Query().Get("channel_id")
+
+		if err := trigger(force, channelID); err != nil {
 			http.Error(w, fmt.Sprintf("Courier Compressor run failed: %v", err), http.StatusInternalServerError)
 			return
 		}

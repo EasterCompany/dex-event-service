@@ -1,13 +1,10 @@
 package fabricator
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,16 +28,12 @@ type FabricatorHandler struct {
 	agent.BaseAgent
 	Config        agent.AgentConfig
 	DiscordClient *discord.Client
-	TTSServiceURL string
 	stopChan      chan struct{}
 	ctx           context.Context
 	cancel        context.CancelFunc
 }
 
 func NewFabricatorHandler(redis *redis.Client, modelClient *model.Client, discord *discord.Client) *FabricatorHandler {
-	// Find TTS service URL from service map or use default
-	ttsURL := "http://127.0.0.1:8200"
-
 	ctx, cancel := context.WithCancel(context.Background())
 	return &FabricatorHandler{
 		BaseAgent: agent.BaseAgent{
@@ -52,18 +45,26 @@ func NewFabricatorHandler(redis *redis.Client, modelClient *model.Client, discor
 			Name:      "Fabricator",
 			ProcessID: FabricatorProcessID,
 			Models: map[string]string{
-				"construction": "fabricator-cli-yolo",
+				"review":    "dex-fabricator-review",
+				"issue":     "dex-fabricator-issue",
+				"construct": "dex-fabricator-construct",
+				"reporter":  "dex-fabricator-reporter",
 			},
 			ProtocolAliases: map[string]string{
-				"construction": "Construction",
+				"review":    "Review",
+				"issue":     "Issue",
+				"construct": "Construct",
+				"reporter":  "Reporter",
 			},
 			Cooldowns: map[string]int{
-				"construction": 86400,
+				"review":    300, // 5 minutes
+				"issue":     300, // 5 minutes
+				"construct": 300, // 5 minutes
+				"reporter":  300, // 5 minutes
 			},
 			IdleRequirement: 300,
 		},
 		DiscordClient: discord,
-		TTSServiceURL: ttsURL,
 		ctx:           ctx,
 		cancel:        cancel,
 	}
@@ -92,327 +93,247 @@ func (h *FabricatorHandler) GetConfig() agent.AgentConfig {
 }
 
 func (h *FabricatorHandler) Run(ctx context.Context) ([]agent.AnalysisResult, string, error) {
-	h.checkAndFabricate()
+	go h.PerformWaterfall(ctx)
 	return nil, "", nil
 }
 
 func (h *FabricatorHandler) runWorker() {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-
-	// New: Listen for voice triggers via a separate ticker or Redis subscription
-	// For simplicity, we'll poll for the latest voice trigger event every few seconds
-	voiceTicker := time.NewTicker(5 * time.Second)
-	defer voiceTicker.Stop()
 
 	for {
 		select {
 		case <-h.stopChan:
 			return
 		case <-ticker.C:
+			if err := h.verifySafety(); err != nil {
+				log.Printf("[%s] Safety check FAILED: %v", HandlerName, err)
+				continue
+			}
 			h.checkAndFabricate()
-		case <-voiceTicker.C:
-			h.checkVoiceTrigger()
 		}
 	}
 }
 
-func (h *FabricatorHandler) checkVoiceTrigger() {
-	ctx := h.ctx
-
-	// Fetch latest voice trigger
-	ids, err := h.RedisClient.ZRevRange(ctx, "events:type:system.fabricator.voice_trigger", 0, 0).Result()
-	if err != nil || len(ids) == 0 {
-		return
-	}
-
-	id := ids[0]
-	isProcessed, _ := h.RedisClient.SIsMember(ctx, "fabricator:processed_voice_triggers", id).Result()
-	if isProcessed {
-		return
-	}
-
-	// Fetch event
-	val, err := h.RedisClient.Get(ctx, "event:"+id).Result()
-	if err != nil {
-		return
-	}
-
-	var e types.Event
-	if err := json.Unmarshal([]byte(val), &e); err != nil {
-		return
-	}
-
-	var ed map[string]interface{}
-	if err := json.Unmarshal(e.Event, &ed); err != nil {
-		return
-	}
-
-	transcription, _ := ed["transcription"].(string)
-	userID, _ := ed["user_id"].(string)
-	channelID, _ := ed["channel_id"].(string)
-
-	// Mark as processed immediately to prevent race
-	h.RedisClient.SAdd(ctx, "fabricator:processed_voice_triggers", id)
-
-	log.Printf("[%s] Detected voice trigger: %s", HandlerName, transcription)
-	go h.PerformVoiceFabrication(ctx, transcription, userID, channelID)
-}
-
-func (h *FabricatorHandler) PerformVoiceFabrication(ctx context.Context, transcription, userID, channelID string) {
-	log.Printf("[%s] Starting Autonomous Voice Fabrication", HandlerName)
-
-	// Enforce global sequential execution
-	// Special "Voice Mode" lock type to avoid pre-emption
-	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
-	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
-
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Construction Protocol (Voice)")
-	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
-
-	h.RedisClient.Set(ctx, "fabricator:active_tier", "construction", utils.DefaultTTL)
-	defer h.RedisClient.Del(ctx, "fabricator:active_tier")
-
-	// 1. Build Autonomous Prompt
-	prompt := fmt.Sprintf("User Request (via Voice): %s\n\nObjective: Implement the user's request using your tools. You are running in autonomous YOLO mode. Do not ask for confirmation. Report your changes clearly in the output.", transcription)
-
+func (h *FabricatorHandler) verifySafety() error {
 	homeDir, _ := os.UserHomeDir()
 	workingDir := filepath.Join(homeDir, "EasterCompany")
 
-	// Check if source code directory exists
-	if _, err := os.Stat(workingDir); os.IsNotExist(err) {
-		log.Printf("[%s] Error: No source code found on this system (~/EasterCompany). Fabricator cannot self-evolve.", HandlerName)
-		return
+	gitDir := filepath.Join(workingDir, ".git")
+	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+		return fmt.Errorf("root repository not found at ~/EasterCompany/.git")
 	}
 
-	// 2. Execute Fabricator CLI
-	binPath, err := exec.LookPath("dex-fabricator-cli")
-	if err != nil {
-		log.Printf("[%s] Error: 'dex-fabricator-cli' binary not found.", HandlerName)
-		return
-	}
-
-	cmd := exec.CommandContext(ctx, binPath, "--yolo", "--resume", "--prompt", prompt)
+	cmd := exec.Command("git", "remote", "get-url", "origin")
 	cmd.Dir = workingDir
-	out, err := cmd.CombinedOutput()
-	output := string(out)
-
-	success := err == nil
-	log.Printf("[%s] Voice fabrication complete (Success: %v). Output size: %d", HandlerName, success, len(output))
-
-	// 3. Generate Summary for Voice Feedback
-	summary := "I encountered an error while trying to implement your request."
-	if success {
-		summaryPrompt := fmt.Sprintf("Summarize the following technical changes into a single, natural sentence for voice reporting.\n\nOutput:\n%s", output)
-		summary, _, _ = h.ModelClient.Generate("dex-summary-model", summaryPrompt, nil)
-		if summary == "" {
-			summary = "I've completed the requested changes and verified the build."
-		}
+	out, err := cmd.Output()
+	if err != nil || !strings.Contains(string(out), "EasterCompany/EasterCompany") {
+		return fmt.Errorf("invalid repository origin")
 	}
 
-	// 4. Emit Completion Event
-	completionEvent := map[string]interface{}{
-		"type":       "system.fabricator.voice_complete",
-		"summary":    summary,
-		"output":     output,
-		"success":    success,
-		"user_id":    userID,
-		"channel_id": channelID,
-		"timestamp":  time.Now().Unix(),
+	cmd = exec.Command("gh", "auth", "status")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("github cli (gh) is not configured")
 	}
 
-	// Manual emit since we don't have the event service URL handy here, or we can use the Redis timeline
-	// Actually, we can use SaveInternalEvent if it was available, but it's in executor.
-	// We'll just push to the Redis timeline which the discord service monitors.
-	eventID := fmt.Sprintf("fabricator-voice-complete-%d", time.Now().Unix())
-	eventJSON, _ := json.Marshal(completionEvent)
-	e := types.Event{
-		ID:        eventID,
-		Service:   "dex-event-service",
-		Event:     eventJSON,
-		Timestamp: time.Now().Unix(),
-	}
-	eJSON, _ := json.Marshal(e)
-	h.RedisClient.Set(ctx, "event:"+eventID, eJSON, 1*time.Hour)
-	h.RedisClient.ZAdd(ctx, "events:timeline", redis.Z{Score: float64(e.Timestamp), Member: eventID})
-	h.RedisClient.ZAdd(ctx, "events:type:system.fabricator.voice_complete", redis.Z{Score: float64(e.Timestamp), Member: eventID})
-
-	// 5. Voice Feedback via Discord
-	if summary != "" && h.DiscordClient != nil {
-		log.Printf("[%s] Generating voice feedback for summary: %s", HandlerName, summary)
-		ttsPayload := map[string]string{"text": summary, "language": "en"}
-		ttsJson, _ := json.Marshal(ttsPayload)
-		ttsResp, ttsErr := http.Post(h.TTSServiceURL+"/generate", "application/json", bytes.NewBuffer(ttsJson))
-		if ttsErr == nil && ttsResp.StatusCode == 200 {
-			audioBytes, _ := io.ReadAll(ttsResp.Body)
-			_ = ttsResp.Body.Close()
-			_ = h.DiscordClient.PlayAudio(audioBytes)
-		} else {
-			if ttsErr != nil {
-				log.Printf("[%s] TTS synthesis failed: %v", HandlerName, ttsErr)
-			} else {
-				log.Printf("[%s] TTS service returned error %d", HandlerName, ttsResp.StatusCode)
-				_ = ttsResp.Body.Close()
-			}
-		}
-	}
+	return nil
 }
 
 func (h *FabricatorHandler) checkAndFabricate() {
 	ctx := h.ctx
-
 	if utils.IsSystemPaused(ctx, h.RedisClient) {
 		return
 	}
 
-	// 1. Fetch Approved Blueprints
-	blueprint, err := h.fetchApprovedBlueprint(ctx)
-	if err != nil || blueprint == nil {
+	now := time.Now().Unix()
+	lastRun, _ := h.RedisClient.Get(ctx, "fabricator:last_run:review").Int64()
+	if now-lastRun < int64(h.Config.Cooldowns["review"]) {
 		return
 	}
 
-	// 2. Check Locks
 	if h.IsActuallyBusy(ctx, h.Config.ProcessID) {
 		return
 	}
 
-	// 3. Perform Fabrication
-	_, _, _ = h.PerformFabrication(ctx, *blueprint)
+	go h.PerformWaterfall(ctx)
 }
 
-func (h *FabricatorHandler) PerformFabrication(ctx context.Context, blueprint types.Event) ([]agent.AnalysisResult, string, error) {
-	log.Printf("[%s] Starting Fabricator Construction", HandlerName)
+func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
+	log.Printf("[%s] Starting Fabricator Waterfall Run", HandlerName)
 
-	// Enforce global sequential execution
 	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Construction Protocol")
-	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
+	var runLogs strings.Builder
+	runLogs.WriteString(fmt.Sprintf("Run started at %s\n\n", time.Now().Format(time.RFC3339)))
 
-	h.RedisClient.Set(ctx, "fabricator:active_tier", "construction", utils.DefaultTTL)
-	defer h.RedisClient.Del(ctx, "fabricator:active_tier")
+	h.RedisClient.Set(ctx, "fabricator:active_tier", "review", utils.DefaultTTL)
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Review Protocol (Tier 0)")
+	reviewOut, err := h.PerformReview(ctx)
+	runLogs.WriteString(fmt.Sprintf("### TIER 0: REVIEW\nStatus: %v\nOutput: %s\n\n", err == nil, reviewOut))
+	h.RedisClient.Set(ctx, "fabricator:last_run:review", time.Now().Unix(), 0)
 
-	// Gather Context
-	prompt := h.buildPrompt(blueprint)
+	h.RedisClient.Set(ctx, "fabricator:active_tier", "issue", utils.DefaultTTL)
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Issue Protocol (Tier 1)")
+	issueOut, err := h.PerformIssue(ctx)
+	runLogs.WriteString(fmt.Sprintf("### TIER 1: ISSUE\nStatus: %v\nOutput: %s\n\n", err == nil, issueOut))
+	h.RedisClient.Set(ctx, "fabricator:last_run:issue", time.Now().Unix(), 0)
 
-	homeDir, _ := os.UserHomeDir()
-	workingDir := filepath.Join(homeDir, "EasterCompany")
+	h.RedisClient.Set(ctx, "fabricator:active_tier", "construct", utils.DefaultTTL)
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Construct Protocol (Tier 2)")
+	constructOut, err := h.PerformConstruct(ctx)
+	runLogs.WriteString(fmt.Sprintf("### TIER 2: CONSTRUCT\nStatus: %v\nOutput: %s\n\n", err == nil, constructOut))
+	h.RedisClient.Set(ctx, "fabricator:last_run:construct", time.Now().Unix(), 0)
 
-	// Check if source code directory exists
-	if _, err := os.Stat(workingDir); os.IsNotExist(err) {
-		log.Printf("[%s] Error: No source code found on this system (~/EasterCompany). Fabricator cannot self-evolve.", HandlerName)
-		utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
-		return nil, "", fmt.Errorf("no source code found")
+	h.RedisClient.Set(ctx, "fabricator:active_tier", "reporter", utils.DefaultTTL)
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Reporter Protocol (Tier 3)")
+	summary, _ := h.PerformReporter(ctx, runLogs.String())
+	h.RedisClient.Set(ctx, "fabricator:last_run:reporter", time.Now().Unix(), 0)
+
+	h.RedisClient.Del(ctx, "fabricator:active_tier")
+	utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
+
+	if summary != "" && h.DiscordClient != nil {
+		debugChannelID := "1426957003108122656"
+		_, _ = h.DiscordClient.PostMessage(debugChannelID, "🛠️ **Fabricator Agent Run Summary**\n\n"+summary)
 	}
 
-	// Execute Fabricator CLI
-	binPath, err := exec.LookPath("dex-fabricator-cli")
-	if err != nil {
-		log.Printf("[%s] Error: 'dex-fabricator-cli' binary not found in PATH.", HandlerName)
-		utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
-		return nil, "", err
-	}
-
-	// Use --yolo for autonomous execution
-	// Use --resume to maintain session continuity
-	cmd := exec.CommandContext(ctx, binPath, "--yolo", "--resume")
-	cmd.Dir = workingDir
-	cmd.Stdin = strings.NewReader(prompt)
-
-	// Capture output
-	out, err := cmd.CombinedOutput()
-	output := string(out)
-
-	if err != nil {
-		log.Printf("[%s] Fabrication failed: %v\nOutput: %s", HandlerName, err, output)
-		utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "error")
-		// Mark as processed to prevent infinite loop on same blueprint
-		h.markBlueprintAsProcessed(ctx, blueprint.ID)
-		return nil, "", err
-	}
-
-	log.Printf("[%s] Fabrication complete.\nOutput: %s", HandlerName, output)
-	utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
-	h.markBlueprintAsProcessed(ctx, blueprint.ID)
-	h.RedisClient.Set(ctx, "fabricator:last_run:construction", time.Now().Unix(), 0)
-
-	return nil, "", nil
+	log.Printf("[%s] Fabricator Waterfall Run complete.", HandlerName)
 }
 
-func (h *FabricatorHandler) fetchApprovedBlueprint(ctx context.Context) (*types.Event, error) {
-	// Look for 'system.blueprint.generated' events in timeline
-	ids, err := h.RedisClient.ZRevRange(ctx, "events:type:system.blueprint.generated", 0, 19).Result()
+func (h *FabricatorHandler) PerformReview(ctx context.Context) (string, error) {
+	ids, err := h.RedisClient.ZRevRange(ctx, "events:timeline", 0, 49).Result()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
+	var alerts strings.Builder
 	for _, id := range ids {
-		// Check if processed
-		isProcessed, _ := h.RedisClient.SIsMember(ctx, "fabricator:processed_blueprints", id).Result()
-		if isProcessed {
-			continue
-		}
-
-		// Fetch event
 		val, err := h.RedisClient.Get(ctx, "event:"+id).Result()
 		if err != nil {
 			continue
 		}
-
 		var e types.Event
-		if err := json.Unmarshal([]byte(val), &e); err != nil {
-			continue
-		}
-
-		// Check if approved
+		_ = json.Unmarshal([]byte(val), &e)
 		var ed map[string]interface{}
-		if err := json.Unmarshal(e.Event, &ed); err != nil {
-			continue
-		}
-
-		if approved, ok := ed["approved"].(bool); ok && approved {
-			return &e, nil
-		}
-	}
-	return nil, nil
-}
-
-func (h *FabricatorHandler) markBlueprintAsProcessed(ctx context.Context, id string) {
-	h.RedisClient.SAdd(ctx, "fabricator:processed_blueprints", id)
-}
-
-func (h *FabricatorHandler) buildPrompt(blueprint types.Event) string {
-	var ed map[string]interface{}
-	_ = json.Unmarshal(blueprint.Event, &ed)
-
-	title, _ := ed["title"].(string)
-	summary, _ := ed["summary"].(string)
-	content, _ := ed["content"].(string)
-	path, _ := ed["implementation_path"].([]interface{})
-
-	var steps []string
-	for _, s := range path {
-		if str, ok := s.(string); ok {
-			steps = append(steps, str)
+		_ = json.Unmarshal(e.Event, &ed)
+		eType, _ := ed["type"].(string)
+		if eType == "system.notification.generated" || eType == "error_occurred" {
+			alerts.WriteString(fmt.Sprintf("- [%s] %s: %s\n", e.ID, eType, string(e.Event)))
 		}
 	}
 
-	sb := strings.Builder{}
-	sb.WriteString("You are the Fabricator. Your goal is to IMPLEMENT the following Blueprint.\n")
-	sb.WriteString("You are running in YOLO mode. Do not ask for permission. Just do it.\n\n")
-
-	sb.WriteString("## BLUEPRINT\n")
-	sb.WriteString(fmt.Sprintf("**Title**: %s\n", title))
-	sb.WriteString(fmt.Sprintf("**Summary**: %s\n", summary))
-	sb.WriteString(fmt.Sprintf("**Technical Content**: %s\n", content))
-	sb.WriteString("**Implementation Path**:\n")
-	for _, s := range steps {
-		sb.WriteString(fmt.Sprintf("- %s\n", s))
+	if alerts.Len() == 0 {
+		return "No alerts found.", nil
 	}
 
-	return sb.String()
+	report, _, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["review"], alerts.String(), nil, nil)
+	if err != nil {
+		return "", err
+	}
+
+	if strings.Contains(report, "<NO_ISSUE/>") {
+		return "Model reported NO ISSUE.", nil
+	}
+
+	repo := "EasterCompany/EasterCompany"
+	title := "System Stability Issue (Automated Review)"
+	body := report
+
+	homeDir, _ := os.UserHomeDir()
+	workingDir := filepath.Join(homeDir, "EasterCompany")
+
+	cmd := exec.Command("gh", "issue", "create", "--repo", repo, "--title", title, "--body", body)
+	cmd.Dir = workingDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), err
+	}
+
+	return "Issue created: " + string(out), nil
 }
 
-// ValidateLogic - Stubs for interface
+func (h *FabricatorHandler) PerformIssue(ctx context.Context) (string, error) {
+	homeDir, _ := os.UserHomeDir()
+	workingDir := filepath.Join(homeDir, "EasterCompany")
+
+	cmd := exec.Command("gh", "issue", "list", "--repo", "EasterCompany/EasterCompany", "--state", "open", "--sort", "created", "--direction", "asc", "--limit", "1", "--json", "number,title,body")
+	cmd.Dir = workingDir
+	out, err := cmd.Output()
+	if err != nil {
+		return string(out), err
+	}
+
+	var issues []map[string]interface{}
+	if err := json.Unmarshal(out, &issues); err != nil || len(issues) == 0 {
+		return "No open issues found.", nil
+	}
+
+	issue := issues[0]
+	issueNum := fmt.Sprintf("%v", issue["number"])
+	issueTitle := fmt.Sprintf("%v", issue["title"])
+
+	comment := "Dexter has targeted this issue for autonomous investigation."
+	cmd = exec.Command("gh", "issue", "comment", issueNum, "--repo", "EasterCompany/EasterCompany", "--body", comment)
+	cmd.Dir = workingDir
+	_ = cmd.Run()
+
+	prompt := fmt.Sprintf("Issue #%s: %s\n\nBody: %s\n\nObjective: Investigate the codebase and create a detailed implementation plan. Do not modify any code.", issueNum, issueTitle, issue["body"])
+	report, _, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["issue"], prompt, nil, nil)
+	if err != nil {
+		return "", err
+	}
+
+	cmd = exec.Command("gh", "issue", "comment", issueNum, "--repo", "EasterCompany/EasterCompany", "--body", "### Autonomous Investigation Report\n\n"+report)
+	cmd.Dir = workingDir
+	_ = cmd.Run()
+
+	return "Investigation complete for Issue #" + issueNum, nil
+}
+
+func (h *FabricatorHandler) PerformConstruct(ctx context.Context) (string, error) {
+	homeDir, _ := os.UserHomeDir()
+	workingDir := filepath.Join(homeDir, "EasterCompany")
+
+	cmd := exec.Command("gh", "issue", "list", "--repo", "EasterCompany/EasterCompany", "--state", "open", "--sort", "created", "--direction", "asc", "--limit", "1", "--json", "number,title,body")
+	cmd.Dir = workingDir
+	out, err := cmd.Output()
+	if err != nil {
+		return string(out), err
+	}
+
+	var issues []map[string]interface{}
+	if err := json.Unmarshal(out, &issues); err != nil || len(issues) == 0 {
+		return "No open issues found.", nil
+	}
+
+	issue := issues[0]
+	issueNum := fmt.Sprintf("%v", issue["number"])
+
+	prompt := fmt.Sprintf("IMPLEMENT FIX for Issue #%s: %s\n\nObjective: Apply the necessary changes to the codebase. You are in YOLO mode. Verify with builds/tests.", issueNum, issue["title"])
+	result, _, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["construct"], prompt, nil, nil)
+	if err != nil {
+		return "", err
+	}
+
+	closingComment := "Dexter has implemented and verified the fix for this issue. Closing.\n\n### Implementation Summary\n" + result
+	cmd = exec.Command("gh", "issue", "comment", issueNum, "--repo", "EasterCompany/EasterCompany", "--body", closingComment)
+	cmd.Dir = workingDir
+	_ = cmd.Run()
+
+	cmd = exec.Command("gh", "issue", "close", issueNum, "--repo", "EasterCompany/EasterCompany")
+	cmd.Dir = workingDir
+	_ = cmd.Run()
+
+	return "Issue #" + issueNum + " closed.", nil
+}
+
+func (h *FabricatorHandler) PerformReporter(ctx context.Context, logs string) (string, error) {
+	summary, _, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["reporter"], logs, nil, nil)
+	if err != nil {
+		return "", err
+	}
+	return summary, nil
+}
+
 func (h *FabricatorHandler) ValidateLogic(res agent.AnalysisResult) []agent.Correction { return nil }

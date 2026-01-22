@@ -72,6 +72,11 @@ func emitEvent(serviceURL string, eventData map[string]interface{}) error {
 	return nil
 }
 
+const (
+	// GlobalVoiceContext is the unified context ID for all voice interactions across channels.
+	GlobalVoiceContext = "voice-global"
+)
+
 func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Dependencies) (types.HandlerOutput, error) {
 	transcription, _ := input.EventData["transcription"].(string)
 	channelID, _ := input.EventData["channel_id"].(string)
@@ -80,6 +85,9 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	channelName, _ := input.EventData["channel_name"].(string)
 	serverID, _ := input.EventData["server_id"].(string)
 	serverName, _ := input.EventData["server_name"].(string)
+
+	// Use GlobalVoiceContext for stateful context tracking instead of channelID
+	contextID := GlobalVoiceContext
 
 	// Robust test_id extraction
 	testID, _ := input.EventData["test_id"].(string)
@@ -100,7 +108,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 
 	// 0.5 Cooldown Check (Anti-Double-Response)
 	// If we just finished speaking, ignore inputs for a short window (2s) to prevent responding to self-echo or late fragments.
-	lastResponseKey := fmt.Sprintf("channel:voice_cooldown:%s", channelID)
+	lastResponseKey := fmt.Sprintf("channel:voice_cooldown:%s", contextID)
 	if ttl, _ := deps.Redis.TTL(ctx, lastResponseKey).Result(); ttl > 0 {
 		log.Printf("Ignoring transcription due to voice cooldown (TTL: %v)", ttl)
 		return types.HandlerOutput{Success: true}, nil
@@ -118,7 +126,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	// Fetch context
 	summaryModel := "dex-summary-model"
 	contextLimit := 12000
-	contextHistory, err := smartcontext.Get(ctx, deps.Redis, deps.Model, channelID, summaryModel, contextLimit)
+	contextHistory, err := smartcontext.Get(ctx, deps.Redis, deps.Model, contextID, summaryModel, contextLimit)
 	if err != nil {
 		log.Printf("Warning: Failed to fetch context from smartcontext: %v, falling back to legacy", err)
 		contextHistory, _ = deps.Discord.FetchContext(channelID, 25)
@@ -183,7 +191,7 @@ Output ONLY the token.`, contextHistory, transcription)
 		"reason":           engagementReason,
 		"handler":          "transcription-handler",
 		"event_id":         input.EventID,
-		"channel_id":       channelID,
+		"channel_id":       contextID,
 		"user_id":          userID,
 		"message_content":  transcription,
 		"timestamp":        time.Now().Unix(),
@@ -236,7 +244,7 @@ Output ONLY the token.`, contextHistory, transcription)
 		// Fetch messages for Chat API
 		// LAZY SUMMARIZATION: Pass empty summaryModel to GetMessages to suppress background summarization
 		// during the latency-critical response phase. We will trigger it manually at the end.
-		messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Model, channelID, "", contextLimit, nil)
+		messages, contextEventIDs, err := smartcontext.GetMessages(ctx, deps.Redis, deps.Model, contextID, "", contextLimit, nil)
 		if err != nil {
 			log.Printf("Warning: Failed to fetch messages context: %v", err)
 		}
@@ -449,7 +457,7 @@ Output ONLY the token.`, contextHistory, transcription)
 				"user_id":        "dexter-bot",
 				"user_name":      "Dexter",
 				"target_user_id": userID,
-				"channel_id":     channelID,
+				"channel_id":     contextID,
 				"channel_name":   channelName,
 				"server_id":      serverID,
 				"server_name":    serverName,
@@ -468,14 +476,14 @@ Output ONLY the token.`, contextHistory, transcription)
 			}
 
 			// Set cooldown to prevent immediate re-triggering
-			deps.Redis.Set(ctx, fmt.Sprintf("channel:voice_cooldown:%s", channelID), "1", 2*time.Second)
+			deps.Redis.Set(ctx, fmt.Sprintf("channel:voice_cooldown:%s", contextID), "1", 2*time.Second)
 
 			// ASYNC HOUSEKEEPING: Trigger background summarization after response is done
 			// ONLY trigger if the raw buffer is starting to get large
 			if len(contextEventIDs) >= 10 {
 				go func() {
-					log.Printf("Housekeeping: Triggering background context summary update for %s", channelID)
-					smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Model, deps.Discord, channelID, summaryModel, smartcontext.CachedSummary{}, nil, nil)
+					log.Printf("Housekeeping: Triggering background context summary update for %s", contextID)
+					smartcontext.UpdateSummary(context.Background(), deps.Redis, deps.Model, deps.Discord, contextID, summaryModel, smartcontext.CachedSummary{}, nil, nil)
 				}()
 			} else {
 				log.Printf("Housekeeping: Skipping summary update (Raw buffer size %d is below threshold)", len(contextEventIDs))

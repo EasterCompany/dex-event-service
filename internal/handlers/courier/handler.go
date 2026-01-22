@@ -2,7 +2,6 @@ package courier
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"github.com/EasterCompany/dex-event-service/internal/chores"
 	"github.com/EasterCompany/dex-event-service/internal/discord"
 	"github.com/EasterCompany/dex-event-service/internal/model"
+	"github.com/EasterCompany/dex-event-service/internal/smartcontext"
 	"github.com/EasterCompany/dex-event-service/internal/web"
 	"github.com/EasterCompany/dex-event-service/utils"
 	"github.com/redis/go-redis/v9"
@@ -402,82 +402,29 @@ func (h *CourierHandler) deliverToRecipient(ctx context.Context, recipient strin
 	}
 }
 
-// PerformCompression scans all active chat contexts and compresses those exceeding the token limit.
+// PerformCompression scans all active channel timelines and triggers summaries for those with enough new data.
 func (h *CourierHandler) PerformCompression(ctx context.Context) error {
 	log.Printf("[%s] Starting Context Compression Protocol", HandlerName)
 
-	// 1. Identify Channels to compress
-	keys, err := h.RedisClient.Keys(ctx, "chat:context:*").Result()
+	// 1. Identify all channels with event timelines
+	keys, err := h.RedisClient.Keys(ctx, "events:channel:*").Result()
 	if err != nil {
 		return err
 	}
 
 	compressedCount := 0
 	for _, key := range keys {
-		sessionID := strings.TrimPrefix(key, "chat:context:")
-		if didCompress, err := h.compressSession(ctx, sessionID); err != nil {
-			log.Printf("[%s] Failed to compress session %s: %v", HandlerName, sessionID, err)
-		} else if didCompress {
-			compressedCount++
-		}
+		channelID := strings.TrimPrefix(key, "events:channel:")
+
+		// Trigger asynchronous summary update for each channel
+		// UpdateSummary handles its own internal batching/threshold logic (15+ new events)
+		go smartcontext.UpdateSummary(context.Background(), h.RedisClient, h.ModelClient, h.DiscordClient, channelID, h.Config.Models["compressor"], smartcontext.CachedSummary{}, nil, nil)
+		compressedCount++
 	}
 
 	h.RedisClient.Set(ctx, "courier:last_run:compressor", time.Now().Unix(), 0)
-	log.Printf("[%s] Context Compression Protocol complete. Compressed %d sessions.", HandlerName, compressedCount)
+	log.Printf("[%s] Context Compression Protocol complete. Initiated summary checks for %d channels.", HandlerName, compressedCount)
 	return nil
-}
-
-func (h *CourierHandler) compressSession(ctx context.Context, sessionID string) (bool, error) {
-	history, err := h.ChatManager.LoadHistory(ctx, sessionID)
-	if err != nil {
-		return false, err
-	}
-
-	// Calculate total tokens (estimated)
-	totalTokens := 0
-	for _, msg := range history {
-		totalTokens += len(msg.Content) / 4
-	}
-
-	// Threshold: 4000 tokens
-	if totalTokens < 4000 {
-		return false, nil
-	}
-
-	log.Printf("[%s] Compressing session %s (%d tokens)...", HandlerName, sessionID, totalTokens)
-
-	if len(history) <= 6 {
-		return false, nil
-	}
-
-	toCompress := history[:len(history)-6]
-	preserved := history[len(history)-6:]
-
-	var sb strings.Builder
-	for _, msg := range toCompress {
-		role := strings.ToUpper(msg.Role)
-		if role == "" {
-			role = "USER"
-		}
-		sb.WriteString(fmt.Sprintf("%s: %s\n\n", role, msg.Content))
-	}
-
-	// Run through the Compressor Model
-	newSummary, _, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["compressor"], sb.String(), nil, nil)
-	if err != nil {
-		return false, err
-	}
-
-	// Reconstruct history
-	newHistory := []model.Message{
-		{Role: "system", Content: "## PREVIOUS CONTEXT SUMMARY\n" + newSummary},
-	}
-	newHistory = append(newHistory, preserved...)
-
-	// Save back to Redis
-	data, _ := json.Marshal(newHistory)
-	err = h.RedisClient.Set(ctx, "chat:context:"+sessionID, data, 0).Err()
-	return true, err
 }
 
 func (h *CourierHandler) ValidateLogic(res agent.AnalysisResult) []agent.Correction {

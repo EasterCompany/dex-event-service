@@ -129,16 +129,13 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 		Protocols:      guardianProtocols,
 	}
 
-	// --- Imaginator Agent ---
-	imaginatorActive, _ := rdb.Get(ctx, "imaginator:active_tier").Result()
-	imaginatorProtocols := make(map[string]ProtocolStatus)
-	imaginatorProtocols["alert_review"] = calculateProtocolStatus(
-		ctx, rdb, imaginatorActive, "alert_review", 3600, "dex-imaginator-alert-review", "imaginator",
-	)
+	// --- Architect Agent ---
+	architectActive, _ := rdb.Get(ctx, "architect:active_tier").Result()
+	architectProtocols := make(map[string]ProtocolStatus)
 
-	resp.Agents["imaginator"] = AgentState{
-		ActiveProtocol: imaginatorActive,
-		Protocols:      imaginatorProtocols,
+	resp.Agents["architect"] = AgentState{
+		ActiveProtocol: architectActive,
+		Protocols:      architectProtocols,
 	}
 
 	// --- Analyzer Agent ---
@@ -159,9 +156,21 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 	fabricatorActive, _ := rdb.Get(ctx, "fabricator:active_tier").Result()
 	fabricatorProtocols := make(map[string]ProtocolStatus)
 
-	// Construction (Every 60s check)
-	fabricatorProtocols["construction"] = calculateProtocolStatus(
-		ctx, rdb, fabricatorActive, "construction", 60, "fabricator-cli-yolo", "fabricator",
+	// Review (Tier 0)
+	fabricatorProtocols["review"] = calculateProtocolStatus(
+		ctx, rdb, fabricatorActive, "review", 300, "dex-fabricator-review", "fabricator",
+	)
+	// Issue (Tier 1)
+	fabricatorProtocols["issue"] = calculateProtocolStatus(
+		ctx, rdb, fabricatorActive, "issue", 300, "dex-fabricator-issue", "fabricator",
+	)
+	// Construct (Tier 2)
+	fabricatorProtocols["construct"] = calculateProtocolStatus(
+		ctx, rdb, fabricatorActive, "construct", 300, "dex-fabricator-construct", "fabricator",
+	)
+	// Reporter (Tier 3)
+	fabricatorProtocols["reporter"] = calculateProtocolStatus(
+		ctx, rdb, fabricatorActive, "reporter", 300, "dex-fabricator-reporter", "fabricator",
 	)
 
 	resp.Agents["fabricator"] = AgentState{
@@ -350,10 +359,14 @@ func ResetAgentHandler(redisClient *redis.Client) http.HandlerFunc {
 			redisClient.Set(ctx, "courier:last_run:compressor", 0, utils.DefaultTTL)
 		case "sentry":
 			redisClient.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
-		case "alert_review":
-			redisClient.Set(ctx, "imaginator:last_run:alert_review", 0, utils.DefaultTTL)
-		case "construction":
-			redisClient.Set(ctx, "fabricator:last_run:construction", 0, utils.DefaultTTL)
+		case "review":
+			redisClient.Set(ctx, "fabricator:last_run:review", 0, utils.DefaultTTL)
+		case "issue":
+			redisClient.Set(ctx, "fabricator:last_run:issue", 0, utils.DefaultTTL)
+		case "construct":
+			redisClient.Set(ctx, "fabricator:last_run:construct", 0, utils.DefaultTTL)
+		case "reporter":
+			redisClient.Set(ctx, "fabricator:last_run:reporter", 0, utils.DefaultTTL)
 		case "synthesis":
 			redisClient.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
 			// Clear per-user cooldowns
@@ -366,8 +379,10 @@ func ResetAgentHandler(redisClient *redis.Client) http.HandlerFunc {
 			redisClient.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "courier:last_run:compressor", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "imaginator:last_run:alert_review", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "fabricator:last_run:construction", 0, utils.DefaultTTL)
+			redisClient.Set(ctx, "fabricator:last_run:review", 0, utils.DefaultTTL)
+			redisClient.Set(ctx, "fabricator:last_run:issue", 0, utils.DefaultTTL)
+			redisClient.Set(ctx, "fabricator:last_run:construct", 0, utils.DefaultTTL)
+			redisClient.Set(ctx, "fabricator:last_run:reporter", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "system:last_cognitive_event", 0, 0)
 

@@ -21,12 +21,12 @@ import (
 	"github.com/EasterCompany/dex-event-service/internal/handlers/fabricator"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/greeting"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/guardian"
-	"github.com/EasterCompany/dex-event-service/internal/handlers/imaginator"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/privatemessage"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/profiler"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/publicmessage"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/transcription"
 	"github.com/EasterCompany/dex-event-service/internal/handlers/webhook"
+	"github.com/EasterCompany/dex-event-service/internal/smartcontext"
 )
 
 const (
@@ -63,7 +63,7 @@ var (
 	FabricatorTrigger func() error
 
 	// CourierTrigger is a global hook for the API to call the background worker logic (compression)
-	CourierTrigger func() error
+	CourierTrigger func(bool, string) error
 )
 
 type job struct {
@@ -188,14 +188,9 @@ func initBackgroundHandlers() {
 				}
 
 				log.Printf("Background handler '%s' started.", handlerConfig.Name)
-			case imaginator.HandlerName:
-				imaginatorHandler := imaginator.NewImaginatorHandler(dependencies.Redis, dependencies.Model, dependencies.Discord)
-				if err := imaginatorHandler.Init(context.Background()); err != nil {
-					log.Printf("ERROR: Failed to initialize imaginator handler: %v", err)
-					continue
-				}
-				runningBackgroundHandlers[handlerConfig.Name] = imaginatorHandler
-				log.Printf("Background handler '%s' started.", handlerConfig.Name)
+			case "architect-handler":
+				// Placeholder for future Architect agent protocols
+				log.Printf("Background handler '%s' started (Empty).", handlerConfig.Name)
 			case profiler.AnalyzerHandlerName:
 				analyzerAgent := profiler.NewAnalyzerAgent(dependencies.Redis, dependencies.Model, dependencies.Discord)
 				if err := analyzerAgent.Init(context.Background()); err != nil {
@@ -213,9 +208,6 @@ func initBackgroundHandlers() {
 				log.Printf("Background handler '%s' started.", handlerConfig.Name)
 			case fabricator.HandlerName:
 				fabricatorHandler := fabricator.NewFabricatorHandler(dependencies.Redis, dependencies.Model, dependencies.Discord)
-				if dependencies.TTSServiceURL != "" {
-					fabricatorHandler.TTSServiceURL = dependencies.TTSServiceURL
-				}
 				if err := fabricatorHandler.Init(context.Background()); err != nil {
 					log.Printf("ERROR: Failed to initialize fabricator handler: %v", err)
 					continue
@@ -238,7 +230,12 @@ func initBackgroundHandlers() {
 				runningBackgroundHandlers[handlerConfig.Name] = courierHandler
 
 				// Wire up the trigger
-				CourierTrigger = func() error {
+				CourierTrigger = func(force bool, channelID string) error {
+					if channelID != "" {
+						// Single channel forced compression
+						go smartcontext.UpdateSummary(context.Background(), dependencies.Redis, dependencies.Model, dependencies.Discord, channelID, courierHandler.Config.Models["compressor"], smartcontext.CachedSummary{}, nil, nil)
+						return nil
+					}
 					return courierHandler.PerformCompression(context.Background())
 				}
 

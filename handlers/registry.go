@@ -54,10 +54,34 @@ var handlerConfigs = map[string]types.HandlerConfig{
 		IsBackgroundWorker: true,
 		Timeout:            0, // Managed by its own internal loop
 	},
-	"imaginator-handler": {
-		Name:               "imaginator-handler",
+	"fabricator-handler": {
+		Name:               "fabricator-handler",
 		IsBackgroundWorker: true,
 		Timeout:            0,
+	},
+	"fabricator-review": {
+		Name:        "fabricator-review",
+		Description: "Tier 0: Review Alerts & Create Issues",
+		Timeout:     300,
+		EventTypes:  []string{}, // Triggered by agent loop
+	},
+	"fabricator-issue": {
+		Name:        "fabricator-issue",
+		Description: "Tier 1: Investigate & Plan Issues",
+		Timeout:     3600,
+		EventTypes:  []string{},
+	},
+	"fabricator-construct": {
+		Name:        "fabricator-construct",
+		Description: "Tier 2: Implement & Close Issues",
+		Timeout:     7200,
+		EventTypes:  []string{},
+	},
+	"fabricator-reporter": {
+		Name:        "fabricator-reporter",
+		Description: "Tier 3: Summarize & Discord Report",
+		Timeout:     300,
+		EventTypes:  []string{},
 	},
 	"profiler-handler": {
 		Name:        "profiler-handler",
