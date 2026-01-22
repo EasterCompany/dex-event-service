@@ -139,7 +139,10 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, modelClient *mo
 		var eventData map[string]interface{}
 		if err := json.Unmarshal(evt.Event, &eventData); err == nil {
 			eventType, _ := eventData["type"].(string)
-			if eventType == "engagement.decision" {
+			testID, _ := eventData["test_id"].(string)
+
+			// CONTEXT SANITIZATION: Skip engagement decisions and all synthetic test noise
+			if eventType == "engagement.decision" || testID != "" || evt.Service == "dex-test-service" {
 				continue
 			}
 

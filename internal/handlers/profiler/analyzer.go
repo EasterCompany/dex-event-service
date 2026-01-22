@@ -380,12 +380,16 @@ func (h *AnalyzerAgent) gatherHistoryContext(ctx context.Context, userID string)
 		if err == nil {
 			var evt types.Event
 			if err := json.Unmarshal([]byte(data), &evt); err == nil {
-				// Filter out system audits
+				// SANITIZATION: Filter out audits and synthetic test noise
 				var evtData map[string]interface{}
 				_ = json.Unmarshal(evt.Event, &evtData)
-				if evtData["type"] != string(types.EventTypeSystemAnalysisAudit) {
-					events = append(events, evt)
+				eType, _ := evtData["type"].(string)
+				testID, _ := evtData["test_id"].(string)
+
+				if eType == string(types.EventTypeSystemAnalysisAudit) || testID != "" || evt.Service == "dex-test-service" {
+					continue
 				}
+				events = append(events, evt)
 			}
 		}
 	}

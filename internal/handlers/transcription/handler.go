@@ -137,13 +137,28 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		prompt = "FORCED_BY_POPULATION"
 	} else {
 		// More users present: Perform inference to see if Dexter was addressed.
-		prompt = fmt.Sprintf("Analyze if Dexter should respond to this message (from voice transcription). Output <ENGAGE/> or <IGNORE/>.\n\nContext:\n%s\n\nMessage: %s", contextHistory, transcription)
+		prompt = fmt.Sprintf(`Analyze if Dexter should respond to this message (from voice transcription). 
+Context:
+%s
+
+Current Message:
+%s
+
+Output EXACTLY one of the following tokens:
+- "IGNORE": No action.
+- "ENGAGE": Generate a full text response.
+
+Output ONLY the token.`, contextHistory, transcription)
+
 		engagementRaw, _, err = deps.Model.Generate("dex-engagement-model", prompt, nil)
 		if err != nil {
 			log.Printf("Engagement check failed: %v", err)
 			return types.HandlerOutput{Success: true, Events: []types.HandlerOutputEvent{}}, nil
 		}
-		shouldEngage = strings.Contains(engagementRaw, "<ENGAGE/>")
+
+		engagementRaw = strings.TrimSpace(engagementRaw)
+		upperRaw := strings.ToUpper(engagementRaw)
+		shouldEngage = strings.Contains(upperRaw, "ENGAGE") || strings.Contains(upperRaw, "<ENGAGE/>")
 		engagementReason = "Evaluated by dex-engagement-model"
 	}
 
