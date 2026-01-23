@@ -39,18 +39,18 @@ func IsSystemBusy(ctx context.Context, redisClient *redis.Client, ignoreVoiceMod
 		return false
 	}
 
-	// Simulations (events with test_id) are allowed to bypass the cognitive lock
+	// 1. Simulations (events with test_id) and CLI are allowed to bypass the cognitive lock
 	// because they are often running WHILE the system is locked for validation.
-	// We check for "test-" prefix in processID which is used by dex-test-service
-	if strings.HasPrefix(processID, "test-") || processID == "dex-test-service" || processID == "dex-cli" {
-		return false
-	}
+	isTestProcess := strings.HasPrefix(processID, "test-") || processID == "dex-test-service" || processID == "dex-cli"
 
-	// 1. Check for global cognitive lock
+	// 2. Check for global cognitive lock
 	holder, _ := redisClient.Get(ctx, CognitiveLockKey).Result()
 	if holder != "" {
 		if holder == "SYSTEM_VALIDATION_ACTIVE" {
-			return false // Allow everything during ecosystem validation
+			if isTestProcess {
+				return false // Only test processes can bypass the validation lock
+			}
+			return true // Background tasks (Compressor, etc.) must wait
 		}
 		if ignoreVoiceMode && (holder == "Voice Mode" || holder == "voice-mode") {
 			// Voice is allowed, continue check for other processes
@@ -83,13 +83,14 @@ func AcquireCognitiveLock(ctx context.Context, redisClient *redis.Client, agentN
 	}
 
 	// Simulations and CLI are allowed to bypass the lock
-	if strings.HasPrefix(processID, "test-") || processID == "dex-test-service" || processID == "dex-cli" {
+	isTestProcess := strings.HasPrefix(processID, "test-") || processID == "dex-test-service" || processID == "dex-cli"
+	if isTestProcess {
 		return
 	}
 
 	// 1. Check if we already hold the lock (Re-entrancy)
 	currentHolder, _ := redisClient.Get(ctx, CognitiveLockKey).Result()
-	if currentHolder == agentName || currentHolder == "SYSTEM_VALIDATION_ACTIVE" {
+	if currentHolder == agentName || (currentHolder == "SYSTEM_VALIDATION_ACTIVE" && isTestProcess) {
 		return
 	}
 
@@ -203,10 +204,12 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 	// Single Serving AI Rule: Check if we should be queued
 	holder, _ := redisClient.Get(ctx, CognitiveLockKey).Result()
 
+	isTestProcess := strings.HasPrefix(processID, "test-") || processID == "dex-test-service" || processID == "dex-cli"
+
 	isLockHolder := false
 	if holder != "" {
-		if holder == "SYSTEM_VALIDATION_ACTIVE" {
-			isLockHolder = true // Allow all during validation
+		if holder == "SYSTEM_VALIDATION_ACTIVE" && isTestProcess {
+			isLockHolder = true // Only test processes bypass the validation lock
 		} else {
 			hLower := strings.ToLower(holder)
 			pLower := strings.ToLower(processID)
