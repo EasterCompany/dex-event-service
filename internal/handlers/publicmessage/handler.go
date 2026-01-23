@@ -155,7 +155,15 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					log.Printf("Failed to fetch web view for %s: %v, falling back to STATIC", foundURL, fetchErr)
 					// Fallback to static if webview fails
 					utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Analyzing link...")
-					meta, fetchErr = deps.Web.FetchMetadata(foundURL, true)
+					// 1. Fetch Metadata
+					meta, fetchErr = deps.Web.FetchMetadata(foundURL, false)
+					if fetchErr == nil && meta != nil {
+						// 2. Fetch Full Content
+						scraped, scrapeErr := deps.Web.PerformScrape(ctx, foundURL)
+						if scrapeErr == nil && scraped != nil {
+							meta.Content = scraped.Content
+						}
+					}
 				}
 			} else {
 				utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Analyzing link...")
