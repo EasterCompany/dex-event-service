@@ -94,7 +94,8 @@ func (h *CourierHandler) GetConfig() agent.AgentConfig {
 }
 
 func (h *CourierHandler) Run(ctx context.Context) ([]agent.AnalysisResult, string, error) {
-	return h.PerformResearch(ctx)
+	go h.PerformWaterfall(ctx)
+	return nil, "", nil
 }
 
 func (h *CourierHandler) runWorker() {
@@ -106,66 +107,32 @@ func (h *CourierHandler) runWorker() {
 		case <-h.stopChan:
 			return
 		case <-ticker.C:
-			h.checkAndResearch()
-			h.checkAndCompress()
+			h.checkAndExecute()
 		}
 	}
 }
 
-func (h *CourierHandler) checkAndCompress() {
+func (h *CourierHandler) checkAndExecute() {
 	ctx := h.ctx
-	now := time.Now().Unix()
-
-	// 1. System Pause Check
 	if utils.IsSystemPaused(ctx, h.RedisClient) {
 		return
 	}
 
-	// 2. Cooldown check
-	lastRun, _ := h.RedisClient.Get(ctx, "courier:last_run:compressor").Int64()
-	if now-lastRun < int64(h.Config.Cooldowns["compressor"]) {
-		return
-	}
-
-	_ = h.PerformCompression(ctx)
-}
-
-func (h *CourierHandler) checkAndResearch() {
-	ctx := h.ctx
-	now := time.Now().Unix()
-
-	// 1. System Pause Check
-	if utils.IsSystemPaused(ctx, h.RedisClient) {
-		return
-	}
-
-	// 2. No ongoing processes (True Busy Check)
 	if h.IsActuallyBusy(ctx, h.Config.ProcessID) {
 		return
 	}
 
-	// 2.5 Check System Idle Time
-	sysState, _ := h.RedisClient.Get(ctx, "system:state").Result()
-	if sysState == "busy" {
-		// If system is busy, we respect that (even if IsActuallyBusy returns false due to race/lag)
-		return
+	now := time.Now().Unix()
+
+	// RULE: No agent can run any protocols unless ALL protocols within it are "READY"
+	for protocol, cooldown := range h.Config.Cooldowns {
+		lastRun, _ := h.RedisClient.Get(ctx, fmt.Sprintf("courier:last_run:%s", protocol)).Int64()
+		if now-lastRun < int64(cooldown) {
+			return
+		}
 	}
 
-	lastTransition, _ := h.RedisClient.Get(ctx, "system:last_transition_ts").Int64()
-	if now-lastTransition < int64(h.Config.IdleRequirement) {
-		return
-	}
-
-	// 2.6 Busy Count Cleanup (Safety Net)
-	h.CleanupBusyCount(ctx)
-
-	// 3. Protocol Cooldown
-	lastRun, _ := h.RedisClient.Get(ctx, "courier:last_run:researcher").Int64()
-	if now-lastRun < int64(h.Config.Cooldowns["researcher"]) {
-		return
-	}
-
-	// 4. Check if any tasks are actually due
+	// 2. Check if any tasks are actually due
 	tasks, err := h.ChoreStore.GetAll(ctx)
 	if err != nil || len(tasks) == 0 {
 		return
@@ -173,21 +140,56 @@ func (h *CourierHandler) checkAndResearch() {
 
 	anyDue := false
 	for _, t := range tasks {
-		if t.Status != chores.ChoreStatusActive {
-			continue
-		}
-		if h.isTaskDue(t) {
+		if t.Status == chores.ChoreStatusActive && h.isTaskDue(t) {
 			anyDue = true
 			break
 		}
 	}
 
-	if !anyDue {
+	if anyDue {
+		go h.PerformWaterfall(ctx)
+	}
+}
+
+func (h *CourierHandler) PerformWaterfall(ctx context.Context) {
+	log.Printf("[%s] Starting Courier Waterfall Run", HandlerName)
+
+	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
+	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+
+	// RULE: Every courier agent run MUST go researcher -> compressor
+	// If any tier skips or fails, the waterfall STOPS immediately.
+
+	// TIER 1: RESEARCHER
+
+	h.RedisClient.Set(ctx, "courier:active_tier", "researcher", utils.DefaultTTL)
+
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Researcher Protocol")
+
+	_, inferenceCount, err := h.PerformResearch(ctx)
+
+	if err != nil || inferenceCount == 0 {
+
+		log.Printf("[%s] Waterfall aborted: Researcher found no work or failed.", HandlerName)
+		h.cleanupRun(ctx)
 		return
 	}
+	h.RedisClient.Set(ctx, "courier:last_run:researcher", time.Now().Unix(), 0)
 
-	// Trigger Research
-	_, _, _ = h.PerformResearch(ctx)
+	// TIER 2: COMPRESSOR
+	h.RedisClient.Set(ctx, "courier:active_tier", "compressor", utils.DefaultTTL)
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Compressor Protocol")
+	err = h.PerformCompression(ctx)
+	if err == nil {
+		h.RedisClient.Set(ctx, "courier:last_run:compressor", time.Now().Unix(), 0)
+	}
+
+	h.cleanupRun(ctx)
+}
+
+func (h *CourierHandler) cleanupRun(ctx context.Context) {
+	h.RedisClient.Del(ctx, "courier:active_tier")
+	utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
 }
 
 func (h *CourierHandler) isTaskDue(t *chores.Chore) bool {
@@ -216,10 +218,10 @@ func (h *CourierHandler) isTaskDue(t *chores.Chore) bool {
 	return now-t.LastRun >= interval
 }
 
-func (h *CourierHandler) PerformResearch(ctx context.Context) ([]agent.AnalysisResult, string, error) {
+func (h *CourierHandler) PerformResearch(ctx context.Context) ([]agent.AnalysisResult, int, error) {
 	tasks, err := h.ChoreStore.GetAll(ctx)
 	if err != nil || len(tasks) == 0 {
-		return nil, "", nil
+		return nil, 0, nil
 	}
 
 	var dueTasks []*chores.Chore
@@ -230,37 +232,25 @@ func (h *CourierHandler) PerformResearch(ctx context.Context) ([]agent.AnalysisR
 	}
 
 	if len(dueTasks) == 0 {
-		return nil, "", nil
+		return nil, 0, nil
 	}
 
 	log.Printf("[%s] Starting Courier Research (%d tasks due)", HandlerName, len(dueTasks))
 
-	// Enforce global sequential execution
-	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
-	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
-
-	h.RedisClient.Set(ctx, "courier:active_tier", "researcher", utils.DefaultTTL)
-	defer h.RedisClient.Del(ctx, "courier:active_tier")
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Researcher Protocol")
-	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
-
 	var totalResults []agent.AnalysisResult
-	var lastAuditID string
+	inferenceCount := 0
 
 	for _, task := range dueTasks {
 		res, auditID, err := h.executeTask(ctx, task)
-		lastAuditID = auditID
 		if err == nil && len(res) > 0 {
 			totalResults = append(totalResults, res...)
 			h.deliverResults(ctx, task, res[0], auditID)
 			_ = h.ChoreStore.MarkRun(ctx, task.ID, nil) // Update last run
+			inferenceCount++
 		}
 	}
 
-	h.RedisClient.Set(ctx, "courier:last_run:researcher", time.Now().Unix(), 0)
-	utils.RecordProcessOutcome(ctx, h.RedisClient, h.Config.ProcessID, "success")
-
-	return totalResults, lastAuditID, nil
+	return totalResults, inferenceCount, nil
 }
 
 func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([]agent.AnalysisResult, string, error) {

@@ -150,30 +150,19 @@ func (h *FabricatorHandler) checkAndFabricate() {
 	}
 
 	now := time.Now().Unix()
-	triggerWaterfall := false
 
-	// Check 1: Review Tier Ready? (Needs Alerts)
-	lastReview, _ := h.RedisClient.Get(ctx, "fabricator:last_run:review").Int64()
-	if now-lastReview >= int64(h.Config.Cooldowns["review"]) {
-		// Only trigger if alerts exist
-		if h.hasPendingAlerts(ctx) {
-			log.Printf("[%s] Triggering waterfall: Review is ready and alerts exist.", HandlerName)
-			triggerWaterfall = true
+	// RULE: No agent can run any protocols unless ALL protocols within it are "READY"
+	for protocol, cooldown := range h.Config.Cooldowns {
+		lastRun, _ := h.RedisClient.Get(ctx, fmt.Sprintf("fabricator:last_run:%s", protocol)).Int64()
+		if now-lastRun < int64(cooldown) {
+			// At least one protocol is on cooldown, whole agent stays idle.
+			return
 		}
 	}
 
-	// Check 2: Construct Tier Ready? (Needs Open Issues)
-	if !triggerWaterfall {
-		lastConstruct, _ := h.RedisClient.Get(ctx, "fabricator:last_run:construct").Int64()
-		if now-lastConstruct >= int64(h.Config.Cooldowns["construct"]) {
-			if h.hasOpenIssues() {
-				log.Printf("[%s] Triggering waterfall: Construct is ready and issues are open.", HandlerName)
-				triggerWaterfall = true
-			}
-		}
-	}
-
-	if triggerWaterfall {
+	// Trigger if we have fresh alerts to review
+	if h.hasPendingAlerts(ctx) {
+		log.Printf("[%s] Triggering waterfall: All protocols ready and pending alerts found.", HandlerName)
 		go h.PerformWaterfall(ctx)
 	}
 }
@@ -200,14 +189,6 @@ func (h *FabricatorHandler) hasPendingAlerts(ctx context.Context) bool {
 	return false
 }
 
-func (h *FabricatorHandler) hasOpenIssues() bool {
-	homeDir, _ := os.UserHomeDir()
-	cmd := exec.Command("gh", "issue", "list", "--repo", "EasterCompany/EasterCompany", "--state", "open", "--limit", "1")
-	cmd.Dir = filepath.Join(homeDir, "EasterCompany")
-	out, err := cmd.Output()
-	return err == nil && len(strings.TrimSpace(string(out))) > 0
-}
-
 func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 	if err := h.verifySafety(); err != nil {
 		log.Printf("[%s] Aborting waterfall due to safety check failure: %v", HandlerName, err)
@@ -220,55 +201,58 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 
 	var runLogs strings.Builder
 	runLogs.WriteString(fmt.Sprintf("Run started at %s\n\n", time.Now().Format(time.RFC3339)))
-	now := time.Now().Unix()
+
+	// RULE: Every fabricator agent run MUST go review -> issue -> construct -> reporter
+	// If any tier skips (no work) or fails, the waterfall STOPS immediately.
 
 	// TIER 0: REVIEW
-	lastReview, _ := h.RedisClient.Get(ctx, "fabricator:last_run:review").Int64()
-	if now-lastReview >= int64(h.Config.Cooldowns["review"]) && h.hasPendingAlerts(ctx) {
-		h.RedisClient.Set(ctx, "fabricator:active_tier", "review", utils.DefaultTTL)
-		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Review Protocol (Tier 0)")
-		inferenceDone, reviewOut, err := h.PerformReview(ctx)
-		runLogs.WriteString(fmt.Sprintf("### TIER 0: REVIEW\nStatus: %v\nOutput: %s\n\n", err == nil, reviewOut))
-		if inferenceDone {
-			h.RedisClient.Set(ctx, "fabricator:last_run:review", time.Now().Unix(), 0)
-		}
-	} else {
-		runLogs.WriteString("### TIER 0: REVIEW\nSkipped (Cooldown or No Alerts).\n\n")
+	h.RedisClient.Set(ctx, "fabricator:active_tier", "review", utils.DefaultTTL)
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Review Protocol (Tier 0)")
+	inferenceDone, reviewOut, err := h.PerformReview(ctx)
+	runLogs.WriteString(fmt.Sprintf("### TIER 0: REVIEW\nStatus: %v\nOutput: %s\n\n", err == nil, reviewOut))
+
+	if !inferenceDone || err != nil {
+		h.finalizeRun(ctx, runLogs.String(), "Aborted at Review")
+		return
 	}
+	h.RedisClient.Set(ctx, "fabricator:last_run:review", time.Now().Unix(), 0)
 
 	// TIER 1: ISSUE
-	lastIssue, _ := h.RedisClient.Get(ctx, "fabricator:last_run:issue").Int64()
-	if now-lastIssue >= int64(h.Config.Cooldowns["issue"]) && h.hasOpenIssues() {
-		h.RedisClient.Set(ctx, "fabricator:active_tier", "issue", utils.DefaultTTL)
-		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Issue Protocol (Tier 1)")
-		inferenceDone, issueOut, err := h.PerformIssue(ctx)
-		runLogs.WriteString(fmt.Sprintf("### TIER 1: ISSUE\nStatus: %v\nOutput: %s\n\n", err == nil, issueOut))
-		if inferenceDone {
-			h.RedisClient.Set(ctx, "fabricator:last_run:issue", time.Now().Unix(), 0)
-		}
-	} else {
-		runLogs.WriteString("### TIER 1: ISSUE\nSkipped (Cooldown or No Issues).\n\n")
+	h.RedisClient.Set(ctx, "fabricator:active_tier", "issue", utils.DefaultTTL)
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Issue Protocol (Tier 1)")
+	inferenceDone, issueOut, err := h.PerformIssue(ctx)
+	runLogs.WriteString(fmt.Sprintf("### TIER 1: ISSUE\nStatus: %v\nOutput: %s\n\n", err == nil, issueOut))
+
+	if !inferenceDone || err != nil {
+		h.finalizeRun(ctx, runLogs.String(), "Aborted at Issue")
+		return
 	}
+	h.RedisClient.Set(ctx, "fabricator:last_run:issue", time.Now().Unix(), 0)
 
 	// TIER 2: CONSTRUCT
-	lastConstruct, _ := h.RedisClient.Get(ctx, "fabricator:last_run:construct").Int64()
-	if now-lastConstruct >= int64(h.Config.Cooldowns["construct"]) && h.hasOpenIssues() {
-		h.RedisClient.Set(ctx, "fabricator:active_tier", "construct", utils.DefaultTTL)
-		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Construct Protocol (Tier 2)")
-		inferenceDone, constructOut, err := h.PerformConstruct(ctx)
-		runLogs.WriteString(fmt.Sprintf("### TIER 2: CONSTRUCT\nStatus: %v\nOutput: %s\n\n", err == nil, constructOut))
-		if inferenceDone {
-			h.RedisClient.Set(ctx, "fabricator:last_run:construct", time.Now().Unix(), 0)
-		}
-	} else {
-		runLogs.WriteString("### TIER 2: CONSTRUCT\nSkipped (Cooldown or No Issues).\n\n")
-	}
+	h.RedisClient.Set(ctx, "fabricator:active_tier", "construct", utils.DefaultTTL)
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Construct Protocol (Tier 2)")
+	inferenceDone, constructOut, err := h.PerformConstruct(ctx)
+	runLogs.WriteString(fmt.Sprintf("### TIER 2: CONSTRUCT\nStatus: %v\nOutput: %s\n\n", err == nil, constructOut))
 
-	// TIER 3: REPORTER
+	if !inferenceDone || err != nil {
+		h.finalizeRun(ctx, runLogs.String(), "Aborted at Construct")
+		return
+	}
+	h.RedisClient.Set(ctx, "fabricator:last_run:construct", time.Now().Unix(), 0)
+
+	// TIER 3: REPORTER (Always runs if we reached here)
+	h.finalizeRun(ctx, runLogs.String(), "Success")
+}
+
+func (h *FabricatorHandler) finalizeRun(ctx context.Context, logs string, status string) {
 	h.RedisClient.Set(ctx, "fabricator:active_tier", "reporter", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Reporter Protocol (Tier 3)")
-	_, summary, _ := h.PerformReporter(ctx, runLogs.String())
-	h.RedisClient.Set(ctx, "fabricator:last_run:reporter", time.Now().Unix(), 0)
+
+	inferenceDone, summary, _ := h.PerformReporter(ctx, fmt.Sprintf("Run Status: %s\n\n%s", status, logs))
+	if inferenceDone {
+		h.RedisClient.Set(ctx, "fabricator:last_run:reporter", time.Now().Unix(), 0)
+	}
 
 	h.RedisClient.Del(ctx, "fabricator:active_tier")
 	utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)

@@ -139,11 +139,12 @@ func (h *GuardianHandler) checkAndAnalyze() {
 	// 4. Busy Count Cleanup
 	h.CleanupBusyCount(ctx)
 
-	// 5. Cooldown checks
-	lastSentry, _ := h.RedisClient.Get(ctx, "guardian:last_run:sentry").Int64()
-
-	if now-lastSentry < int64(h.Config.Cooldowns["sentry"]) {
-		return
+	// RULE: No agent can run any protocols unless ALL protocols within it are "READY"
+	for protocol, cooldown := range h.Config.Cooldowns {
+		lastRun, _ := h.RedisClient.Get(ctx, fmt.Sprintf("guardian:last_run:%s", protocol)).Int64()
+		if now-lastRun < int64(cooldown) {
+			return
+		}
 	}
 
 	// Trigger full analysis

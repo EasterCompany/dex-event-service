@@ -94,45 +94,79 @@ func (h *AnalyzerAgent) runWorker() {
 		case <-h.ctx.Done():
 			return
 		case <-ticker.C:
-			// 1. Check Idle
-			lastCognitiveEvent, _ := h.RedisClient.Get(h.ctx, "system:last_cognitive_event").Int64()
-			now := time.Now().Unix()
-			idleTime := now - lastCognitiveEvent
-
-			if idleTime < int64(h.Config.IdleRequirement) {
-				// System is too active
-				continue
-			}
-
-			// 2. Run Protocols
-			h.PerformSummary(h.ctx)
-			h.PerformSynthesis(h.ctx)
+			h.checkAndExecute()
 		}
 	}
 }
 
-func (h *AnalyzerAgent) PerformSummary(ctx context.Context) {
+func (h *AnalyzerAgent) checkAndExecute() {
+	ctx := h.ctx
 	if utils.IsSystemPaused(ctx, h.RedisClient) {
-		log.Printf("[%s] Summary skipped: System is paused.", h.Config.Name)
 		return
 	}
 
-	// Strict Protocol Cooldown Check
-	lastRun, _ := h.RedisClient.Get(ctx, "analyzer:last_run:summary").Int64()
-	if time.Now().Unix()-lastRun < int64(h.Config.Cooldowns["summary"]) {
-		return
-	}
-
-	// Busy Check (Prevent Queueing)
 	if h.IsActuallyBusy(ctx, h.Config.ProcessID) {
 		return
 	}
 
-	log.Printf("[%s] Starting Summary Protocol...", h.Config.Name)
+	now := time.Now().Unix()
+
+	// RULE: No agent can run any protocols unless ALL protocols within it are "READY"
+	for protocol, cooldown := range h.Config.Cooldowns {
+		lastRun, _ := h.RedisClient.Get(ctx, fmt.Sprintf("analyzer:last_run:%s", protocol)).Int64()
+		if now-lastRun < int64(cooldown) {
+			return
+		}
+	}
+
+	// 1. Check Idle
+	lastCognitiveEvent, _ := h.RedisClient.Get(ctx, "system:last_cognitive_event").Int64()
+	idleTime := now - lastCognitiveEvent
+
+	if idleTime < int64(h.Config.IdleRequirement) {
+		return
+	}
+
+	go h.PerformWaterfall(ctx)
+}
+
+func (h *AnalyzerAgent) PerformWaterfall(ctx context.Context) {
+	log.Printf("[%s] Starting Analyzer Waterfall Run", h.Config.Name)
 
 	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 
+	// RULE: Every analyzer agent run MUST go summary -> synthesis
+	// If any tier skips or fails, the waterfall STOPS immediately.
+
+	// TIER 1: SUMMARY
+	h.RedisClient.Set(ctx, "analyzer:active_tier", "summary", 0)
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Summary Batch")
+	inferenceCount := h.PerformSummary(ctx)
+
+	if inferenceCount == 0 {
+		log.Printf("[%s] Waterfall aborted: Summary found no active users.", h.Config.Name)
+		h.cleanupRun(ctx)
+		return
+	}
+	h.RedisClient.Set(ctx, "analyzer:last_run:summary", time.Now().Unix(), 0)
+
+	// TIER 2: SYNTHESIS
+	h.RedisClient.Set(ctx, "analyzer:active_tier", "synthesis", 0)
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Synthesis Batch")
+	if h.PerformSynthesis(ctx) > 0 {
+		h.RedisClient.Set(ctx, "analyzer:last_run:synthesis", time.Now().Unix(), 0)
+	}
+
+	h.cleanupRun(ctx)
+}
+
+func (h *AnalyzerAgent) cleanupRun(ctx context.Context) {
+	h.RedisClient.Set(ctx, "analyzer:active_tier", "", 0)
+	utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
+}
+
+func (h *AnalyzerAgent) PerformSummary(ctx context.Context) int {
 	userSet := make(map[string]bool)
 	iter := h.RedisClient.Scan(ctx, 0, "user:profile:*", 0).Iterator()
 	for iter.Next(ctx) {
@@ -150,29 +184,25 @@ func (h *AnalyzerAgent) PerformSummary(ctx context.Context) {
 	}
 
 	if len(usersToProcess) == 0 {
-		return
+		return 0
 	}
 
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Summary Batch")
-	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
-
+	inferenceCount := 0
 	for _, targetUserID := range usersToProcess {
 		cooldownKey := fmt.Sprintf("agent:%s:summary:cooldown:%s", h.Config.Name, targetUserID)
 		if h.RedisClient.Get(ctx, cooldownKey).Val() != "" {
 			continue
 		}
-		h.processUserSummary(ctx, targetUserID, cooldownKey)
+		if h.processUserSummary(ctx, targetUserID, cooldownKey) {
+			inferenceCount++
+		}
 	}
 
-	h.RedisClient.Set(ctx, "analyzer:last_run:summary", time.Now().Unix(), 0)
-	log.Printf("[%s] Summary batch complete.", h.Config.Name)
+	return inferenceCount
 }
 
-func (h *AnalyzerAgent) processUserSummary(ctx context.Context, targetUserID string, cooldownKey string) {
+func (h *AnalyzerAgent) processUserSummary(ctx context.Context, targetUserID string, cooldownKey string) bool {
 	log.Printf("[%s] Starting summary for user %s", h.Config.Name, targetUserID)
-
-	h.RedisClient.Set(ctx, "analyzer:active_tier", "summary", 0)
-	defer h.RedisClient.Set(ctx, "analyzer:active_tier", "", 0)
 
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, fmt.Sprintf("Summarizing User: %s", targetUserID))
 
@@ -193,36 +223,16 @@ func (h *AnalyzerAgent) processUserSummary(ctx context.Context, targetUserID str
 				h.RedisClient.Set(ctx, "user:summary:"+targetUserID, summary, 48*time.Hour)
 			}
 			h.RedisClient.Set(ctx, cooldownKey, "1", time.Duration(h.Config.Cooldowns["summary"])*time.Second)
+			return true
 		}
 	} else {
 		h.RedisClient.Set(ctx, cooldownKey, "1", 4*time.Hour)
 	}
+	return false
 }
 
-func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
-	if utils.IsSystemPaused(ctx, h.RedisClient) {
-		log.Printf("[%s] Synthesis skipped: System is paused.", h.Config.Name)
-		return
-	}
-
-	// Strict Protocol Cooldown Check
-	lastRun, _ := h.RedisClient.Get(ctx, "analyzer:last_run:synthesis").Int64()
-	if time.Now().Unix()-lastRun < int64(h.Config.Cooldowns["synthesis"]) {
-		return
-	}
-
-	// Busy Check (Prevent Queueing)
-	if h.IsActuallyBusy(ctx, h.Config.ProcessID) {
-		return
-	}
-
-	log.Printf("[%s] Starting Synthesis Protocol...", h.Config.Name)
-
-	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
-	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
-
+func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) int {
 	// 1. Identify candidates (Users active in last 24h, not synthesized in 12h)
-	// users, err := h.RedisClient.Keys(ctx, "user:profile:*").Result() // Removed unused call
 	userSet := make(map[string]bool)
 	iter := h.RedisClient.Scan(ctx, 0, "user:profile:*", 0).Iterator()
 	for iter.Next(ctx) {
@@ -241,14 +251,12 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 	}
 
 	if len(usersToProcess) == 0 {
-		return
+		return 0
 	}
-
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Synthesis Batch")
-	defer utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
 
 	log.Printf("[%s] Starting synthesis batch for %d users...", h.Config.Name, len(usersToProcess))
 
+	inferenceCount := 0
 	for _, targetUserID := range usersToProcess {
 		// Check cooldown
 		cooldownKey := fmt.Sprintf("agent:%s:cooldown:%s", h.Config.Name, targetUserID)
@@ -256,27 +264,23 @@ func (h *AnalyzerAgent) PerformSynthesis(ctx context.Context) {
 			continue
 		}
 
-		h.processUserSynthesis(ctx, targetUserID, cooldownKey)
+		if h.processUserSynthesis(ctx, targetUserID, cooldownKey) {
+			inferenceCount++
+		}
 	}
 
-	// Update last run global metric AFTER the entire batch is complete
-	h.RedisClient.Set(ctx, "analyzer:last_run:synthesis", time.Now().Unix(), 0)
-	log.Printf("[%s] Synthesis batch complete.", h.Config.Name)
+	return inferenceCount
 }
 
-func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID string, cooldownKey string) {
+func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID string, cooldownKey string) bool {
 	startTime := time.Now()
 	log.Printf("[%s] Starting synthesis for user %s", h.Config.Name, targetUserID)
-
-	// Set active tier for frontend visibility
-	h.RedisClient.Set(ctx, "analyzer:active_tier", "synthesis", 0)
-	defer h.RedisClient.Set(ctx, "analyzer:active_tier", "", 0)
 
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, fmt.Sprintf("Synthesizing Dossier: %s", targetUserID))
 
 	p, err := LoadProfile(ctx, h.RedisClient, targetUserID)
 	if err != nil {
-		return
+		return false
 	}
 
 	// 1. ALWAYS AUTOMATED: Sanitize and Enrich
@@ -289,6 +293,7 @@ func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID s
 	summaryFound := summary != ""
 
 	var auditID string
+	inferenceDone := false
 
 	if summaryFound {
 		// 3. AI STEP: Run Cognitive Loop
@@ -314,6 +319,7 @@ func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID s
 					if err := saveProfile(ctx, h.RedisClient, &update); err != nil {
 						log.Printf("[%s] Failed to save AI updated profile: %v", h.Config.Name, err)
 					}
+					inferenceDone = true
 				}
 			}
 			h.RedisClient.Set(ctx, cooldownKey, "1", time.Duration(h.Config.Cooldowns["synthesis"])*time.Second)
@@ -350,6 +356,7 @@ func (h *AnalyzerAgent) processUserSynthesis(ctx context.Context, targetUserID s
 	}
 
 	log.Printf("[%s] Synthesis completed for user %s (Audit: %s, AI: %v)", h.Config.Name, targetUserID, auditID, summaryFound)
+	return inferenceDone
 }
 
 func (h *AnalyzerAgent) gatherHistoryContext(ctx context.Context, userID string) string {
