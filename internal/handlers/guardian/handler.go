@@ -327,7 +327,7 @@ func (h *GuardianHandler) fetchRecentLogs(ctx context.Context) (string, error) {
 }
 
 func (h *GuardianHandler) fetchTestResults(ctx context.Context) (string, error) {
-	cmd := h.createDexCommand(ctx, "test", "--no-event")
+	cmd := h.createDexCommand(ctx, "test", "--no-event", "--fast")
 	out, _ := cmd.CombinedOutput()
 	return utils.StripANSI(string(out)), nil
 }
