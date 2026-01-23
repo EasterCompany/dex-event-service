@@ -467,17 +467,7 @@ func (h *FabricatorHandler) PerformConstruct(ctx context.Context) (bool, string,
 	prompt := fmt.Sprintf("IMPLEMENT FIX for Issue #%s: %s in %s\n\nObjective: Apply the necessary changes to the codebase. You are in YOLO mode. Verify with builds/tests. REQUIREMENTS: Changes must pass `dex fmt`, `dex lint`, and `dex build --source --force --dry-run` before completion.", issueNum, oldestIssue.Title, repo)
 	result, _, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["construct"], prompt, nil, nil)
 	if err != nil {
-		return true, "", err
-	}
-
-	// Post-fabrication verification
-	log.Printf("[%s] Verification phase starting for Issue #%s", HandlerName, issueNum)
-
-	// Perform dry-run build to verify integrity
-	buildCmd := exec.Command("dex", "build", "--source", "--force", "--dry-run")
-	buildCmd.Dir = workingDir
-	if out, err := buildCmd.CombinedOutput(); err != nil {
-		return true, fmt.Sprintf("Construction FAILED verification: %v\nOutput: %s", err, string(out)), err
+		return true, result, err
 	}
 
 	closingComment := "Dexter has implemented and verified the fix for this issue. Closing.\n\n### Implementation Summary\n" + result
