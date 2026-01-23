@@ -396,7 +396,7 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 					// CLI statuses are usually self-completing or updated by the next event.
 					// For terminal statuses, we clear the process.
 					lowerM := strings.ToLower(m)
-					if s == "online" || s == "success" || s == "failure" || s == "error" ||
+					if s == "success" || s == "failure" || s == "error" ||
 						strings.Contains(lowerM, "complete") || strings.Contains(lowerM, "success") ||
 						strings.Contains(lowerM, "failed") || strings.Contains(lowerM, "error") {
 						time.Sleep(5 * time.Second) // Give user time to see the final state
