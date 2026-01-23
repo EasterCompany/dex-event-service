@@ -159,8 +159,16 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				}
 			} else {
 				utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Analyzing link...")
-				meta, fetchErr = deps.Web.FetchMetadata(foundURL, true)
+				// 1. Fetch Metadata (Title/Description)
+				meta, fetchErr = deps.Web.FetchMetadata(foundURL, false)
 				if fetchErr == nil && meta != nil {
+					// 2. Fetch Full Content (Cleaned/Scraped)
+					scraped, scrapeErr := deps.Web.PerformScrape(ctx, foundURL)
+					if scrapeErr == nil && scraped != nil {
+						// Merge content into meta for backward compatibility in the history/event emission
+						meta.Content = scraped.Content
+					}
+
 					if err := utils.StoreMetadataHistory(deps.Redis, meta, foundURL); err != nil {
 						log.Printf("Failed to store web history: %v", err)
 					}
@@ -173,7 +181,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 			}
 
 			// Consolidate data for linkContext and event emission
-			var currentTitle, currentDescription, currentSummary, currentImageURL, currentContentType, currentProvider string
+			var currentTitle, currentDescription, currentContent, currentImageURL, currentContentType, currentProvider string
 
 			if webView != nil {
 				currentTitle = webView.Title
@@ -181,7 +189,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				currentImageURL = ""             // Screenshot is handled separately
 				currentContentType = "text/html" // General type for rendered content
 				currentProvider = "webview"      // Indicate source
-				currentSummary = webView.Summary // Use summary from web service
+				currentContent = webView.Content
 
 				// Add screenshot as virtual attachment
 				if webView.Screenshot != "" {
@@ -204,7 +212,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				currentImageURL = meta.ImageURL
 				currentContentType = meta.ContentType
 				currentProvider = meta.Provider
-				currentSummary = meta.Summary // Use summary from web service
+				currentContent = meta.Content
 			}
 
 			// Check for explicit text in link metadata
@@ -243,18 +251,24 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				}
 			}
 
-			if currentTitle != "" || currentDescription != "" || currentSummary != "" {
-				linkContext += fmt.Sprintf("\n[Link: %s", foundURL)
+			if currentTitle != "" || currentDescription != "" || currentContent != "" {
+				// Build a high-fidelity combined block
+				var combined strings.Builder
+				combined.WriteString(fmt.Sprintf("\n[Link: %s\n", foundURL))
 				if currentTitle != "" {
-					linkContext += fmt.Sprintf(" - Title: %s", currentTitle)
+					combined.WriteString(fmt.Sprintf("# %s\n", currentTitle))
 				}
 				if currentDescription != "" {
-					linkContext += fmt.Sprintf(" - Description: %s", currentDescription)
+					combined.WriteString(fmt.Sprintf("> %s\n", currentDescription))
 				}
-				if currentSummary != "" {
-					linkContext += fmt.Sprintf("\n - Content Summary: %s", currentSummary)
+				if currentContent != "" {
+					combined.WriteString("\n--- PAGE CONTENT ---\n")
+					combined.WriteString(currentContent)
 				}
-				linkContext += "]"
+				combined.WriteString("]")
+
+				// Normalize for token efficiency
+				linkContext += utils.NormalizeWhitespace(combined.String())
 
 				linkEvent := map[string]interface{}{
 					"type":            types.EventTypeAnalysisLinkCompleted,
@@ -263,7 +277,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					"url":             foundURL,
 					"title":           currentTitle,
 					"description":     currentDescription,
-					"summary":         currentSummary,
+					"content":         currentContent,
 					"timestamp":       time.Now().Unix(),
 					"channel_id":      channelID,
 					"user_id":         userID,

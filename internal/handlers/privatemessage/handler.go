@@ -100,17 +100,27 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 		if !strings.HasPrefix(foundURL, "https://discord.com/attachments/") {
 			utils.ReportProcess(ctx, deps.Redis, deps.Discord, channelID, "Analyzing link...")
 			log.Printf("Found external URL in message: %s", foundURL)
-			meta, err := deps.Web.FetchMetadata(foundURL, true)
+
+			// 1. Fetch Metadata (Title/Description)
+			meta, err := deps.Web.FetchMetadata(foundURL, false)
 			if err != nil {
 				log.Printf("Failed to fetch metadata for %s: %v", foundURL, err)
 				continue
+			}
+
+			// 2. Fetch Full Content (Cleaned/Scraped)
+			scraped, scrapeErr := deps.Web.PerformScrape(ctx, foundURL)
+			var currentContent string
+			if scrapeErr == nil && scraped != nil {
+				currentContent = scraped.Content
+				// Merge content into meta for backward compatibility in history
+				meta.Content = scraped.Content
 			}
 
 			if err := utils.StoreMetadataHistory(deps.Redis, meta, foundURL); err != nil {
 				log.Printf("Failed to store web history: %v", err)
 			}
 
-			summary := meta.Summary
 			// Check for explicit text in link metadata
 			if meta.Title != "" || meta.Description != "" {
 				modPrompt := fmt.Sprintf("Analyze this link metadata:\n\nTitle: %s\nDescription: %s\nURL: %s", meta.Title, meta.Description, foundURL)
@@ -149,18 +159,24 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 				}
 			}
 
-			if meta.Title != "" || meta.Description != "" || summary != "" {
-				linkContext += fmt.Sprintf("\n[Link: %s", foundURL)
+			if meta.Title != "" || meta.Description != "" || currentContent != "" {
+				// Build a high-fidelity combined block
+				var combined strings.Builder
+				combined.WriteString(fmt.Sprintf("\n[Link: %s\n", foundURL))
 				if meta.Title != "" {
-					linkContext += fmt.Sprintf(" - Title: %s", meta.Title)
+					combined.WriteString(fmt.Sprintf("# %s\n", meta.Title))
 				}
 				if meta.Description != "" {
-					linkContext += fmt.Sprintf(" - Description: %s", meta.Description)
+					combined.WriteString(fmt.Sprintf("> %s\n", meta.Description))
 				}
-				if summary != "" {
-					linkContext += fmt.Sprintf("\n - Content Summary: %s", summary)
+				if currentContent != "" {
+					combined.WriteString("\n--- PAGE CONTENT ---\n")
+					combined.WriteString(currentContent)
 				}
-				linkContext += "]"
+				combined.WriteString("]")
+
+				// Normalize for token efficiency
+				linkContext += utils.NormalizeWhitespace(combined.String())
 
 				linkEvent := map[string]interface{}{
 					"type":            types.EventTypeAnalysisLinkCompleted,
@@ -169,7 +185,7 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					"url":             foundURL,
 					"title":           meta.Title,
 					"description":     meta.Description,
-					"summary":         summary,
+					"content":         currentContent,
 					"timestamp":       time.Now().Unix(),
 					"channel_id":      channelID,
 					"user_id":         userID,
