@@ -57,6 +57,7 @@ type GenerateResponse struct {
 	Response           string  `json:"response"`
 	Message            Message `json:"message"` // Fallback
 	Done               bool    `json:"done"`
+	Success            bool    `json:"success"` // New: Logical success indicator
 	EvalCount          int     `json:"eval_count,omitempty"`
 	PromptEvalCount    int     `json:"prompt_eval_count,omitempty"`
 	TotalDuration      int64   `json:"total_duration,omitempty"`
@@ -86,6 +87,7 @@ type ChatResponse struct {
 	Message            Message `json:"message"`
 	Response           string  `json:"response"` // Dedicated spoke fallback
 	Done               bool    `json:"done"`
+	Success            bool    `json:"success"` // New: Logical success indicator
 	EvalCount          int     `json:"eval_count,omitempty"`
 	PromptEvalCount    int     `json:"prompt_eval_count,omitempty"`
 	TotalDuration      int64   `json:"total_duration,omitempty"`
@@ -101,6 +103,7 @@ type GenerationStats struct {
 	LoadDuration       time.Duration
 	PromptEvalDuration time.Duration
 	EvalDuration       time.Duration
+	Success            bool // New: Logical success indicator
 }
 
 func (c *Client) emit(eventType string, data map[string]interface{}) {
@@ -371,6 +374,7 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 		LoadDuration:       time.Duration(response.LoadDuration),
 		PromptEvalDuration: time.Duration(response.PromptEvalDuration),
 		EvalDuration:       time.Duration(response.EvalDuration),
+		Success:            response.Success,
 	}
 
 	return response.Response, stats, nil
