@@ -534,7 +534,7 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 		isSyncMode := req.HandlerMode == "sync" // Determine sync vs async once
 
 		for _, hConfig := range handlersToExecute {
-			currentChildIDs, err := handlers.ExecuteHandler(redisClient, &event, &hConfig, isSyncMode)
+			currentChildIDs, err := handlers.ExecuteHandler(r.Context(), redisClient, &event, &hConfig, isSyncMode)
 			if err != nil {
 				// Log error but don't fail the overall request.
 				log.Printf("Error executing handler '%s' for event %s: %v", hConfig.Name, eventID, err)

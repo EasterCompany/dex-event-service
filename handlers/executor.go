@@ -68,6 +68,7 @@ var (
 )
 
 type job struct {
+	Context    context.Context
 	Event      *types.Event
 	Config     *types.HandlerConfig
 	ResultChan chan jobResult
@@ -280,7 +281,7 @@ func startWorker() {
 					}
 				}
 			}()
-			childIDs, err := executeHandlerInternal(j.Event, j.Config)
+			childIDs, err := executeHandlerInternal(j.Context, j.Event, j.Config)
 			if j.ResultChan != nil {
 				j.ResultChan <- jobResult{ChildIDs: childIDs, Error: err}
 			}
@@ -288,7 +289,7 @@ func startWorker() {
 	}
 }
 
-func ExecuteHandler(redisClient *redis.Client, event *types.Event, handlerConfig *types.HandlerConfig, isSync bool) ([]string, error) {
+func ExecuteHandler(ctx context.Context, redisClient *redis.Client, event *types.Event, handlerConfig *types.HandlerConfig, isSync bool) ([]string, error) {
 	if dependencies == nil {
 		return nil, fmt.Errorf("executor not initialized")
 	}
@@ -300,20 +301,22 @@ func ExecuteHandler(redisClient *redis.Client, event *types.Event, handlerConfig
 	}
 	if isSync {
 		resChan := make(chan jobResult)
-		jobQueue <- &job{Event: event, Config: handlerConfig, ResultChan: resChan}
+		jobQueue <- &job{Context: ctx, Event: event, Config: handlerConfig, ResultChan: resChan}
 		res := <-resChan
 		return res.ChildIDs, res.Error
 	}
 	select {
-	case jobQueue <- &job{Event: event, Config: handlerConfig}:
+	case jobQueue <- &job{Context: ctx, Event: event, Config: handlerConfig}:
 	default:
 		return nil, fmt.Errorf("job queue full")
 	}
 	return []string{}, nil
 }
 
-func executeHandlerInternal(event *types.Event, handlerConfig *types.HandlerConfig) ([]string, error) {
-	ctx := context.Background()
+func executeHandlerInternal(ctx context.Context, event *types.Event, handlerConfig *types.HandlerConfig) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	redisClient := dependencies.Redis
 	var eventData map[string]interface{}
 	if err := json.Unmarshal(event.Event, &eventData); err != nil {
