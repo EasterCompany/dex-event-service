@@ -342,6 +342,9 @@ func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([
 	systemPrompt := "You are the Courier Agent's Researcher Protocol. Your goal is to act as a high-fidelity intelligence analyst. Analyze the provided web data and sources to create a comprehensive, factual, and surgically accurate report.\n\nFILTERING RULES:\n1. IGNORE repetitive 'Latest Updates' feed lists, navigation menus, or sidebar widgets.\n2. IGNORE local crime stories, celebrity gossip, or minor human interest stories unless they have geopolitical significance.\n3. IGNORE marketing content or blog posts that are not primary news reporting.\n4. IGNORE website metadata, 'About Us' sections, copyright notices, subscription prompts, and navigation headers.\n5. Prioritize geopolitical events, economic indicators, and major policy changes.\n\nAlways include a 'Sources' section at the end with the provided links."
 	inputContext := fmt.Sprintf("## USER INSTRUCTION\n%s\n\n## RESEARCH DATA\n%s%s", task.NaturalInstruction, webData.String(), sourcesBlock)
 
+	// Final tightening of the concatenated context
+	inputContext = utils.NormalizeWhitespace(inputContext)
+
 	sessionID := fmt.Sprintf("research-%s-%d", task.ID, time.Now().Unix())
 
 	return h.RunCognitiveLoop(ctx, h, "researcher", h.Config.Models["researcher"], sessionID, systemPrompt, inputContext, 1)
