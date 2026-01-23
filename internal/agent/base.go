@@ -462,12 +462,13 @@ func (b *BaseAgent) ValidateSchema(res AnalysisResult, required []string) []Corr
 
 	for _, section := range required {
 		missing := false
-		switch strings.ToLower(section) {
-		case "summary":
+		lowerSection := strings.ToLower(section)
+		switch lowerSection {
+		case "summary", "system":
 			if res.Summary == "" {
 				missing = true
 			}
-		case "content", "body", "insight":
+		case "content", "body", "insight", "anomalies", "issues", "major issues:", "minor issues:":
 			if res.Content == "" {
 				missing = true
 			}
@@ -487,12 +488,16 @@ func (b *BaseAgent) ValidateSchema(res AnalysisResult, required []string) []Corr
 			if len(res.ImplementationPath) == 0 {
 				missing = true
 			}
+		default:
+			// For custom required sections not mapped above, we check if they appear in either field
+			if !strings.Contains(strings.ToLower(res.Summary), lowerSection) && !strings.Contains(strings.ToLower(res.Content), lowerSection) {
+				missing = true
+			}
 		}
 
 		if missing {
 			msg := fmt.Sprintf("Missing mandatory section: '%s'. You must include this section in your report.", section)
-			lowerSect := strings.ToLower(section)
-			if lowerSect == "priority" || lowerSect == "category" || lowerSect == "related" || lowerSect == "related services" {
+			if lowerSection == "priority" || lowerSection == "category" || lowerSection == "related" || lowerSection == "related services" {
 				msg = fmt.Sprintf("Missing mandatory metadata field: '**%s**:'. You must include this field at the top of your report.", section)
 			}
 
@@ -502,8 +507,8 @@ func (b *BaseAgent) ValidateSchema(res AnalysisResult, required []string) []Corr
 		}
 	}
 
-	// Basic quality check on sections
-	if res.Title == "" || len(res.Title) < 5 {
+	// Basic quality check on title
+	if res.Title == "" || len(res.Title) < 3 {
 		corrections = append(corrections, Correction{
 			Type: "SCHEMA", Guidance: "Report title is missing or too short. Provide a descriptive title starting with #.", Mandatory: true,
 		})
@@ -561,18 +566,20 @@ func (b *BaseAgent) ParseSingleMarkdownReport(input string) AnalysisResult {
 			continue
 		}
 
-		// Title handles top-level header
-		if strings.HasPrefix(trimmed, "# ") {
+		// 1. Handle Top-Level Header (Report Title)
+		// We only set the title ONCE from the very first # header found.
+		if strings.HasPrefix(trimmed, "# ") && res.Title == "" {
 			res.Title = strings.TrimPrefix(trimmed, "# ")
 			if strings.Contains(strings.ToUpper(res.Title), "[BLUEPRINT]") {
 				res.Type = "blueprint"
 				res.Title = strings.TrimSpace(strings.Replace(strings.ToUpper(res.Title), "[BLUEPRINT]", "", 1))
 			}
-			continue
+			// CRITICAL: Do NOT 'continue' here. This header might ALSO be a section start (like # SYSTEM).
 		}
 
 		lower := strings.ToLower(trimmed)
-		// Metadata fields
+
+		// 2. Metadata fields
 		if strings.HasPrefix(lower, "**priority**:") {
 			res.Priority = strings.TrimSpace(trimmed[strings.Index(trimmed, ":")+1:])
 			continue
@@ -586,26 +593,32 @@ func (b *BaseAgent) ParseSingleMarkdownReport(input string) AnalysisResult {
 			continue
 		}
 
-		// Section headers (Must start with #)
+		// 3. Section headers (Headers starting with #)
 		if strings.HasPrefix(trimmed, "#") {
-			if strings.Contains(lower, "summary") || strings.Contains(lower, "overview") {
+			isSectionStart := false
+			if strings.Contains(lower, "summary") || strings.Contains(lower, "overview") || strings.Contains(lower, "system") {
 				currentSection = "summary"
-				continue
-			}
-			if strings.Contains(lower, "content") || strings.Contains(lower, "insight") || strings.Contains(lower, "body") || strings.Contains(lower, "analysis") {
+				isSectionStart = true
+			} else if strings.Contains(lower, "content") || strings.Contains(lower, "insight") || strings.Contains(lower, "body") || strings.Contains(lower, "analysis") || strings.Contains(lower, "anomalies") || strings.Contains(lower, "issues") {
 				currentSection = "content"
-				continue
-			}
-			if strings.Contains(lower, "implementation path") || strings.Contains(lower, "proposed steps") || strings.Contains(lower, "implementation plan") {
+				isSectionStart = true
+			} else if strings.Contains(lower, "implementation path") || strings.Contains(lower, "proposed steps") || strings.Contains(lower, "implementation plan") {
 				currentSection = "path"
+				isSectionStart = true
+			}
+
+			if isSectionStart {
 				continue
 			}
-			// Unknown header - stop capture
-			currentSection = ""
+
+			// If it's a major header (# or ##) but not a recognized section, reset capture.
+			if strings.HasPrefix(trimmed, "# ") || strings.HasPrefix(trimmed, "## ") {
+				currentSection = ""
+			}
 			continue
 		}
 
-		// Content capture based on active section
+		// 4. Content capture based on active section
 		switch currentSection {
 		case "summary":
 			summaryLines = append(summaryLines, trimmed)
@@ -613,12 +626,10 @@ func (b *BaseAgent) ParseSingleMarkdownReport(input string) AnalysisResult {
 			contentLines = append(contentLines, trimmed)
 		case "path":
 			if strings.HasPrefix(trimmed, "-") || strings.HasPrefix(trimmed, "*") || (len(trimmed) > 2 && trimmed[1] == '.') {
-				// Clean the markdown bullet point from the start of the string
 				cleaned := trimmed
 				if strings.HasPrefix(trimmed, "-") || strings.HasPrefix(trimmed, "*") {
 					cleaned = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(trimmed, "-"), "*"))
 				} else {
-					// Handle numbered lists like "1. ..."
 					dotIdx := strings.Index(trimmed, ".")
 					if dotIdx > 0 && dotIdx < 5 {
 						cleaned = strings.TrimSpace(trimmed[dotIdx+1:])
@@ -629,11 +640,11 @@ func (b *BaseAgent) ParseSingleMarkdownReport(input string) AnalysisResult {
 		}
 	}
 
-	res.Summary = strings.TrimSpace(strings.Join(summaryLines, " "))
+	res.Summary = strings.TrimSpace(strings.Join(summaryLines, "\n"))
 	res.Content = strings.TrimSpace(strings.Join(contentLines, "\n"))
 	res.ImplementationPath = pathLines
 
-	// Default Body logic (will be refined by specific agent tiers)
+	// Default Body logic
 	res.Body = res.Content
 	if res.Body == "" {
 		res.Body = res.Summary
