@@ -27,25 +27,19 @@ func getWorkingDir() string {
 }
 
 func ListGitHubIssues() ([]GitHubIssue, error) {
-	cmd := exec.Command("gh", "issue", "list", "--repo", "EasterCompany/EasterCompany", "--state", "open", "--json", "number,title,body,state,labels,createdAt,updatedAt,repository", "--limit", "100")
+	cmd := exec.Command("gh", "issue", "list", "--repo", "EasterCompany/EasterCompany", "--state", "open", "--json", "number,title,body,state,labels,createdAt,updatedAt", "--limit", "100")
 	cmd.Dir = getWorkingDir()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list github issues: %w (output: %s)", err, string(out))
 	}
 
-	// Internal GH JSON might have repository as an object
-	type ghRepo struct {
-		Name          string `json:"name"`
-		NameWithOwner string `json:"nameWithOwner"`
-	}
 	type ghIssueInternal struct {
-		Number     int    `json:"number"`
-		Title      string `json:"title"`
-		Body       string `json:"body"`
-		State      string `json:"state"`
-		Repository ghRepo `json:"repository"`
-		Labels     []struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		Body   string `json:"body"`
+		State  string `json:"state"`
+		Labels []struct {
 			Name string `json:"name"`
 		} `json:"labels"`
 		CreatedAt string `json:"createdAt"`
@@ -64,7 +58,7 @@ func ListGitHubIssues() ([]GitHubIssue, error) {
 			Title:     internal.Title,
 			Body:      internal.Body,
 			State:     internal.State,
-			Repo:      internal.Repository.NameWithOwner,
+			Repo:      "EasterCompany/EasterCompany",
 			Labels:    internal.Labels,
 			CreatedAt: internal.CreatedAt,
 			UpdatedAt: internal.UpdatedAt,
