@@ -158,6 +158,12 @@ func (h *GuardianHandler) checkAndAnalyze() {
 func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agent.AnalysisResult, string, error) {
 	log.Printf("[%s] Starting Guardian Analysis (Tier: %d)", HandlerName, tier)
 
+	// CLAIM RUN: Set last_run timestamps to now immediately to prevent redundant ticks
+	now := time.Now().Unix()
+	for protocol := range h.Config.Cooldowns {
+		h.RedisClient.Set(ctx, fmt.Sprintf("guardian:last_run:%s", protocol), now, 0)
+	}
+
 	// Enforce global sequential execution
 	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)

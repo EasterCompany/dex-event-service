@@ -154,8 +154,17 @@ func (h *CourierHandler) checkAndExecute() {
 func (h *CourierHandler) PerformWaterfall(ctx context.Context) {
 	log.Printf("[%s] Starting Courier Waterfall Run", HandlerName)
 
+	// RULE: Immediately "claim" the run by setting the last_run timestamps to now.
+	// This prevents the 1-minute ticker from spawning redundant goroutines while this one is waiting for the lock.
+	now := time.Now().Unix()
+	for protocol := range h.Config.Cooldowns {
+		h.RedisClient.Set(ctx, fmt.Sprintf("courier:last_run:%s", protocol), now, 0)
+	}
+
 	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
+
+	// ... rest of the function ...
 
 	// RULE: Every courier agent run MUST go researcher -> compressor
 	// If any tier skips or fails, the waterfall STOPS immediately.

@@ -133,6 +133,12 @@ func (h *AnalyzerAgent) checkAndExecute() {
 func (h *AnalyzerAgent) PerformWaterfall(ctx context.Context) {
 	log.Printf("[%s] Starting Analyzer Waterfall Run", h.Config.Name)
 
+	// CLAIM RUN: Set all protocol last_run timestamps to now immediately.
+	now := time.Now().Unix()
+	for protocol := range h.Config.Cooldowns {
+		h.RedisClient.Set(ctx, fmt.Sprintf("analyzer:last_run:%s", protocol), now, 0)
+	}
+
 	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 
