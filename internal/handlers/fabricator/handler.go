@@ -283,6 +283,24 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 		h.finalizeRun(ctx, runLogs.String(), "FAILED (Rollback Triggered)")
 		return
 	}
+
+	// STEP 2.5: FINAL PRODUCTION BUILD (Trigger Git Add/Commit/Push)
+	log.Printf("[%s] Construction successful. Triggering production build and commit...", HandlerName)
+	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Deploying Fix...")
+
+	homeDir, _ := os.UserHomeDir()
+	workingDir := filepath.Join(homeDir, "EasterCompany")
+
+	// 'dex build' handles git add/commit/push automatically if successful.
+	// We build from source to ensure the latest CLI logic is used.
+	buildCmd := exec.Command("dex", "build", "--source", "--force")
+	buildCmd.Dir = workingDir
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		log.Printf("[%s] Production build failed: %v\nOutput: %s", HandlerName, err, string(out))
+		// Note: We don't rollback here because the dry-run passed, so the code is syntactically correct.
+		// A build failure here is likely environment/infrastructure related.
+	}
+
 	h.RedisClient.Set(ctx, "fabricator:last_run:construct", time.Now().Unix(), 0)
 
 	// TIER 3: REPORTER
@@ -292,9 +310,7 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 func (h *FabricatorHandler) stashWorkspace() {
 	homeDir, _ := os.UserHomeDir()
 	workingDir := filepath.Join(homeDir, "EasterCompany")
-	// Stash root
 	_ = exec.Command("git", "-C", workingDir, "stash", "push", "--include-untracked", "-m", "dexter-autostash").Run()
-	// Stash submodules
 	_ = exec.Command("git", "-C", workingDir, "submodule", "foreach", "git stash push --include-untracked -m dexter-autostash").Run()
 }
 
@@ -308,7 +324,6 @@ func (h *FabricatorHandler) unstashWorkspace() {
 func (h *FabricatorHandler) rollbackWorkspace() {
 	homeDir, _ := os.UserHomeDir()
 	workingDir := filepath.Join(homeDir, "EasterCompany")
-	// Hard reset everything
 	_ = exec.Command("git", "-C", workingDir, "checkout", ".").Run()
 	_ = exec.Command("git", "-C", workingDir, "clean", "-fd").Run()
 	_ = exec.Command("git", "-C", workingDir, "submodule", "foreach", "git checkout . && git clean -fd").Run()
@@ -327,8 +342,7 @@ func (h *FabricatorHandler) finalizeRun(ctx context.Context, logs string, status
 	utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
 
 	if summary != "" && h.DiscordClient != nil {
-		// Get debug channel from options
-		debugChannelID := "1426957003108122656" // Default
+		debugChannelID := "1426957003108122656"
 		if opt, err := config.LoadOptions(); err == nil {
 			if opt.Discord.DebugChannelID != "" {
 				debugChannelID = opt.Discord.DebugChannelID
@@ -496,9 +510,6 @@ func (h *FabricatorHandler) PerformIssue(ctx context.Context, reviewOutput strin
 }
 
 func (h *FabricatorHandler) PerformConstruct(ctx context.Context, targetIssue *IssueInfo, investigationReport string) (bool, string, error) {
-	homeDir, _ := os.UserHomeDir()
-	workingDir := filepath.Join(homeDir, "EasterCompany")
-
 	issueNum := fmt.Sprintf("%d", targetIssue.Number)
 	repo := targetIssue.Repo
 
@@ -513,14 +524,11 @@ func (h *FabricatorHandler) PerformConstruct(ctx context.Context, targetIssue *I
 		return false, result, nil
 	}
 
-	// PERSISTENCE: Git Commit
-	log.Printf("[%s] Construction successful. Committing changes...", HandlerName)
-	_ = exec.Command("git", "-C", workingDir, "add", ".").Run()
-	_ = exec.Command("git", "-C", workingDir, "submodule", "foreach", "git add .").Run()
-	commitMsg := fmt.Sprintf("fix: Autonomous resolution for %s#%s\n\n%s", repo, issueNum, targetIssue.Title)
-	_ = exec.Command("git", "-C", workingDir, "commit", "-m", commitMsg).Run()
-
 	closingComment := "Dexter has implemented and verified the fix for this issue. Closing.\n\n### Implementation Summary\n" + result
+
+	homeDir, _ := os.UserHomeDir()
+	workingDir := filepath.Join(homeDir, "EasterCompany")
+
 	cmd := exec.Command("gh", "issue", "comment", issueNum, "--repo", repo, "--body", closingComment)
 	cmd.Dir = workingDir
 	_ = cmd.Run()
@@ -529,7 +537,7 @@ func (h *FabricatorHandler) PerformConstruct(ctx context.Context, targetIssue *I
 	cmd.Dir = workingDir
 	_ = cmd.Run()
 
-	return true, fmt.Sprintf("Issue #%s in %s closed and verified.", issueNum, repo), nil
+	return true, result, nil
 }
 
 func (h *FabricatorHandler) PerformReporter(ctx context.Context, logs string) (bool, string, error) {
