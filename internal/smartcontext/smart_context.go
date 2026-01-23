@@ -122,8 +122,8 @@ func GetMessages(ctx context.Context, redisClient *redis.Client, modelClient *mo
 			eventType, _ := eventData["type"].(string)
 			testID, _ := eventData["test_id"].(string)
 
-			// CONTEXT SANITIZATION: Skip engagement decisions and all synthetic test noise
-			if eventType == "engagement.decision" || testID != "" || evt.Service == "dex-test-service" {
+			// CONTEXT SANITIZATION: Skip noisy events and synthetic test data
+			if isNoisyEvent(eventType) || testID != "" || evt.Service == "dex-test-service" {
 				continue
 			}
 
@@ -354,7 +354,9 @@ func FormatEventsBlock(events []types.Event) string {
 		var eventData map[string]interface{}
 		if err := json.Unmarshal(evt.Event, &eventData); err == nil {
 			eventType, _ := eventData["type"].(string)
-			if eventType == "engagement.decision" {
+			testID, _ := eventData["test_id"].(string)
+
+			if isNoisyEvent(eventType) || testID != "" || evt.Service == "dex-test-service" {
 				continue
 			}
 			line := templates.FormatEventAsText(eventType, eventData, evt.Service, evt.Timestamp, 0, "UTC", "en")
@@ -362,4 +364,20 @@ func FormatEventsBlock(events []types.Event) string {
 		}
 	}
 	return sb.String()
+}
+
+// isNoisyEvent identifies low-value system events that clutter context
+func isNoisyEvent(eventType string) bool {
+	switch eventType {
+	case "engagement.decision",
+		"system.cli.status",
+		"system.status.change",
+		"system.process.reaped",
+		"system.diagnostic.ping",
+		"messaging.bot.status_update",
+		"system.notification.logged",
+		"system.analysis.audit":
+		return true
+	}
+	return false
 }
