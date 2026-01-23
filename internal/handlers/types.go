@@ -21,10 +21,17 @@ type Dependencies struct {
 	EventServiceURL   string
 	TTSServiceURL     string
 	CheckInterruption func() bool
+	// GetBackgroundHandler allows sync handlers to trigger logic in background workers
+	GetBackgroundHandler func(name string) BackgroundHandler
 }
 
 type Handler interface {
 	Handle(ctx context.Context, input types.HandlerInput, deps *Dependencies) (types.HandlerOutput, error)
+}
+
+type BackgroundHandler interface {
+	Init(ctx context.Context) error
+	Close() error
 }
 
 type HandlerFunc func(ctx context.Context, input types.HandlerInput, deps *Dependencies) (types.HandlerOutput, error)

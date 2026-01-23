@@ -344,11 +344,9 @@ func ResetAgentHandler(redisClient *redis.Client) http.HandlerFunc {
 		// 1. Map protocols to their Redis keys
 		// researcher -> courier:last_run:researcher
 		// sentry -> guardian:last_run:sentry
-		// alert_review -> imaginator:last_run:alert_review
-		// construction -> fabricator:last_run:construction
-		// synthesis -> analyzer:last_run:synthesis
-
 		switch protocol {
+		case "alert_review":
+			redisClient.Set(ctx, "architect:last_run:alert_review", 0, utils.DefaultTTL)
 		case "researcher":
 			redisClient.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
 			// Reset the cognitive idle timer as well, so it triggers immediately if conditions met

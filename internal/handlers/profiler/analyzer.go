@@ -166,7 +166,6 @@ func (h *AnalyzerAgent) PerformWaterfall(ctx context.Context) {
 
 	h.cleanupRun(ctx)
 }
-
 func (h *AnalyzerAgent) cleanupRun(ctx context.Context) {
 	h.RedisClient.Set(ctx, "analyzer:active_tier", "", 0)
 	utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)

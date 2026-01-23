@@ -218,6 +218,9 @@ func (h *GuardianHandler) PerformAnalysis(ctx context.Context, tier int) ([]agen
 			}
 			_, _ = h.emitResult(ctx, res, "sentry", auditEventID)
 
+			// Store summary for Delta Awareness in next run
+			h.RedisClient.Set(ctx, "guardian:last_report_summary", report, 24*time.Hour)
+
 			// Check for MAJOR ISSUES and emit additional alert if found
 			if strings.Contains(strings.ToUpper(report), "# MAJOR ISSUES:") && !strings.Contains(strings.ToUpper(report), "NONE.") {
 				// Extract major issues for the alert summary
@@ -265,7 +268,26 @@ func (h *GuardianHandler) ValidateLogic(res agent.AnalysisResult) []agent.Correc
 
 func (h *GuardianHandler) gatherContext(ctx context.Context, tier string, previousResults []agent.AnalysisResult) string {
 	status, _ := h.fetchSystemStatus(ctx)
-	logs, _ := h.fetchRecentLogs(ctx)
+
+	// Filter logs for high-priority errors
+	rawLogs, _ := h.fetchRecentLogs(ctx)
+	var filteredLogs []string
+	for _, line := range strings.Split(rawLogs, "\n") {
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "error") || strings.Contains(lower, "fatal") || strings.Contains(lower, "fail") || strings.Contains(lower, "dexter") {
+			filteredLogs = append(filteredLogs, line)
+		}
+	}
+	logs := strings.Join(filteredLogs, "\n")
+	if logs == "" {
+		logs = "No recent errors detected in logs."
+	}
+
+	// Fetch Last Sentry Report for Delta Analysis
+	lastReport, _ := h.RedisClient.Get(ctx, "guardian:last_report_summary").Result()
+	if lastReport == "" {
+		lastReport = "No previous report found."
+	}
 
 	var tests, events, systemInfo, knownIssues, sourceStatus string
 	switch tier {
@@ -277,17 +299,17 @@ func (h *GuardianHandler) gatherContext(ctx context.Context, tier string, previo
 		sourceStatus, _ = h.fetchSourceCodeStatus(ctx)
 	}
 
-	return h.formatContext(tier, status, logs, tests, events, systemInfo, knownIssues, sourceStatus, previousResults)
+	return h.formatContext(tier, status, logs, tests, events, systemInfo, knownIssues, sourceStatus, lastReport, previousResults)
 }
 
-func (h *GuardianHandler) formatContext(tier, status, logs, tests, events, systemInfo, knownIssues, sourceStatus string, previousResults []agent.AnalysisResult) string {
-	// Base context with common components
-	context := fmt.Sprintf("## SYSTEM STATUS (dex status)\n%s\n\n## LOGS (dex logs)\n%s",
-		status, logs)
+func (h *GuardianHandler) formatContext(tier, status, logs, tests, events, systemInfo, knownIssues, sourceStatus, lastReport string, previousResults []agent.AnalysisResult) string {
+	// Base context with Delta Awareness
+	context := fmt.Sprintf("## PREVIOUS SYSTEM STATE (Last Report)\n%s\n\n## CURRENT SYSTEM STATUS\n%s\n\n## RECENT ERROR LOGS\n%s",
+		lastReport, status, logs)
 
 	switch tier {
 	case "sentry":
-		context += fmt.Sprintf("\n\n## SOURCE CODE STATUS (git status)\n%s\n\n## TEST RESULTS (dex test)\n%s\n\n## HARDWARE STATUS (dex system)\n%s\n\n## KNOWN ISSUES (Do not re-report)\n%s\n\n## EVENT TIMELINE (dex event log)\n%s",
+		context += fmt.Sprintf("\n\n## SOURCE CODE STATUS\n%s\n\n## TEST RESULTS\n%s\n\n## HARDWARE STATUS\n%s\n\n## KNOWN ISSUES\n%s\n\n## EVENT TIMELINE\n%s",
 			sourceStatus, tests, systemInfo, knownIssues, events)
 	}
 
