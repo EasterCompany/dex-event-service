@@ -267,80 +267,117 @@ func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([
 	log.Printf("[%s] Executing Task: %s", HandlerName, task.NaturalInstruction)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, statusMsg)
 
-	// 1. Generate Optimized Search Query
-	// Inject current date context specifically for query generation
-	now := time.Now().Format("2006-01-02")
 	queryModel := h.Config.Models["researcher"]
-	// Relaxed query instructions to avoid over-constrained DDG searches
-	queryPrompt := fmt.Sprintf("Current Date: %s. You are an intelligence officer. Generate a search query for: %s.\n\nRULES:\n1. Use natural language keywords + date ranges if needed.\n2. AVOID complex 'site:' operators or long boolean strings as they often break the search engine.\n3. Target RECENT events (last 48h) for daily news.\n4. Output ONLY the query string.", now, task.NaturalInstruction)
+	now := time.Now().Format("2006-01-02")
 
-	// Quick one-off chat for query optimization
+	// Helper to perform search and scrape
+	performSearchAndScrape := func(query string) (string, []string, int) {
+		targetURL := task.ExecutionPlan.EntryURL
+		var localWebData strings.Builder
+		var localSourceLinks []string
+		seenURLs := make(map[string]bool)
+		totalContentLen := 0
+
+		if targetURL != "" {
+			scraped, _ := h.WebClient.PerformScrape(ctx, targetURL)
+			if scraped != nil {
+				localWebData.WriteString(fmt.Sprintf("# CONTENT FROM TARGET URL: %s\n\n%s\n\n", targetURL, scraped.Content))
+				localSourceLinks = append(localSourceLinks, targetURL)
+				seenURLs[targetURL] = true
+				totalContentLen += len(scraped.Content)
+			}
+		} else {
+			results, _ := h.WebClient.PerformSearch(ctx, query, 5)
+			localWebData.WriteString(fmt.Sprintf("# SEARCH RESULTS FOR: %s\n\n", query))
+
+			for i, r := range results {
+				if len(localSourceLinks) >= 3 {
+					break
+				}
+				cleanURL := strings.TrimSuffix(r.URL, "/")
+				if seenURLs[cleanURL] {
+					continue
+				}
+				seenURLs[cleanURL] = true
+
+				log.Printf("[%s] Scraping result %d: %s", HandlerName, i+1, r.URL)
+				scraped, _ := h.WebClient.PerformScrape(ctx, r.URL)
+
+				content := ""
+				if scraped != nil {
+					content = scraped.Content
+				}
+
+				if len(content) > 100 {
+					localWebData.WriteString(fmt.Sprintf("## SOURCE %d: %s (%s)\n\n%s\n\n---\n\n", i+1, r.Title, r.URL, content))
+					localSourceLinks = append(localSourceLinks, r.URL)
+					totalContentLen += len(content)
+				} else {
+					localWebData.WriteString(fmt.Sprintf("## SOURCE %d (Snippet): %s (%s)\n\n%s\n\n---\n\n", i+1, r.Title, r.URL, r.Snippet))
+					localSourceLinks = append(localSourceLinks, r.URL)
+					totalContentLen += len(r.Snippet)
+				}
+			}
+		}
+		return localWebData.String(), localSourceLinks, totalContentLen
+	}
+
+	// 1. Initial Query Generation
+	queryPrompt := fmt.Sprintf("Current Date: %s. You are an intelligence officer. Generate a search query for: %s.\n\nRULES:\n1. Use natural language keywords + date ranges if needed.\n2. AVOID complex 'site:' operators.\n3. Output ONLY the query string.", now, task.NaturalInstruction)
 	queryResp, err := h.ModelClient.Chat(ctx, queryModel, []model.Message{{Role: "user", Content: queryPrompt}})
 	searchQuery := task.NaturalInstruction
 	if err == nil {
 		searchQuery = strings.Trim(queryResp.Content, "\" \n\r")
-		log.Printf("[%s] Optimized Query: %s", HandlerName, searchQuery)
 	}
+	log.Printf("[%s] Initial Query: %s", HandlerName, searchQuery)
 
-	// 2. Perform Web Search
-	targetURL := task.ExecutionPlan.EntryURL
-	var webData strings.Builder
-	var sourceLinks []string
-	seenURLs := make(map[string]bool) // Deduplication set
+	// 2. Initial Search
+	webDataStr, sourceLinks, contentLen := performSearchAndScrape(searchQuery)
 
-	if targetURL != "" {
-		scraped, _ := h.WebClient.PerformScrape(ctx, targetURL)
-		if scraped != nil {
-			webData.WriteString(fmt.Sprintf("# CONTENT FROM TARGET URL: %s\n\n%s\n\n", targetURL, scraped.Content))
-			sourceLinks = append(sourceLinks, targetURL)
-			seenURLs[targetURL] = true
-		}
-	} else {
-		results, _ := h.WebClient.PerformSearch(ctx, searchQuery, 5)
-		webData.WriteString(fmt.Sprintf("# SEARCH RESULTS FOR: %s\n\n", searchQuery))
+	// 3. Quality Check & Re-Query
+	// Heuristic: If we have fewer than 2 sources OR very little content (< 1000 chars), try again.
+	if len(sourceLinks) < 2 || contentLen < 1000 {
+		log.Printf("[%s] Initial search quality low (Sources: %d, Content: %d). Triggering Re-Query...", HandlerName, len(sourceLinks), contentLen)
 
-		for i, r := range results {
-			if len(sourceLinks) >= 3 { // Hard limit of 3 unique sources
-				break
-			}
+		reQueryPrompt := fmt.Sprintf("Current Date: %s. Your previous search query '%s' yielded poor results (only %d sources found). \n\nTask: %s\n\nGenerate a NEW, REFINED search query to find better information. Try broader terms or different synonyms. Output ONLY the query string.", now, searchQuery, len(sourceLinks), task.NaturalInstruction)
+		reQueryResp, err := h.ModelClient.Chat(ctx, queryModel, []model.Message{{Role: "user", Content: reQueryPrompt}})
 
-			// Normalize URL for deduplication (strip trailing slash)
-			cleanURL := strings.TrimSuffix(r.URL, "/")
-			if seenURLs[cleanURL] {
-				continue
-			}
-			seenURLs[cleanURL] = true
+		if err == nil {
+			newQuery := strings.Trim(reQueryResp.Content, "\" \n\r")
+			log.Printf("[%s] Refined Query: %s", HandlerName, newQuery)
 
-			log.Printf("[%s] Scraping result %d: %s", HandlerName, i+1, r.URL)
+			// Retry Search
+			retryWebData, retryLinks, retryLen := performSearchAndScrape(newQuery)
 
-			scraped, _ := h.WebClient.PerformScrape(ctx, r.URL)
-			if scraped != nil && len(scraped.Content) > 100 {
-				webData.WriteString(fmt.Sprintf("## SOURCE %d: %s (%s)\n\n%s\n\n---\n\n", i+1, r.Title, r.URL, scraped.Content))
-				sourceLinks = append(sourceLinks, r.URL)
-			} else {
-				// Fallback to snippet if scrape fails
-				webData.WriteString(fmt.Sprintf("## SOURCE %d (Snippet): %s (%s)\n\n%s\n\n---\n\n", i+1, r.Title, r.URL, r.Snippet))
-				sourceLinks = append(sourceLinks, r.URL)
+			// If retry yielded ANY data, append it (don't replace, we want to accumulate knowledge)
+			if retryLen > 0 {
+				webDataStr += "\n\n# REFINED SEARCH DATA\n" + retryWebData
+				// Merge links uniquely
+				for _, link := range retryLinks {
+					exists := false
+					for _, existing := range sourceLinks {
+						if existing == link {
+							exists = true
+							break
+						}
+					}
+					if !exists {
+						sourceLinks = append(sourceLinks, link)
+					}
+				}
 			}
 		}
 	}
 
-	// 2.5 Circuit Breaker: Zero Data Check
+	// 2.5 Circuit Breaker
 	if len(sourceLinks) == 0 {
-		log.Printf("[%s] Research Aborted: No valid sources found for query '%s'", HandlerName, searchQuery)
+		log.Printf("[%s] Research Aborted: No valid sources found.", HandlerName)
 		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Failed: No Data Found")
-
-		// Optional: Send failure notification?
-		// For now, just return empty to stop the loop.
-		// We could update the chore last run to avoid immediate retry loop?
-		// Yes, otherwise it will loop forever.
 		_ = h.ChoreStore.MarkRun(ctx, task.ID, nil)
-
-		return nil, "", fmt.Errorf("no data found for query: %s", searchQuery)
+		return nil, "", fmt.Errorf("no data found")
 	}
 
-	// 3. Final Synthesis Cognitive Loop
-
+	// 3. Final Synthesis
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Synthesizing Report")
 
 	sourcesBlock := "\n\n### SOURCES\n"
@@ -349,11 +386,9 @@ func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([
 	}
 
 	systemPrompt := "You are the Courier Agent's Researcher Protocol. Your goal is to act as a high-fidelity intelligence analyst. Analyze the provided web data and sources to create a comprehensive, factual, and surgically accurate report.\n\nFILTERING RULES:\n1. IGNORE repetitive 'Latest Updates' feed lists, navigation menus, or sidebar widgets.\n2. IGNORE local crime stories, celebrity gossip, or minor human interest stories unless they have geopolitical significance.\n3. IGNORE marketing content or blog posts that are not primary news reporting.\n4. IGNORE website metadata, 'About Us' sections, copyright notices, subscription prompts, and navigation headers.\n5. Prioritize geopolitical events, economic indicators, and major policy changes.\n\nAlways include a 'Sources' section at the end with the provided links."
-	inputContext := fmt.Sprintf("## USER INSTRUCTION\n%s\n\n## RESEARCH DATA\n%s%s", task.NaturalInstruction, webData.String(), sourcesBlock)
+	inputContext := fmt.Sprintf("## USER INSTRUCTION\n%s\n\n## RESEARCH DATA\n%s%s", task.NaturalInstruction, webDataStr, sourcesBlock)
 
-	// Final tightening of the concatenated context
 	inputContext = utils.NormalizeWhitespace(inputContext)
-
 	sessionID := fmt.Sprintf("research-%s-%d", task.ID, time.Now().Unix())
 
 	return h.RunCognitiveLoop(ctx, h, "researcher", h.Config.Models["researcher"], sessionID, systemPrompt, inputContext, 1)
