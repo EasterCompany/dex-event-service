@@ -71,7 +71,7 @@ func ListGitHubIssues() ([]GitHubIssue, error) {
 func CreateGitHubIssue(title, body string) (int, error) {
 	cmd := exec.Command("gh", "issue", "create", "--repo", "EasterCompany/EasterCompany", "--title", title, "--body", body, "--label", "roadmap")
 	cmd.Dir = getWorkingDir()
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return 0, fmt.Errorf("failed to create github issue: %w (output: %s)", err, string(out))
 	}
