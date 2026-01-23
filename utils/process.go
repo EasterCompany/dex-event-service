@@ -154,20 +154,33 @@ func TransitionToBusy(ctx context.Context, redisClient *redis.Client) {
 	}
 
 	lastTransition, _ := redisClient.Get(ctx, "system:last_transition_ts").Int64()
+	now := time.Now().Unix()
+
 	if lastTransition > 0 {
-		idleDuration := time.Now().Unix() - lastTransition
+		idleDuration := now - lastTransition
 		if idleDuration > 0 {
 			redisClient.IncrBy(ctx, "system:metrics:total_idle_seconds", idleDuration)
 		}
+	} else {
+		// If it was never set, set it now so the NEXT transition is accurate
+		redisClient.Set(ctx, "system:last_transition_ts", now, 0)
 	}
+
 	redisClient.Set(ctx, "system:state", "busy", 0)
-	redisClient.Set(ctx, "system:last_transition_ts", time.Now().Unix(), 0)
+	redisClient.Set(ctx, "system:last_transition_ts", now, 0)
 }
 
 // TransitionToIdle handles the state change from Busy to Idle.
 func TransitionToIdle(ctx context.Context, redisClient *redis.Client) {
 	lastState, _ := redisClient.Get(ctx, "system:state").Result()
+	now := time.Now().Unix()
+
 	if lastState == "idle" || lastState == "paused" {
+		// Even if already idle, ensure the transition TS is set if it was missing
+		ts, _ := redisClient.Exists(ctx, "system:last_transition_ts").Result()
+		if ts == 0 {
+			redisClient.Set(ctx, "system:last_transition_ts", now, 0)
+		}
 		return
 	}
 
@@ -179,7 +192,7 @@ func TransitionToIdle(ctx context.Context, redisClient *redis.Client) {
 	// Note: total_active_seconds is handled by individual process completion in ClearProcess.
 	// This function primarily marks the transition time for the NEXT idle period to be measured correctly.
 	redisClient.Set(ctx, "system:state", targetState, 0)
-	redisClient.Set(ctx, "system:last_transition_ts", time.Now().Unix(), 0)
+	redisClient.Set(ctx, "system:last_transition_ts", now, 0)
 }
 
 // ReportProcess updates a process's state in Redis and synchronizes the Discord status.
@@ -209,12 +222,22 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 		redisClient.Del(ctx, queueKey)
 	}
 
-	// 1. Check if process already exists
-	exists, _ := redisClient.Exists(ctx, key).Result()
+	// 1. Check if process already exists in ANY state (Active or Queued)
+	// This prevents double-incrementing system:busy_ref_count when transitioning from queue to info
+	existsActive, _ := redisClient.Exists(ctx, fmt.Sprintf("process:info:%s", processID)).Result()
+	existsQueued, _ := redisClient.Exists(ctx, fmt.Sprintf("process:queued:%s", processID)).Result()
+	alreadyKnown := existsActive > 0 || existsQueued > 0
 
 	existingState := ""
-	if exists > 0 {
-		if val, err := redisClient.Get(ctx, key).Result(); err == nil {
+	if existsActive > 0 {
+		if val, err := redisClient.Get(ctx, fmt.Sprintf("process:info:%s", processID)).Result(); err == nil {
+			var p map[string]interface{}
+			if jsonErr := json.Unmarshal([]byte(val), &p); jsonErr == nil {
+				existingState, _ = p["state"].(string)
+			}
+		}
+	} else if existsQueued > 0 {
+		if val, err := redisClient.Get(ctx, fmt.Sprintf("process:queued:%s", processID)).Result(); err == nil {
 			var p map[string]interface{}
 			if jsonErr := json.Unmarshal([]byte(val), &p); jsonErr == nil {
 				existingState, _ = p["state"].(string)
@@ -224,9 +247,8 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 
 	stateChanged := existingState != state
 
-	// 2. Increment Ref Count ONLY if it's a NEW process (not already in info or queued)
-	// Note: We check exists on the specific key (info or queued)
-	if exists == 0 {
+	// 2. Increment Ref Count ONLY if it's a completely NEW process ID
+	if !alreadyKnown {
 		_, _ = redisClient.Incr(ctx, "system:busy_ref_count").Result()
 	}
 
@@ -244,8 +266,12 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 	}
 
 	// Use start_time from existing process if it exists to maintain duration metrics
-	if exists > 0 {
-		if val, err := redisClient.Get(ctx, key).Result(); err == nil {
+	if alreadyKnown {
+		sourceKey := fmt.Sprintf("process:info:%s", processID)
+		if existsQueued > 0 {
+			sourceKey = fmt.Sprintf("process:queued:%s", processID)
+		}
+		if val, err := redisClient.Get(ctx, sourceKey).Result(); err == nil {
 			var p map[string]interface{}
 			if jsonErr := json.Unmarshal([]byte(val), &p); jsonErr == nil {
 				if st, ok := p["start_time"]; ok {
@@ -260,7 +286,7 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 	redisClient.Set(ctx, key, jsonBytes, DefaultTTL)
 
 	// Emit registration event ONLY if new or state changed
-	if exists == 0 || stateChanged {
+	if !alreadyKnown || stateChanged {
 		_, _ = SendEvent(ctx, redisClient, "process-manager", "system.process.registered", map[string]interface{}{
 			"process_id": processID,
 			"pid":        os.Getpid(),
@@ -290,6 +316,65 @@ func ReportProcess(ctx context.Context, redisClient *redis.Client, discordClient
 			discordClient.SetVoiceState(true, true, fmt.Sprintf("Busy: %s", state))
 		}
 	}
+}
+
+// SyncSystemState enforces the correct busy/idle state based on active processes and cognitive lock.
+// This is used as a self-healing mechanism in the status building loop.
+func SyncSystemState(ctx context.Context, redisClient *redis.Client) string {
+	if redisClient == nil {
+		return "idle"
+	}
+
+	// 1. Check if paused (highest priority override)
+	isPaused, _ := redisClient.Get(ctx, "system:is_paused").Result()
+	if isPaused == "true" {
+		currentState, _ := redisClient.Get(ctx, "system:state").Result()
+		if currentState != "paused" {
+			redisClient.Set(ctx, "system:state", "paused", 0)
+		}
+		return "paused"
+	}
+
+	// 2. Check if we should be busy
+	busy := false
+
+	// A. Global Cognitive Lock
+	holder, _ := redisClient.Get(ctx, CognitiveLockKey).Result()
+	if holder != "" && holder != "PAUSED" {
+		busy = true
+	}
+
+	// B. Active Processes
+	if !busy {
+		keys, _ := redisClient.Keys(ctx, "process:info:*").Result()
+		if len(keys) > 0 {
+			busy = true
+		}
+	}
+
+	// C. Queued Processes
+	if !busy {
+		keys, _ := redisClient.Keys(ctx, "process:queued:*").Result()
+		if len(keys) > 0 {
+			busy = true
+		}
+	}
+
+	// 3. Apply state transition if needed
+	lastState, _ := redisClient.Get(ctx, "system:state").Result()
+
+	if busy && lastState != "busy" {
+		TransitionToBusy(ctx, redisClient)
+		return "busy"
+	} else if !busy && lastState != "idle" {
+		TransitionToIdle(ctx, redisClient)
+		return "idle"
+	}
+
+	if lastState == "" {
+		return "idle"
+	}
+	return lastState
 }
 
 // ClearProcess removes a process from Redis and attempts to restore an idle Discord status if appropriate.

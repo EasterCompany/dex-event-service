@@ -23,12 +23,14 @@ type BaseAgent struct {
 
 // IsActuallyBusy checks if the system is currently processing tasks.
 func (b *BaseAgent) IsActuallyBusy(ctx context.Context, selfProcessID string) bool {
-	keys, err := b.RedisClient.Keys(ctx, "process:info:*").Result()
-	if err != nil {
-		return false
-	}
+	// Check info (active)
+	infoKeys, _ := b.RedisClient.Keys(ctx, "process:info:*").Result()
+	// Check queued
+	queueKeys, _ := b.RedisClient.Keys(ctx, "process:queued:*").Result()
 
-	for _, k := range keys {
+	allKeys := append(infoKeys, queueKeys...)
+
+	for _, k := range allKeys {
 		// Ignore ourselves
 		if strings.HasSuffix(k, ":"+selfProcessID) {
 			continue
