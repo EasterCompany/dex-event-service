@@ -291,7 +291,7 @@ func (h *CourierHandler) executeTask(ctx context.Context, task *chores.Chore) ([
 		webData.WriteString(fmt.Sprintf("# SEARCH RESULTS FOR: %s\n\n", searchQuery))
 
 		for i, r := range results {
-			if len(sourceLinks) >= 5 { // Hard limit of 5 unique sources
+			if len(sourceLinks) >= 3 { // Hard limit of 3 unique sources
 				break
 			}
 
