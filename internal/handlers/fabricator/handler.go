@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EasterCompany/dex-event-service/config"
 	"github.com/EasterCompany/dex-event-service/internal/agent"
 	"github.com/EasterCompany/dex-event-service/internal/discord"
 	"github.com/EasterCompany/dex-event-service/internal/model"
@@ -189,6 +190,13 @@ func (h *FabricatorHandler) hasPendingAlerts(ctx context.Context) bool {
 	return false
 }
 
+type IssueInfo struct {
+	Repo   string
+	Number int
+	Title  string
+	Body   string
+}
+
 func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 	if err := h.verifySafety(); err != nil {
 		log.Printf("[%s] Aborting waterfall due to safety check failure: %v", HandlerName, err)
@@ -218,28 +226,40 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 	inferenceDone, reviewOut, err := h.PerformReview(ctx)
 	runLogs.WriteString(fmt.Sprintf("### TIER 0: REVIEW\nStatus: %v\nOutput: %s\n\n", err == nil, reviewOut))
 
-	if !inferenceDone || err != nil {
+	if !inferenceDone || err != nil || strings.Contains(reviewOut, "<NO_ISSUE/>") {
+		log.Printf("[%s] Waterfall aborted at Review: InferenceDone=%v, Err=%v, NoIssue=%v", HandlerName, inferenceDone, err, strings.Contains(reviewOut, "<NO_ISSUE/>"))
 		h.finalizeRun(ctx, runLogs.String(), "Aborted at Review")
 		return
 	}
 	h.RedisClient.Set(ctx, "fabricator:last_run:review", time.Now().Unix(), 0)
 
-	// TIER 1: ISSUE
+	// TIER 1: ISSUE (Find and Investigate)
 	h.RedisClient.Set(ctx, "fabricator:active_tier", "issue", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Issue Protocol (Tier 1)")
-	inferenceDone, issueOut, err := h.PerformIssue(ctx)
-	runLogs.WriteString(fmt.Sprintf("### TIER 1: ISSUE\nStatus: %v\nOutput: %s\n\n", err == nil, issueOut))
 
-	if !inferenceDone || err != nil {
+	targetIssue, investigationReport, err := h.PerformIssue(ctx)
+	if err != nil || targetIssue == nil {
+		runLogs.WriteString("### TIER 1: ISSUE\nStatus: Failed or No Work\n\n")
 		h.finalizeRun(ctx, runLogs.String(), "Aborted at Issue")
+		return
+	}
+
+	runLogs.WriteString(fmt.Sprintf("### TIER 1: ISSUE\nTarget: %s#%d\nStatus: Success\n\n", targetIssue.Repo, targetIssue.Number))
+
+	if strings.Contains(investigationReport, "<NO_ISSUE/>") {
+		log.Printf("[%s] Model reported NO ISSUE for %s#%d. Closing issue.", HandlerName, targetIssue.Repo, targetIssue.Number)
+		h.closeIssue(targetIssue, "Dexter investigated the codebase and found this issue to be invalid or already resolved.\n\n### Investigation Summary\n"+investigationReport)
+		h.finalizeRun(ctx, runLogs.String(), "Success (No Issue Found)")
 		return
 	}
 	h.RedisClient.Set(ctx, "fabricator:last_run:issue", time.Now().Unix(), 0)
 
-	// TIER 2: CONSTRUCT
+	// TIER 2: CONSTRUCT (Apply and Verify)
 	h.RedisClient.Set(ctx, "fabricator:active_tier", "construct", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Construct Protocol (Tier 2)")
-	inferenceDone, constructOut, err := h.PerformConstruct(ctx)
+
+	// Pass the investigation report to the construct tier
+	inferenceDone, constructOut, err := h.PerformConstruct(ctx, targetIssue, investigationReport)
 	runLogs.WriteString(fmt.Sprintf("### TIER 2: CONSTRUCT\nStatus: %v\nOutput: %s\n\n", err == nil, constructOut))
 
 	if !inferenceDone || err != nil {
@@ -266,6 +286,11 @@ func (h *FabricatorHandler) finalizeRun(ctx context.Context, logs string, status
 
 	if summary != "" && h.DiscordClient != nil {
 		debugChannelID := "1426957003108122656"
+		if opt, err := config.LoadOptions(); err == nil {
+			if opt.Discord.DebugChannelID != "" {
+				debugChannelID = opt.Discord.DebugChannelID
+			}
+		}
 		_, _ = h.DiscordClient.PostMessage(debugChannelID, "🛠️ **Fabricator Agent Run Summary**\n\n"+summary)
 	}
 }
@@ -302,7 +327,7 @@ func (h *FabricatorHandler) PerformReview(ctx context.Context) (bool, string, er
 	}
 
 	if strings.Contains(report, "<NO_ISSUE/>") {
-		return true, "Model reported NO ISSUE.", nil
+		return true, report, nil
 	}
 
 	repo := "EasterCompany/EasterCompany"
@@ -336,11 +361,48 @@ func (h *FabricatorHandler) PerformReview(ctx context.Context) (bool, string, er
 	return true, "Issue created: " + string(out), nil
 }
 
-func (h *FabricatorHandler) PerformIssue(ctx context.Context) (bool, string, error) {
+func (h *FabricatorHandler) closeIssue(issue *IssueInfo, comment string) {
+	homeDir, _ := os.UserHomeDir()
+	workingDir := filepath.Join(homeDir, "EasterCompany")
+	issueNum := fmt.Sprintf("%d", issue.Number)
+
+	cmd := exec.Command("gh", "issue", "comment", issueNum, "--repo", issue.Repo, "--body", comment)
+	cmd.Dir = workingDir
+	_ = cmd.Run()
+
+	cmd = exec.Command("gh", "issue", "close", issueNum, "--repo", issue.Repo)
+	cmd.Dir = workingDir
+	_ = cmd.Run()
+}
+
+func (h *FabricatorHandler) findOldestIssue(ctx context.Context) (*IssueInfo, error) {
 	homeDir, _ := os.UserHomeDir()
 	workingDir := filepath.Join(homeDir, "EasterCompany")
 
-	// 1. Get list of all repos (root + submodules)
+	repos := h.discoverRepos(workingDir)
+	var oldestIssue *IssueInfo
+
+	for _, repo := range repos {
+		cmd := exec.Command("gh", "issue", "list", "--repo", repo, "--state", "open", "--sort", "created", "--direction", "asc", "--limit", "1", "--json", "number,title,body")
+		cmd.Dir = workingDir
+		out, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+
+		var issues []map[string]interface{}
+		if err := json.Unmarshal(out, &issues); err == nil && len(issues) > 0 {
+			issue := issues[0]
+			num := int(issue["number"].(float64))
+			if oldestIssue == nil {
+				oldestIssue = &IssueInfo{Repo: repo, Number: num, Title: issue["title"].(string), Body: issue["body"].(string)}
+			}
+		}
+	}
+	return oldestIssue, nil
+}
+
+func (h *FabricatorHandler) discoverRepos(workingDir string) []string {
 	repos := []string{"EasterCompany/EasterCompany"}
 	cmd := exec.Command("git", "submodule", "foreach", "--quiet", "git remote get-url origin")
 	cmd.Dir = workingDir
@@ -356,122 +418,54 @@ func (h *FabricatorHandler) PerformIssue(ctx context.Context) (bool, string, err
 			}
 		}
 	}
+	return repos
+}
 
-	// 2. Fetch oldest issue across all repos
-	type IssueInfo struct {
-		Repo   string
-		Number int
-		Title  string
-		Body   string
-	}
-	var oldestIssue *IssueInfo
-
-	for _, repo := range repos {
-		cmd = exec.Command("gh", "issue", "list", "--repo", repo, "--state", "open", "--sort", "created", "--direction", "asc", "--limit", "1", "--json", "number,title,body")
-		cmd.Dir = workingDir
-		out, err = cmd.Output()
-		if err != nil {
-			continue
-		}
-
-		var issues []map[string]interface{}
-		if err := json.Unmarshal(out, &issues); err == nil && len(issues) > 0 {
-			issue := issues[0]
-			num := int(issue["number"].(float64))
-			if oldestIssue == nil {
-				oldestIssue = &IssueInfo{Repo: repo, Number: num, Title: issue["title"].(string), Body: issue["body"].(string)}
-			}
-		}
-	}
-
-	if oldestIssue == nil {
-		return false, "No open issues found.", nil
+func (h *FabricatorHandler) PerformIssue(ctx context.Context) (*IssueInfo, string, error) {
+	oldestIssue, err := h.findOldestIssue(ctx)
+	if err != nil || oldestIssue == nil {
+		return nil, "", err
 	}
 
 	issueNum := fmt.Sprintf("%d", oldestIssue.Number)
 	repo := oldestIssue.Repo
 
 	comment := "Dexter has targeted this issue for autonomous investigation."
-	cmd = exec.Command("gh", "issue", "comment", issueNum, "--repo", repo, "--body", comment)
+	homeDir, _ := os.UserHomeDir()
+	workingDir := filepath.Join(homeDir, "EasterCompany")
+	cmd := exec.Command("gh", "issue", "comment", issueNum, "--repo", repo, "--body", comment)
 	cmd.Dir = workingDir
 	_ = cmd.Run()
 
 	prompt := fmt.Sprintf("Issue #%s: %s\n\nBody: %s\n\nObjective: Investigate the codebase and create a detailed implementation plan. Do not modify any code.", issueNum, oldestIssue.Title, oldestIssue.Body)
 	report, _, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["issue"], prompt, nil, nil)
 	if err != nil {
-		return true, "", err
+		return oldestIssue, "", err
 	}
 
 	cmd = exec.Command("gh", "issue", "comment", issueNum, "--repo", repo, "--body", "### Autonomous Investigation Report\n\n"+report)
 	cmd.Dir = workingDir
 	_ = cmd.Run()
 
-	return true, fmt.Sprintf("Investigation complete for Issue #%s in %s", issueNum, repo), nil
+	return oldestIssue, report, nil
 }
 
-func (h *FabricatorHandler) PerformConstruct(ctx context.Context) (bool, string, error) {
+func (h *FabricatorHandler) PerformConstruct(ctx context.Context, targetIssue *IssueInfo, investigationReport string) (bool, string, error) {
 	homeDir, _ := os.UserHomeDir()
 	workingDir := filepath.Join(homeDir, "EasterCompany")
 
-	// 1. Get list of all repos (root + submodules)
-	repos := []string{"EasterCompany/EasterCompany"}
-	cmd := exec.Command("git", "submodule", "foreach", "--quiet", "git remote get-url origin")
-	cmd.Dir = workingDir
-	out, err := cmd.Output()
-	if err == nil {
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		for _, line := range lines {
-			if strings.Contains(line, "github.com") {
-				parts := strings.Split(strings.TrimSuffix(line, ".git"), "github.com/")
-				if len(parts) > 1 {
-					repos = append(repos, parts[1])
-				}
-			}
-		}
-	}
+	issueNum := fmt.Sprintf("%d", targetIssue.Number)
+	repo := targetIssue.Repo
 
-	// 2. Fetch oldest issue across all repos
-	type IssueInfo struct {
-		Repo   string
-		Number int
-		Title  string
-		Body   string
-	}
-	var oldestIssue *IssueInfo
+	prompt := fmt.Sprintf("IMPLEMENT FIX for Issue #%s: %s in %s\n\n### INVESTIGATION REPORT:\n%s\n\nObjective: Apply the necessary changes to the codebase. You are in YOLO mode. Verify with builds/tests. REQUIREMENTS: Changes must pass `dex build --source --force --dry-run` before completion.", issueNum, targetIssue.Title, repo, investigationReport)
 
-	for _, repo := range repos {
-		cmd = exec.Command("gh", "issue", "list", "--repo", repo, "--state", "open", "--sort", "created", "--direction", "asc", "--limit", "1", "--json", "number,title,body")
-		cmd.Dir = workingDir
-		out, err = cmd.Output()
-		if err != nil {
-			continue
-		}
-
-		var issues []map[string]interface{}
-		if err := json.Unmarshal(out, &issues); err == nil && len(issues) > 0 {
-			issue := issues[0]
-			num := int(issue["number"].(float64))
-			if oldestIssue == nil {
-				oldestIssue = &IssueInfo{Repo: repo, Number: num, Title: issue["title"].(string), Body: issue["body"].(string)}
-			}
-		}
-	}
-
-	if oldestIssue == nil {
-		return false, "No open issues found.", nil
-	}
-
-	issueNum := fmt.Sprintf("%d", oldestIssue.Number)
-	repo := oldestIssue.Repo
-
-	prompt := fmt.Sprintf("IMPLEMENT FIX for Issue #%s: %s in %s\n\nObjective: Apply the necessary changes to the codebase. You are in YOLO mode. Verify with builds/tests. REQUIREMENTS: Changes must pass `dex fmt`, `dex lint`, and `dex build --source --force --dry-run` before completion.", issueNum, oldestIssue.Title, repo)
 	result, _, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["construct"], prompt, nil, nil)
 	if err != nil {
 		return true, result, err
 	}
 
 	closingComment := "Dexter has implemented and verified the fix for this issue. Closing.\n\n### Implementation Summary\n" + result
-	cmd = exec.Command("gh", "issue", "comment", issueNum, "--repo", repo, "--body", closingComment)
+	cmd := exec.Command("gh", "issue", "comment", issueNum, "--repo", repo, "--body", closingComment)
 	cmd.Dir = workingDir
 	_ = cmd.Run()
 
