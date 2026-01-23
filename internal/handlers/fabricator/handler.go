@@ -145,122 +145,129 @@ func (h *FabricatorHandler) checkAndFabricate() {
 		return
 	}
 
-	now := time.Now().Unix()
-	// Confirm that an agent can only run IF ALL PROTOCOLS are READY
-	for protocol, cooldown := range h.Config.Cooldowns {
-		lastRun, _ := h.RedisClient.Get(ctx, fmt.Sprintf("fabricator:last_run:%s", protocol)).Int64()
-		if now-lastRun < int64(cooldown) {
-			return
-		}
-	}
-
 	if h.IsActuallyBusy(ctx, h.Config.ProcessID) {
 		return
 	}
 
-	go h.PerformWaterfall(ctx)
+	now := time.Now().Unix()
+	triggerWaterfall := false
+
+	// Check 1: Review Tier Ready? (Needs Alerts)
+	lastReview, _ := h.RedisClient.Get(ctx, "fabricator:last_run:review").Int64()
+	if now-lastReview >= int64(h.Config.Cooldowns["review"]) {
+		// Only trigger if alerts exist
+		if h.hasPendingAlerts(ctx) {
+			log.Printf("[%s] Triggering waterfall: Review is ready and alerts exist.", HandlerName)
+			triggerWaterfall = true
+		}
+	}
+
+	// Check 2: Construct Tier Ready? (Needs Open Issues)
+	if !triggerWaterfall {
+		lastConstruct, _ := h.RedisClient.Get(ctx, "fabricator:last_run:construct").Int64()
+		if now-lastConstruct >= int64(h.Config.Cooldowns["construct"]) {
+			if h.hasOpenIssues() {
+				log.Printf("[%s] Triggering waterfall: Construct is ready and issues are open.", HandlerName)
+				triggerWaterfall = true
+			}
+		}
+	}
+
+	if triggerWaterfall {
+		go h.PerformWaterfall(ctx)
+	}
+}
+
+func (h *FabricatorHandler) hasPendingAlerts(ctx context.Context) bool {
+	ids, err := h.RedisClient.ZRevRange(ctx, "events:timeline", 0, 49).Result()
+	if err != nil {
+		return false
+	}
+	for _, id := range ids {
+		val, err := h.RedisClient.Get(ctx, "event:"+id).Result()
+		if err != nil {
+			continue
+		}
+		var ed map[string]interface{}
+		var e types.Event
+		_ = json.Unmarshal([]byte(val), &e)
+		_ = json.Unmarshal(e.Event, &ed)
+		eType, _ := ed["type"].(string)
+		if eType == "system.notification.generated" || eType == "error_occurred" {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *FabricatorHandler) hasOpenIssues() bool {
+	homeDir, _ := os.UserHomeDir()
+	cmd := exec.Command("gh", "issue", "list", "--repo", "EasterCompany/EasterCompany", "--state", "open", "--limit", "1")
+	cmd.Dir = filepath.Join(homeDir, "EasterCompany")
+	out, err := cmd.Output()
+	return err == nil && len(strings.TrimSpace(string(out))) > 0
 }
 
 func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 	if err := h.verifySafety(); err != nil {
 		log.Printf("[%s] Aborting waterfall due to safety check failure: %v", HandlerName, err)
-
-		// Report failure to front-end (cooldown 1h)
-		cooldownKey := "fabricator:safety_alert_cooldown"
-		if h.RedisClient.Get(ctx, cooldownKey).Val() == "" {
-			payload := map[string]interface{}{
-				"title":    "Fabricator Safety Alert",
-				"body":     fmt.Sprintf("Fabricator disabled: %v. Please ensure root repository (~/EasterCompany/.git) and GitHub CLI are correctly configured.", err),
-				"category": "error",
-				"priority": "high",
-				"type":     "system.notification.generated",
-			}
-			_, _ = utils.SendEvent(ctx, h.RedisClient, HandlerName, "system.notification.generated", payload)
-			h.RedisClient.Set(ctx, cooldownKey, "1", 1*time.Hour)
-		}
 		return
 	}
 
 	log.Printf("[%s] Starting Fabricator Waterfall Run", HandlerName)
-
 	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
 
 	var runLogs strings.Builder
 	runLogs.WriteString(fmt.Sprintf("Run started at %s\n\n", time.Now().Format(time.RFC3339)))
-
-	// Capture initial commit hash to detect changes
-	homeDir, _ := os.UserHomeDir()
-	workingDir := filepath.Join(homeDir, "EasterCompany")
-	initialHash := ""
-	if out, err := exec.Command("git", "rev-parse", "HEAD").Output(); err == nil {
-		initialHash = strings.TrimSpace(string(out))
-	}
+	now := time.Now().Unix()
 
 	// TIER 0: REVIEW
-	h.RedisClient.Set(ctx, "fabricator:active_tier", "review", utils.DefaultTTL)
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Review Protocol (Tier 0)")
-	reviewOut, err := h.PerformReview(ctx)
-	runLogs.WriteString(fmt.Sprintf("### TIER 0: REVIEW\nStatus: %v\nOutput: %s\n\n", err == nil, reviewOut))
-
-	// No work check: skip waterfall and don't trigger cooldown
-	if strings.Contains(reviewOut, "No alerts found") || strings.Contains(reviewOut, "NO ISSUE") {
-		utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
-		h.RedisClient.Del(ctx, "fabricator:active_tier")
-		log.Printf("[%s] Waterfall aborted: No issues found during review.", HandlerName)
-		return
+	lastReview, _ := h.RedisClient.Get(ctx, "fabricator:last_run:review").Int64()
+	if now-lastReview >= int64(h.Config.Cooldowns["review"]) && h.hasPendingAlerts(ctx) {
+		h.RedisClient.Set(ctx, "fabricator:active_tier", "review", utils.DefaultTTL)
+		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Review Protocol (Tier 0)")
+		inferenceDone, reviewOut, err := h.PerformReview(ctx)
+		runLogs.WriteString(fmt.Sprintf("### TIER 0: REVIEW\nStatus: %v\nOutput: %s\n\n", err == nil, reviewOut))
+		if inferenceDone {
+			h.RedisClient.Set(ctx, "fabricator:last_run:review", time.Now().Unix(), 0)
+		}
+	} else {
+		runLogs.WriteString("### TIER 0: REVIEW\nSkipped (Cooldown or No Alerts).\n\n")
 	}
-	h.RedisClient.Set(ctx, "fabricator:last_run:review", time.Now().Unix(), 0)
 
 	// TIER 1: ISSUE
-	h.RedisClient.Set(ctx, "fabricator:active_tier", "issue", utils.DefaultTTL)
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Issue Protocol (Tier 1)")
-	issueOut, err := h.PerformIssue(ctx)
-	runLogs.WriteString(fmt.Sprintf("### TIER 1: ISSUE\nStatus: %v\nOutput: %s\n\n", err == nil, issueOut))
-
-	if strings.Contains(issueOut, "No open issues found") {
-		utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
-		h.RedisClient.Del(ctx, "fabricator:active_tier")
-		log.Printf("[%s] Waterfall aborted: No issues found to target.", HandlerName)
-		return
+	lastIssue, _ := h.RedisClient.Get(ctx, "fabricator:last_run:issue").Int64()
+	if now-lastIssue >= int64(h.Config.Cooldowns["issue"]) && h.hasOpenIssues() {
+		h.RedisClient.Set(ctx, "fabricator:active_tier", "issue", utils.DefaultTTL)
+		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Issue Protocol (Tier 1)")
+		inferenceDone, issueOut, err := h.PerformIssue(ctx)
+		runLogs.WriteString(fmt.Sprintf("### TIER 1: ISSUE\nStatus: %v\nOutput: %s\n\n", err == nil, issueOut))
+		if inferenceDone {
+			h.RedisClient.Set(ctx, "fabricator:last_run:issue", time.Now().Unix(), 0)
+		}
+	} else {
+		runLogs.WriteString("### TIER 1: ISSUE\nSkipped (Cooldown or No Issues).\n\n")
 	}
-	h.RedisClient.Set(ctx, "fabricator:last_run:issue", time.Now().Unix(), 0)
 
 	// TIER 2: CONSTRUCT
-	h.RedisClient.Set(ctx, "fabricator:active_tier", "construct", utils.DefaultTTL)
-	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Construct Protocol (Tier 2)")
-	constructOut, err := h.PerformConstruct(ctx)
-	runLogs.WriteString(fmt.Sprintf("### TIER 2: CONSTRUCT\nStatus: %v\nOutput: %s\n\n", err == nil, constructOut))
-
-	if strings.Contains(constructOut, "No open issues found") {
-		utils.ClearProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID)
-		h.RedisClient.Del(ctx, "fabricator:active_tier")
-		return
-	}
-	h.RedisClient.Set(ctx, "fabricator:last_run:construct", time.Now().Unix(), 0)
-
-	// Check for changes and trigger auto-build
-	currentHash := ""
-	if out, err := exec.Command("git", "rev-parse", "HEAD").Output(); err == nil {
-		currentHash = strings.TrimSpace(string(out))
-	}
-
-	if initialHash != "" && currentHash != "" && initialHash != currentHash {
-		log.Printf("[%s] Changes detected (%s -> %s). Triggering auto-build.", HandlerName, initialHash, currentHash)
-		runLogs.WriteString("### AUTO-REBUILD\nChanges detected. System is re-building.\n\n")
-		buildCmd := exec.Command("dex", "build", "--source", "--force")
-		buildCmd.Dir = workingDir
-		if out, err := buildCmd.CombinedOutput(); err != nil {
-			log.Printf("ERROR: Auto-rebuild failed: %v\nOutput: %s", err, string(out))
-			runLogs.WriteString(fmt.Sprintf("Build FAILED: %v\n", err))
-		} else {
-			runLogs.WriteString("Build SUCCESSFUL.\n")
+	lastConstruct, _ := h.RedisClient.Get(ctx, "fabricator:last_run:construct").Int64()
+	if now-lastConstruct >= int64(h.Config.Cooldowns["construct"]) && h.hasOpenIssues() {
+		h.RedisClient.Set(ctx, "fabricator:active_tier", "construct", utils.DefaultTTL)
+		utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Construct Protocol (Tier 2)")
+		inferenceDone, constructOut, err := h.PerformConstruct(ctx)
+		runLogs.WriteString(fmt.Sprintf("### TIER 2: CONSTRUCT\nStatus: %v\nOutput: %s\n\n", err == nil, constructOut))
+		if inferenceDone {
+			h.RedisClient.Set(ctx, "fabricator:last_run:construct", time.Now().Unix(), 0)
 		}
+	} else {
+		runLogs.WriteString("### TIER 2: CONSTRUCT\nSkipped (Cooldown or No Issues).\n\n")
 	}
 
+	// TIER 3: REPORTER
 	h.RedisClient.Set(ctx, "fabricator:active_tier", "reporter", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Reporter Protocol (Tier 3)")
-	summary, _ := h.PerformReporter(ctx, runLogs.String())
+	_, summary, _ := h.PerformReporter(ctx, runLogs.String())
 	h.RedisClient.Set(ctx, "fabricator:last_run:reporter", time.Now().Unix(), 0)
 
 	h.RedisClient.Del(ctx, "fabricator:active_tier")
@@ -270,14 +277,12 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 		debugChannelID := "1426957003108122656"
 		_, _ = h.DiscordClient.PostMessage(debugChannelID, "🛠️ **Fabricator Agent Run Summary**\n\n"+summary)
 	}
-
-	log.Printf("[%s] Fabricator Waterfall Run complete.", HandlerName)
 }
 
-func (h *FabricatorHandler) PerformReview(ctx context.Context) (string, error) {
+func (h *FabricatorHandler) PerformReview(ctx context.Context) (bool, string, error) {
 	ids, err := h.RedisClient.ZRevRange(ctx, "events:timeline", 0, 49).Result()
 	if err != nil {
-		return "", err
+		return false, "", err
 	}
 
 	var alerts strings.Builder
@@ -297,16 +302,16 @@ func (h *FabricatorHandler) PerformReview(ctx context.Context) (string, error) {
 	}
 
 	if alerts.Len() == 0 {
-		return "No alerts found.", nil
+		return false, "No alerts found.", nil
 	}
 
 	report, _, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["review"], alerts.String(), nil, nil)
 	if err != nil {
-		return "", err
+		return false, "", err
 	}
 
 	if strings.Contains(report, "<NO_ISSUE/>") {
-		return "Model reported NO ISSUE.", nil
+		return true, "Model reported NO ISSUE.", nil
 	}
 
 	repo := "EasterCompany/EasterCompany"
@@ -334,13 +339,13 @@ func (h *FabricatorHandler) PerformReview(ctx context.Context) (string, error) {
 	cmd.Dir = workingDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return string(out), err
+		return true, string(out), err
 	}
 
-	return "Issue created: " + string(out), nil
+	return true, "Issue created: " + string(out), nil
 }
 
-func (h *FabricatorHandler) PerformIssue(ctx context.Context) (string, error) {
+func (h *FabricatorHandler) PerformIssue(ctx context.Context) (bool, string, error) {
 	homeDir, _ := os.UserHomeDir()
 	workingDir := filepath.Join(homeDir, "EasterCompany")
 
@@ -389,7 +394,7 @@ func (h *FabricatorHandler) PerformIssue(ctx context.Context) (string, error) {
 	}
 
 	if oldestIssue == nil {
-		return "No open issues found.", nil
+		return false, "No open issues found.", nil
 	}
 
 	issueNum := fmt.Sprintf("%d", oldestIssue.Number)
@@ -403,17 +408,17 @@ func (h *FabricatorHandler) PerformIssue(ctx context.Context) (string, error) {
 	prompt := fmt.Sprintf("Issue #%s: %s\n\nBody: %s\n\nObjective: Investigate the codebase and create a detailed implementation plan. Do not modify any code.", issueNum, oldestIssue.Title, oldestIssue.Body)
 	report, _, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["issue"], prompt, nil, nil)
 	if err != nil {
-		return "", err
+		return true, "", err
 	}
 
 	cmd = exec.Command("gh", "issue", "comment", issueNum, "--repo", repo, "--body", "### Autonomous Investigation Report\n\n"+report)
 	cmd.Dir = workingDir
 	_ = cmd.Run()
 
-	return fmt.Sprintf("Investigation complete for Issue #%s in %s", issueNum, repo), nil
+	return true, fmt.Sprintf("Investigation complete for Issue #%s in %s", issueNum, repo), nil
 }
 
-func (h *FabricatorHandler) PerformConstruct(ctx context.Context) (string, error) {
+func (h *FabricatorHandler) PerformConstruct(ctx context.Context) (bool, string, error) {
 	homeDir, _ := os.UserHomeDir()
 	workingDir := filepath.Join(homeDir, "EasterCompany")
 
@@ -462,7 +467,7 @@ func (h *FabricatorHandler) PerformConstruct(ctx context.Context) (string, error
 	}
 
 	if oldestIssue == nil {
-		return "No open issues found.", nil
+		return false, "No open issues found.", nil
 	}
 
 	issueNum := fmt.Sprintf("%d", oldestIssue.Number)
@@ -471,7 +476,7 @@ func (h *FabricatorHandler) PerformConstruct(ctx context.Context) (string, error
 	prompt := fmt.Sprintf("IMPLEMENT FIX for Issue #%s: %s in %s\n\nObjective: Apply the necessary changes to the codebase. You are in YOLO mode. Verify with builds/tests. REQUIREMENTS: Changes must pass `dex fmt`, `dex lint`, and `dex build --source --force --dry-run` before completion.", issueNum, oldestIssue.Title, repo)
 	result, _, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["construct"], prompt, nil, nil)
 	if err != nil {
-		return "", err
+		return true, "", err
 	}
 
 	// Post-fabrication verification
@@ -481,7 +486,7 @@ func (h *FabricatorHandler) PerformConstruct(ctx context.Context) (string, error
 	buildCmd := exec.Command("dex", "build", "--source", "--force", "--dry-run")
 	buildCmd.Dir = workingDir
 	if out, err := buildCmd.CombinedOutput(); err != nil {
-		return fmt.Sprintf("Construction FAILED verification: %v\nOutput: %s", err, string(out)), err
+		return true, fmt.Sprintf("Construction FAILED verification: %v\nOutput: %s", err, string(out)), err
 	}
 
 	closingComment := "Dexter has implemented and verified the fix for this issue. Closing.\n\n### Implementation Summary\n" + result
@@ -493,25 +498,15 @@ func (h *FabricatorHandler) PerformConstruct(ctx context.Context) (string, error
 	cmd.Dir = workingDir
 	_ = cmd.Run()
 
-	// Automatic Re-build and Deploy if changes detected
-	log.Printf("[%s] Auto-rebuild phase starting...", HandlerName)
-	rebuildCmd := exec.Command("dex", "build", "--source", "--force")
-	rebuildCmd.Dir = workingDir
-	if out, err := rebuildCmd.CombinedOutput(); err != nil {
-		log.Printf("ERROR: Auto-rebuild failed: %v\nOutput: %s", err, string(out))
-	} else {
-		log.Printf("[%s] Auto-rebuild and deploy complete.", HandlerName)
-	}
-
-	return fmt.Sprintf("Issue #%s in %s closed and system re-built.", issueNum, repo), nil
+	return true, fmt.Sprintf("Issue #%s in %s closed and verified.", issueNum, repo), nil
 }
 
-func (h *FabricatorHandler) PerformReporter(ctx context.Context, logs string) (string, error) {
+func (h *FabricatorHandler) PerformReporter(ctx context.Context, logs string) (bool, string, error) {
 	summary, _, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["reporter"], logs, nil, nil)
 	if err != nil {
-		return "", err
+		return false, "", err
 	}
-	return summary, nil
+	return true, summary, nil
 }
 
 func (h *FabricatorHandler) ValidateLogic(res agent.AnalysisResult) []agent.Correction { return nil }
