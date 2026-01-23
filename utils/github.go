@@ -29,7 +29,7 @@ func getWorkingDir() string {
 func ListGitHubIssues() ([]GitHubIssue, error) {
 	cmd := exec.Command("gh", "issue", "list", "--repo", "EasterCompany/EasterCompany", "--state", "open", "--json", "number,title,body,state,labels,createdAt,updatedAt,repository", "--limit", "100")
 	cmd.Dir = getWorkingDir()
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list github issues: %w (output: %s)", err, string(out))
 	}
