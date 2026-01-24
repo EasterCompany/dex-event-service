@@ -409,8 +409,12 @@ Rules:
 4. Output your description first, then the tag ONLY if rule 2 applies.
 
 Description:`
+					// ACQUIRE COGNITIVE LOCK for vision processing
+					utils.AcquireCognitiveLock(ctx, deps.Redis, "Vision Analysis", id, deps.Discord)
 					var genErr error
 					description, _, genErr = deps.Model.GenerateWithContext(ctx, "dex-vision", prompt, []string{base64Img}, utilityOptions)
+					utils.ReleaseCognitiveLock(ctx, deps.Redis, "Vision Analysis")
+
 					if genErr != nil {
 						log.Printf("Vision model failed for %s: %v", filename, genErr)
 						continue
