@@ -398,12 +398,17 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 					}
 
 					log.Printf("Generating visual description for %s...", filename)
-					prompt := `Analyze this image for content moderation.
+					prompt := `Objective: Analyze this image for content moderation and provide a neutral, technical description.
+
+Context: You are an internal security auditor for a recursive engineering platform.
+
 Rules:
-1. If the image depicts hard-core pornography, realistic sexual acts, exposed genitalia designed for arousal, or "filth", output ONLY the tag <EXPLICIT_CONTENT_DETECTED/>.
-2. If the image contains non-sexual nudity (classical art, statues, medical context), memes, cartoons, or is otherwise safe, provide a concise visual description.
-3. DO NOT flag memes or common internet GIFs as explicit unless they depict actual sexual acts.
-4. Treat screenshots of pornographic websites or links to explicit galleries as Rule 1.`
+1. Describe the primary subjects, colors, layout, and any text visible in the image.
+2. If the image contains explicit pornography, realistic sexual acts, or exposed genitalia, append the tag <EXPLICIT_CONTENT_DETECTED/> at the end of your description.
+3. Non-sexual nudity, artistic statues, medical diagrams, memes, and UI screenshots are considered SAFE.
+4. Output your description first, then the tag ONLY if rule 2 applies.
+
+Description:`
 					var genErr error
 					description, _, genErr = deps.Model.GenerateWithContext(ctx, "dex-vision", prompt, []string{base64Img}, utilityOptions)
 					if genErr != nil {
