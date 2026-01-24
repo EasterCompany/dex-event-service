@@ -326,7 +326,7 @@ func RunGuardianHandler(redisClient *redis.Client, triggerFunc func(int) ([]inte
 	}
 }
 
-// ResetAgentHandler resets the timers for any specific protocol.
+// ResetAgentHandler resets all protocols for a specific agent or the entire system.
 func ResetAgentHandler(redisClient *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if redisClient == nil {
@@ -336,49 +336,40 @@ func ResetAgentHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		ctx := context.Background()
 		query := r.URL.Query()
-		protocol := query.Get("protocol")
-		if protocol == "" {
-			protocol = query.Get("tier")
+		agentName := query.Get("agent")
+		if agentName == "" {
+			// Legacy fallback for old frontend versions during transition
+			agentName = query.Get("protocol")
+			if agentName == "" {
+				agentName = query.Get("tier")
+			}
 		}
 
-		// 1. Map protocols to their Redis keys
-		// researcher -> courier:last_run:researcher
-		// sentry -> guardian:last_run:sentry
-		switch protocol {
-		case "alert_review":
+		switch agentName {
+		case "architect":
 			redisClient.Set(ctx, "architect:last_run:alert_review", 0, utils.DefaultTTL)
-		case "researcher":
+		case "courier":
 			redisClient.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
-			// Reset the cognitive idle timer as well, so it triggers immediately if conditions met
-			redisClient.Set(ctx, "system:last_cognitive_event", 0, 0)
-		case "compressor":
 			redisClient.Set(ctx, "courier:last_run:compressor", 0, utils.DefaultTTL)
-		case "sentry":
+			redisClient.Set(ctx, "system:last_cognitive_event", 0, 0)
+		case "guardian":
 			redisClient.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
-		case "review":
+		case "fabricator":
 			redisClient.Set(ctx, "fabricator:last_run:review", 0, utils.DefaultTTL)
-		case "issue":
 			redisClient.Set(ctx, "fabricator:last_run:issue", 0, utils.DefaultTTL)
-		case "construct":
 			redisClient.Set(ctx, "fabricator:last_run:construct", 0, utils.DefaultTTL)
-		case "reporter":
 			redisClient.Set(ctx, "fabricator:last_run:reporter", 0, utils.DefaultTTL)
-		case "summary":
+		case "analyzer":
 			redisClient.Set(ctx, "analyzer:last_run:summary", 0, utils.DefaultTTL)
-			// Clear per-user summary cooldowns
-			iter := redisClient.Scan(ctx, 0, "agent:Analyzer:summary:cooldown:*", 0).Iterator()
-			for iter.Next(ctx) {
-				redisClient.Del(ctx, iter.Val())
-			}
-		case "synthesis":
 			redisClient.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
-			// Clear per-user cooldowns
-			iter := redisClient.Scan(ctx, 0, "agent:Analyzer:cooldown:*", 0).Iterator()
+			// Clear per-user cooldowns for Analyzer
+			iter := redisClient.Scan(ctx, 0, "agent:Analyzer:*", 0).Iterator()
 			for iter.Next(ctx) {
 				redisClient.Del(ctx, iter.Val())
 			}
 		case "all":
-			// Reset everything
+			// Global Reset
+			redisClient.Set(ctx, "architect:last_run:alert_review", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "courier:last_run:compressor", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
@@ -390,18 +381,31 @@ func ResetAgentHandler(redisClient *redis.Client) http.HandlerFunc {
 			redisClient.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
 			redisClient.Set(ctx, "system:last_cognitive_event", 0, 0)
 
-			// Clear per-user cooldowns
 			iter := redisClient.Scan(ctx, 0, "agent:Analyzer:*", 0).Iterator()
 			for iter.Next(ctx) {
 				redisClient.Del(ctx, iter.Val())
 			}
 		default:
-			http.Error(w, fmt.Sprintf("Unknown protocol: %s", protocol), http.StatusBadRequest)
-			return
+			// Fallback for direct protocol resets if still requested
+			switch agentName {
+			case "researcher":
+				redisClient.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
+			case "compressor":
+				redisClient.Set(ctx, "courier:last_run:compressor", 0, utils.DefaultTTL)
+			case "sentry":
+				redisClient.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
+			case "summary":
+				redisClient.Set(ctx, "analyzer:last_run:summary", 0, utils.DefaultTTL)
+			case "synthesis":
+				redisClient.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
+			default:
+				http.Error(w, fmt.Sprintf("Unknown agent or protocol: %s", agentName), http.StatusBadRequest)
+				return
+			}
 		}
 
 		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(w, "Protocol '%s' reset successfully", protocol)
+		_, _ = fmt.Fprintf(w, "Agent '%s' reset successfully", agentName)
 	}
 }
 

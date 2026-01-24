@@ -232,11 +232,6 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 	var runLogs strings.Builder
 	runLogs.WriteString(fmt.Sprintf("Run started at %s\n\n", time.Now().Format(time.RFC3339)))
 
-	// STEP 0: Workspace Protection
-	log.Printf("[%s] Protecting human workspace...", HandlerName)
-	h.stashWorkspace()
-	defer h.unstashWorkspace()
-
 	// TIER 0: REVIEW (Alert -> Issue)
 	h.RedisClient.Set(ctx, "fabricator:active_tier", "review", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Review Protocol (Tier 0)")
@@ -278,9 +273,8 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 	runLogs.WriteString(fmt.Sprintf("### TIER 2: CONSTRUCT\nStatus: %v\nOutput: %s\n\n", success, constructOut))
 
 	if !success || err != nil {
-		log.Printf("[%s] Construction FAILED. Triggering Rollback.", HandlerName)
-		h.rollbackWorkspace()
-		h.finalizeRun(ctx, runLogs.String(), "FAILED (Rollback Triggered)")
+		log.Printf("[%s] Construction unsuccessful. Leaving changes for next run.", HandlerName)
+		h.finalizeRun(ctx, runLogs.String(), "Incomplete (Build Failed)")
 		return
 	}
 
@@ -292,41 +286,16 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 	workingDir := filepath.Join(homeDir, "EasterCompany")
 
 	// 'dex build' handles git add/commit/push automatically if successful.
-	// We build from source to ensure the latest CLI logic is used.
 	buildCmd := exec.Command("dex", "build", "--source", "--force")
 	buildCmd.Dir = workingDir
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		log.Printf("[%s] Production build failed: %v\nOutput: %s", HandlerName, err, string(out))
-		// Note: We don't rollback here because the dry-run passed, so the code is syntactically correct.
-		// A build failure here is likely environment/infrastructure related.
 	}
 
 	h.RedisClient.Set(ctx, "fabricator:last_run:construct", time.Now().Unix(), 0)
 
 	// TIER 3: REPORTER
 	h.finalizeRun(ctx, runLogs.String(), "Success")
-}
-
-func (h *FabricatorHandler) stashWorkspace() {
-	homeDir, _ := os.UserHomeDir()
-	workingDir := filepath.Join(homeDir, "EasterCompany")
-	_ = exec.Command("git", "-C", workingDir, "stash", "push", "--include-untracked", "-m", "dexter-autostash").Run()
-	_ = exec.Command("git", "-C", workingDir, "submodule", "foreach", "git stash push --include-untracked -m dexter-autostash").Run()
-}
-
-func (h *FabricatorHandler) unstashWorkspace() {
-	homeDir, _ := os.UserHomeDir()
-	workingDir := filepath.Join(homeDir, "EasterCompany")
-	_ = exec.Command("git", "-C", workingDir, "stash", "pop").Run()
-	_ = exec.Command("git", "-C", workingDir, "submodule", "foreach", "git stash pop").Run()
-}
-
-func (h *FabricatorHandler) rollbackWorkspace() {
-	homeDir, _ := os.UserHomeDir()
-	workingDir := filepath.Join(homeDir, "EasterCompany")
-	_ = exec.Command("git", "-C", workingDir, "checkout", ".").Run()
-	_ = exec.Command("git", "-C", workingDir, "clean", "-fd").Run()
-	_ = exec.Command("git", "-C", workingDir, "submodule", "foreach", "git checkout . && git clean -fd").Run()
 }
 
 func (h *FabricatorHandler) finalizeRun(ctx context.Context, logs string, status string) {

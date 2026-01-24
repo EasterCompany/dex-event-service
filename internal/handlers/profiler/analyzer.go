@@ -133,11 +133,10 @@ func (h *AnalyzerAgent) checkAndExecute() {
 func (h *AnalyzerAgent) PerformWaterfall(ctx context.Context) {
 	log.Printf("[%s] Starting Analyzer Waterfall Run", h.Config.Name)
 
-	// CLAIM RUN: Set all protocol last_run timestamps to now immediately.
+	// CLAIM RUN: Set summary last_run timestamp immediately to prevent re-entry.
+	// We do NOT set synthesis last_run yet; that only happens if it actually runs.
 	now := time.Now().Unix()
-	for protocol := range h.Config.Cooldowns {
-		h.RedisClient.Set(ctx, fmt.Sprintf("analyzer:last_run:%s", protocol), now, 0)
-	}
+	h.RedisClient.Set(ctx, "analyzer:last_run:summary", now, 0)
 
 	utils.AcquireCognitiveLock(ctx, h.RedisClient, h.Config.Name, h.Config.ProcessID, h.DiscordClient)
 	defer utils.ReleaseCognitiveLock(ctx, h.RedisClient, h.Config.Name)
@@ -155,14 +154,16 @@ func (h *AnalyzerAgent) PerformWaterfall(ctx context.Context) {
 		h.cleanupRun(ctx)
 		return
 	}
-	h.RedisClient.Set(ctx, "analyzer:last_run:summary", time.Now().Unix(), 0)
+	// Update timestamp again at end? No, already set at start.
 
 	// TIER 2: SYNTHESIS
 	h.RedisClient.Set(ctx, "analyzer:active_tier", "synthesis", 0)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Synthesis Batch")
-	if h.PerformSynthesis(ctx) > 0 {
-		h.RedisClient.Set(ctx, "analyzer:last_run:synthesis", time.Now().Unix(), 0)
-	}
+
+	// Only update synthesis last_run if we actually attempt it
+	h.RedisClient.Set(ctx, "analyzer:last_run:synthesis", time.Now().Unix(), 0)
+
+	h.PerformSynthesis(ctx)
 
 	h.cleanupRun(ctx)
 }
@@ -219,7 +220,8 @@ func (h *AnalyzerAgent) processUserSummary(ctx context.Context, targetUserID str
 		sessionID := fmt.Sprintf("summary-%s-%d", targetUserID, time.Now().Unix())
 		// Temporary override EnforceJSON for text summary
 		h.Config.EnforceJSON = false
-		results, _, err := h.RunCognitiveLoop(ctx, h, "summary", h.Config.Models["summary"], sessionID, "Summarize user behavior concisely.", input, 1)
+		systemPrompt := fmt.Sprintf("You are an expert behavior analyst. Summarize the behavior and interactions of the user '%s' based on the provided context. Be concise and objective.", targetUserID)
+		results, _, err := h.RunCognitiveLoop(ctx, h, "summary", h.Config.Models["summary"], sessionID, systemPrompt, input, 1)
 
 		if err == nil && len(results) > 0 {
 			history, _ := h.ChatManager.LoadHistory(ctx, sessionID)
@@ -418,6 +420,27 @@ func (h *AnalyzerAgent) gatherHistoryContext(ctx context.Context, userID string)
 
 					// 4. Include critical service logs even without keywords
 					if !relevant && strings.Contains(evt.Service, "dex-") && evt.Service != "dex-discord-service" {
+						// NEW FILTER: Reduce CLI noise for self-reflection
+						if evt.Service == "dex-cli" {
+							// Only keep significant lifecycle/error events
+							lowerC := strings.ToLower(content)
+							isSignificant := strings.Contains(lowerC, "build") ||
+								strings.Contains(lowerC, "error") ||
+								strings.Contains(lowerC, "restart") ||
+								strings.Contains(lowerC, "upgrade") ||
+								strings.Contains(lowerC, "install") ||
+								strings.Contains(lowerC, "failure")
+
+							if !isSignificant {
+								continue
+							}
+						}
+						// Also filter out verbose model inference logs unless they failed
+						if strings.Contains(evt.Service, "model") || strings.Contains(content, "Model Inference") {
+							if !strings.Contains(content, "error") && !strings.Contains(content, "failed") {
+								continue
+							}
+						}
 						relevant = true
 					}
 
@@ -488,10 +511,23 @@ func (h *AnalyzerAgent) gatherHistoryContext(ctx context.Context, userID string)
 				_ = json.Unmarshal(evt.Event, &evtData)
 				eType, _ := evtData["type"].(string)
 				testID, _ := evtData["test_id"].(string)
+				content := ""
+				if c, ok := evtData["content"].(string); ok {
+					content = c
+				}
 
 				if eType == string(types.EventTypeSystemAnalysisAudit) || testID != "" || evt.Service == "dex-test-service" {
 					continue
 				}
+
+				// NOISE REDUCTION: Filter out system internals from user context
+				if evt.Service == "dex-cli" || evt.Service == "process-manager" {
+					continue
+				}
+				if strings.Contains(content, "Model Inference") {
+					continue
+				}
+
 				events = append(events, evt)
 			}
 		}

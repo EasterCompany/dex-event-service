@@ -516,11 +516,18 @@ func getSanitizedEvents(ctx context.Context, key string, count int) []types.Even
 					delete(eventData, "response_raw")
 					delete(eventData, "base64_preview")
 					delete(eventData, "input_prompt")
+
+					// Remove top-level URL for non-link analysis events (Visual analysis, etc)
+					if eventType != "analysis.link.completed" && eventType != "analysis.router.decision" {
+						delete(eventData, "url")
+					}
 				}
 				if attachments, ok := eventData["attachments"].([]interface{}); ok {
 					for _, att := range attachments {
 						if attMap, ok := att.(map[string]interface{}); ok {
 							delete(attMap, "base64")
+							delete(attMap, "url")
+							delete(attMap, "proxy_url")
 						}
 					}
 				}
