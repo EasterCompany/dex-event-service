@@ -14,6 +14,20 @@ func StripANSI(s string) string {
 	return ansiRegex.ReplaceAllString(s, "")
 }
 
+// StripEmojis removes unicode emojis and Discord custom emoji tags from a string.
+func StripEmojis(s string) string {
+	// 1. Remove Discord custom emojis: <:name:id> or <a:name:id>
+	customEmojiRegex := regexp.MustCompile(`<a?:\w+:\d+>`)
+	s = customEmojiRegex.ReplaceAllString(s, "")
+
+	// 2. Remove Unicode emojis
+	// This regex covers most common emoji ranges
+	unicodeEmojiRegex := regexp.MustCompile(`[\x{1F300}-\x{1F9FF}]|[\x{2600}-\x{26FF}]`)
+	s = unicodeEmojiRegex.ReplaceAllString(s, "")
+
+	return strings.TrimSpace(s)
+}
+
 // NormalizeWhitespace aggressively tightens a string for AI context.
 // It trims the entire string, collapses 3+ newlines to 2, and trims horizontal whitespace from every line.
 func NormalizeWhitespace(s string) string {

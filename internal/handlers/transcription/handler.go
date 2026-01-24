@@ -41,7 +41,9 @@ func cleanForSpeech(text string) string {
 	text = reAsterisks.ReplaceAllString(text, "$1")
 	// 3. Remove any remaining asterisks
 	text = reSingleAsterisk.ReplaceAllString(text, "")
-	// 4. Clean up whitespace
+	// 4. Remove emojis
+	text = utils.StripEmojis(text)
+	// 5. Clean up whitespace
 	return strings.TrimSpace(text)
 }
 
