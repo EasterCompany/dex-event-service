@@ -398,6 +398,7 @@ func createChildEvent(redisClient *redis.Client, parent *types.Event, childEvent
 	pipe.Set(ctx, eventKeyPrefix+childID, childEventJSON, utils.DefaultTTL)
 	pipe.ZAdd(ctx, timelineKey, redis.Z{Score: float64(timestamp), Member: childID})
 	pipe.ZAdd(ctx, "events:service:"+parent.Service, redis.Z{Score: float64(timestamp), Member: childID})
+	pipe.ZAdd(ctx, "events:type:"+childEventData.Type, redis.Z{Score: float64(timestamp), Member: childID})
 	_, err := pipe.Exec(ctx)
 	return childID, err
 }
