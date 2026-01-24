@@ -76,7 +76,8 @@ func IsSystemBusy(ctx context.Context, redisClient *redis.Client, ignoreVoiceMod
 }
 
 // AcquireCognitiveLock attempts to take the global cognitive lock.
-// If the lock is held, it will wait (poll) until it becomes available.
+// If the lock is held by another agent, it will wait (poll) until it becomes available.
+// If the lock is held by "PAUSED", it will override it to allow human interaction.
 func AcquireCognitiveLock(ctx context.Context, redisClient *redis.Client, agentName string, processID string, discordClient *discord.Client) {
 	if redisClient == nil {
 		return
@@ -90,7 +91,7 @@ func AcquireCognitiveLock(ctx context.Context, redisClient *redis.Client, agentN
 
 	// 1. Check if we already hold the lock (Re-entrancy)
 	currentHolder, _ := redisClient.Get(ctx, CognitiveLockKey).Result()
-	if currentHolder == agentName || (currentHolder == "SYSTEM_VALIDATION_ACTIVE" && isTestProcess) {
+	if currentHolder == agentName {
 		return
 	}
 
@@ -101,23 +102,25 @@ func AcquireCognitiveLock(ctx context.Context, redisClient *redis.Client, agentN
 		case <-ctx.Done():
 			return
 		default:
-			// 1.5 Check if system is paused
-			if IsSystemPaused(ctx, redisClient) {
-				// If paused, we wait. We do not try to acquire.
-				time.Sleep(5 * time.Second)
-				continue
+			// 2. Check if lock is "PAUSED" - if so, we can override it
+			val, _ := redisClient.Get(ctx, CognitiveLockKey).Result()
+			if val == "PAUSED" {
+				// We take the lock even if paused because this is a reactive interaction
+				redisClient.Set(ctx, CognitiveLockKey, agentName, CognitiveLockTTL)
+				log.Printf("[%s] Cognitive Lock acquired by overriding PAUSE.", agentName)
+				return
 			}
 
-			// 2. Attempt to set the lock with a TTL
+			// 3. Attempt to set the lock with a TTL
 			ok, err := redisClient.SetNX(ctx, CognitiveLockKey, agentName, CognitiveLockTTL).Result()
 			if err == nil && ok {
 				log.Printf("[%s] Cognitive Lock ACQUIRED.", agentName)
 				return
 			}
 
-			// Lock is held, report as queued if not already
+			// Lock is held by another ACTIVE agent, report as queued if not already
 			if !isQueued {
-				log.Printf("[%s] Cognitive Lock busy, waiting in queue...", agentName)
+				log.Printf("[%s] System busy (Locked by %s), waiting in queue...", agentName, val)
 				if processID != "" {
 					ReportProcess(ctx, redisClient, discordClient, processID, "Queued")
 				}
@@ -131,6 +134,7 @@ func AcquireCognitiveLock(ctx context.Context, redisClient *redis.Client, agentN
 }
 
 // ReleaseCognitiveLock releases the global cognitive lock.
+// If the system is still paused, it restores the "PAUSED" lock state.
 func ReleaseCognitiveLock(ctx context.Context, redisClient *redis.Client, agentName string) {
 	if redisClient == nil {
 		return
@@ -139,8 +143,14 @@ func ReleaseCognitiveLock(ctx context.Context, redisClient *redis.Client, agentN
 	// Verify we are the holder before releasing (safety)
 	holder, err := redisClient.Get(ctx, CognitiveLockKey).Result()
 	if err == nil && holder == agentName {
-		redisClient.Del(ctx, CognitiveLockKey)
-		log.Printf("[%s] Cognitive Lock RELEASED.", agentName)
+		if IsSystemPaused(ctx, redisClient) {
+			// Restore the PAUSED indicator for the dashboard
+			redisClient.Set(ctx, CognitiveLockKey, "PAUSED", 0)
+			log.Printf("[%s] Cognitive Lock RELEASED (Restored PAUSE).", agentName)
+		} else {
+			redisClient.Del(ctx, CognitiveLockKey)
+			log.Printf("[%s] Cognitive Lock RELEASED.", agentName)
+		}
 	}
 }
 

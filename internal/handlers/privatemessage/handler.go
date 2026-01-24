@@ -516,6 +516,10 @@ Description:`
 			"repeat_penalty": 1.3,
 		}
 		lastUpdate := time.Now()
+
+		// ACQUIRE COGNITIVE LOCK for response generation
+		utils.AcquireCognitiveLock(ctx, deps.Redis, "Response Generation", channelID, deps.Discord)
+
 		stats, err := deps.Model.ChatStreamWithChannel(ctx, responseModel, finalMessages, channelID, options, func(chunk string) {
 			fullResponse += chunk
 
@@ -529,6 +533,9 @@ Description:`
 				lastUpdate = time.Now()
 			}
 		})
+
+		utils.ReleaseCognitiveLock(ctx, deps.Redis, "Response Generation")
+
 		if err != nil {
 			log.Printf("Response generation failed: %v", err)
 			_, _ = deps.Discord.CompleteStream(channelID, streamMessageID, "Error: I couldn't generate a response. Please try again later.")
