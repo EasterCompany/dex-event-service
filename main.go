@@ -309,6 +309,7 @@ func main() {
 	})).Methods("POST")
 	router.HandleFunc("/cli/execute", endpoints.HandleCLIExecute).Methods("POST")
 	router.HandleFunc("/web/history", endpoints.WebHistoryHandler).Methods("GET", "POST")
+	router.HandleFunc("/web/view", endpoints.WebViewHandler).Methods("GET")
 	router.HandleFunc("/system/status", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }).Methods("GET", "HEAD")
 	router.HandleFunc("/roadmap", endpoints.RoadmapHandler(redisClient)).Methods("GET", "POST", "PATCH", "DELETE")
 	router.HandleFunc("/roadmap/stats", endpoints.GetRoadmapStatsHandler()).Methods("GET")

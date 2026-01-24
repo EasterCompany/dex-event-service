@@ -53,3 +53,23 @@ func WebHistoryHandler(w http.ResponseWriter, r *http.Request) {
 
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }
+
+// WebViewHandler returns the cumulative state of the current web analysis
+func WebViewHandler(w http.ResponseWriter, r *http.Request) {
+	if redisClient == nil {
+		http.Error(w, "Redis client not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	ctx := r.Context()
+	val, err := redisClient.Get(ctx, "state:web:view").Result()
+	if err != nil {
+		// Not an error, just empty
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{}"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(val))
+}

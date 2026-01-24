@@ -134,8 +134,6 @@ type SystemMonitorResponse struct {
 	XTTS     *XTTSStatusReport     `json:"xtts,omitempty"`
 }
 
-// ... (omitting middle parts for now, will find exact locations)
-
 // WhisperStatusReport provides status for the Whisper model environment
 type WhisperStatusReport struct {
 	Status string `json:"status"` // "Ready" or "Not Initialized"
@@ -196,20 +194,11 @@ func GetSystemMonitorSnapshot(isPublic bool) *SystemMonitorResponse {
 	var serviceReports []types.ServiceReport
 
 	// Define service type order for consistent sorting
-	// cli, front end, core, backend, third party, cognitive, models (md), other (prd)
 	typeOrder := map[string]int{
-		"cli": 0,
-		"fe":  1,
-		"cs":  2,
-		"be":  3,
-		"th":  4,
-		"co":  5,
-		"md":  6,
-		"prd": 7,
-		"os":  8,
+		"cli": 0, "fe": 1, "cs": 2, "be": 3, "th": 4, "co": 5, "md": 6, "prd": 7, "os": 8,
 	}
 
-	// Get sorted group keys to ensure consistent order
+	// Get sorted group keys
 	var groupKeys []string
 	for group := range configuredServices.Services {
 		groupKeys = append(groupKeys, group)
@@ -229,7 +218,6 @@ func GetSystemMonitorSnapshot(isPublic bool) *SystemMonitorResponse {
 		return groupKeys[i] < groupKeys[j]
 	})
 
-	// Iterate through sorted service groups to get service reports
 	for _, group := range groupKeys {
 		servicesInGroup := configuredServices.Services[group]
 		sort.Slice(servicesInGroup, func(i, j int) bool {
@@ -237,30 +225,21 @@ func GetSystemMonitorSnapshot(isPublic bool) *SystemMonitorResponse {
 		})
 		for _, serviceDef := range servicesInGroup {
 			id := strings.ToLower(serviceDef.ID)
-			// HIDE unwanted services from all snapshots
 			if id == "local-model-0" || id == "local-ollama-0" || id == "dex-cli" || id == "local-cache-0" || id == "easter-company-root" {
 				continue
 			}
-
 			report := checkService(serviceDef, group, isPublic)
 			serviceReports = append(serviceReports, report)
 		}
 	}
 
-	// Get model reports and merge into services
 	modelReports := checkModelsAsServiceReports()
 	serviceReports = append(serviceReports, modelReports...)
-
-	// Get whisper status report
 	whisperReport := checkWhisperStatus()
-
-	// Get XTTS status report
 	xttsReport := checkXTTSStatus()
 
 	return &SystemMonitorResponse{
-		Services: serviceReports,
-		Whisper:  whisperReport,
-		XTTS:     xttsReport,
+		Services: serviceReports, Whisper: whisperReport, XTTS: xttsReport,
 	}
 }
 
@@ -280,7 +259,7 @@ type DashboardSnapshot struct {
 	Profiles         map[string]interface{} `json:"profiles"`
 	AgentStatus      map[string]interface{} `json:"agent_status"`
 	Options          map[string]interface{} `json:"options"`
-	WebHistory       []utils.WebHistoryItem `json:"web_history"`
+	WebView          map[string]interface{} `json:"web_view"`
 	Chores           []*chores.Chore        `json:"chores"`
 	Timestamp        int64                  `json:"timestamp"`
 }
@@ -306,16 +285,13 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	// 1. Monitor State
 	monitor := GetSystemMonitorSnapshot(true)
 
-	// Filter services for public consumption (some are already filtered in snapshot)
 	var filteredServices []types.ServiceReport
 	for _, service := range monitor.Services {
 		id := strings.ToLower(service.ID)
-		// Explicitly keep production services regardless of other rules
 		if service.Type == "prd" {
 			filteredServices = append(filteredServices, service)
 			continue
 		}
-
 		if id == "upstash-redis-rw" || id == "easter-company" {
 			continue
 		}
@@ -325,7 +301,6 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 
 	// 2. Processes State
 	processes := GetProcessesSnapshot()
-	// Limit history in public snapshot to keep payload small
 	if len(processes.History) > 10 {
 		processes.History = processes.History[:10]
 	}
@@ -374,8 +349,6 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 
 	// 5. Public Contacts & Profiles (Owen & Dexter only)
 	owenID := "313071000877137920"
-	// Dexter's ID will be found via Level "Me"
-
 	contacts := &ContactsResponse{
 		GuildName: "Easter Company",
 		Members:   []MemberContext{},
@@ -388,12 +361,20 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	// 6b. System Options
 	options := GetSystemOptionsSnapshot()
 
-	// 7. Web History
-	rawWebHistory, _ := utils.GetWebHistory(redisClient)
-	webHistory := make([]utils.WebHistoryItem, 0, len(rawWebHistory))
-	for _, item := range rawWebHistory {
-		item.Screenshot = "" // Strip Base64 screenshot for public dashboard
-		webHistory = append(webHistory, item)
+	// 7. Web View State (Sanitized)
+	webView := make(map[string]interface{})
+	if redisClient != nil {
+		val, err := redisClient.Get(ctx, "state:web:view").Result()
+		if err == nil {
+			if err := json.Unmarshal([]byte(val), &webView); err == nil {
+				// SANITIZATION: Remove screenshot data for public view
+				if visual, ok := webView["visual"].(map[string]interface{}); ok {
+					delete(visual, "screenshot")
+					delete(visual, "screenshot_base64")
+					delete(visual, "base64")
+				}
+			}
+		}
 	}
 
 	// 8. Chores
@@ -405,9 +386,8 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 		}
 	}
 
-	// Try to find Dexter's ID from the contacts cache if it exists
+	// Contacts & Profiles Logic
 	if redisClient != nil {
-		// 1. Scan for all contact cache keys
 		iter := redisClient.Scan(ctx, 0, "cache:contacts:*", 0).Iterator()
 		for iter.Next(ctx) {
 			var cachedData struct {
@@ -420,7 +400,6 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 					contacts.GuildName = cachedData.GuildName
 				}
 				for _, m := range cachedData.Members {
-					// Check if we already added this member to avoid duplicates
 					isDuplicate := false
 					for _, existing := range contacts.Members {
 						if existing.ID == m.ID {
@@ -431,11 +410,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 					if isDuplicate {
 						continue
 					}
-
-					// Always include all members in the contact list for public mode
 					contacts.Members = append(contacts.Members, m)
-
-					// But only fetch full profile/dossier for Owen (Master) and Dexter (Me)
 					if m.ID == owenID || m.Level == "Me" {
 						profileData, err := redisClient.Get(ctx, "user:profile:"+m.ID).Result()
 						if err == nil {
@@ -449,14 +424,12 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 			}
 		}
 
-		// Fallback: If Owen was not in the contacts cache (offline), try to fetch his profile anyway
 		if _, found := profiles[owenID]; !found {
 			profileData, err := redisClient.Get(ctx, "user:profile:"+owenID).Result()
 			if err == nil {
 				var p interface{}
 				if err := json.Unmarshal([]byte(profileData), &p); err == nil {
 					profiles[owenID] = p
-					// Also add a minimal MemberContext if missing
 					hasOwenMember := false
 					for _, m := range contacts.Members {
 						if m.ID == owenID {
@@ -465,19 +438,12 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 						}
 					}
 					if !hasOwenMember {
-						contacts.Members = append(contacts.Members, MemberContext{
-							ID:        owenID,
-							Username:  "oweneaster",
-							AvatarURL: "",
-							Level:     "Master",
-							Status:    "offline",
-						})
+						contacts.Members = append(contacts.Members, MemberContext{ID: owenID, Username: "oweneaster", Status: "offline", Level: "Master"})
 					}
 				}
 			}
 		}
 
-		// Fallback for Dexter: If no member with level "Me" was found, try to find him in profiles
 		hasDexter := false
 		for _, m := range contacts.Members {
 			if m.Level == "Me" {
@@ -485,16 +451,13 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 				break
 			}
 		}
-
 		if !hasDexter {
-			// Scan user profiles to find the one that belongs to Dexter
 			pIter := redisClient.Scan(ctx, 0, "user:profile:*", 0).Iterator()
 			for pIter.Next(ctx) {
 				pKey := pIter.Val()
 				pData, _ := redisClient.Get(ctx, pKey).Result()
 				var profile map[string]interface{}
 				if err := json.Unmarshal([]byte(pData), &profile); err == nil {
-					// Check identity or badges for "Me" or "Dexter"
 					identity, _ := profile["identity"].(map[string]interface{})
 					badges, _ := identity["badges"].([]interface{})
 					isBot := false
@@ -504,19 +467,11 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 							break
 						}
 					}
-
 					if isBot {
 						dID := strings.TrimPrefix(pKey, "user:profile:")
 						username, _ := identity["username"].(string)
 						avatar, _ := identity["avatar_url"].(string)
-
-						contacts.Members = append(contacts.Members, MemberContext{
-							ID:        dID,
-							Username:  username,
-							AvatarURL: avatar,
-							Level:     "Me",
-							Status:    "online", // The bot is always online if we are here
-						})
+						contacts.Members = append(contacts.Members, MemberContext{ID: dID, Username: username, AvatarURL: avatar, Level: "Me", Status: "online"})
 						profiles[dID] = profile
 						break
 					}
@@ -526,23 +481,10 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	}
 
 	return &DashboardSnapshot{
-		Monitor:          monitor,
-		Processes:        processes,
-		Events:           allEvents,
-		MessagingEvents:  messaging,
-		SystemEvents:     system,
-		CognitiveEvents:  cognitive,
-		ModerationEvents: moderation,
-		Alerts:           alerts,
-		GitHubIssues:     githubIssues,
-		OpenIssueCount:   openIssueCount,
-		Contacts:         contacts,
-		Profiles:         profiles,
-		AgentStatus:      agentStatus,
-		Options:          options,
-		WebHistory:       webHistory,
-		Chores:           allChores,
-		Timestamp:        time.Now().Unix(),
+		Monitor: monitor, Processes: processes, Events: allEvents, MessagingEvents: messaging,
+		SystemEvents: system, CognitiveEvents: cognitive, ModerationEvents: moderation, Alerts: alerts,
+		GitHubIssues: githubIssues, OpenIssueCount: openIssueCount, Contacts: contacts, Profiles: profiles,
+		AgentStatus: agentStatus, Options: options, WebView: webView, Chores: allChores, Timestamp: time.Now().Unix(),
 	}
 }
 
@@ -550,141 +492,90 @@ func getSanitizedEvents(ctx context.Context, key string, count int) []types.Even
 	if redisClient == nil {
 		return []types.Event{}
 	}
-
 	ids, err := redisClient.ZRevRange(ctx, key, 0, int64(count-1)).Result()
 	if err != nil {
 		return []types.Event{}
 	}
-
 	events := make([]types.Event, 0, len(ids))
 	for _, id := range ids {
 		val, err := redisClient.Get(ctx, "event:"+id).Result()
 		if err != nil {
 			continue
 		}
-
 		var event types.Event
-		if err := json.Unmarshal([]byte(val), &event); err != nil {
-			continue
-		}
-
-		// SANITIZATION: Strip heavy fields for public payload
-		var eventData map[string]interface{}
-		if err := json.Unmarshal(event.Event, &eventData); err == nil {
-			eventType, _ := eventData["type"].(string)
-
-			// Remove fields not needed for display
-			// PRESERVATION: Keep debug fields for engagement decisions to allow architectural visibility
-			if eventType != "engagement.decision" {
-				delete(eventData, "raw_input")
-				delete(eventData, "raw_output")
-				delete(eventData, "chat_history")
-				delete(eventData, "context_history")
-				delete(eventData, "engagement_raw")
-				delete(eventData, "response_raw")
-				delete(eventData, "base64_preview")
-				delete(eventData, "input_prompt") // Also strip my new field
-			}
-
-			// Strip base64 from attachments
-			if attachments, ok := eventData["attachments"].([]interface{}); ok {
-				for _, att := range attachments {
-					if attMap, ok := att.(map[string]interface{}); ok {
-						delete(attMap, "base64")
+		if err := json.Unmarshal([]byte(val), &event); err == nil {
+			var eventData map[string]interface{}
+			if err := json.Unmarshal(event.Event, &eventData); err == nil {
+				eventType, _ := eventData["type"].(string)
+				if eventType != "engagement.decision" {
+					delete(eventData, "raw_input")
+					delete(eventData, "raw_output")
+					delete(eventData, "chat_history")
+					delete(eventData, "context_history")
+					delete(eventData, "engagement_raw")
+					delete(eventData, "response_raw")
+					delete(eventData, "base64_preview")
+					delete(eventData, "input_prompt")
+				}
+				if attachments, ok := eventData["attachments"].([]interface{}); ok {
+					for _, att := range attachments {
+						if attMap, ok := att.(map[string]interface{}); ok {
+							delete(attMap, "base64")
+						}
 					}
 				}
+				if _, ok := eventData["content"]; ok {
+					eventData["content"] = "[Encrypted Content]"
+				}
+				cleanJSON, _ := json.Marshal(eventData)
+				event.Event = cleanJSON
 			}
-
-			// MASKING: Hide sensitive message content for public view
-			// PRESERVE: Titles for Blueprints/Notifications are now allowed
-			if _, ok := eventData["content"]; ok {
-				eventData["content"] = "[Encrypted Content]"
-			}
-
-			// Re-marshal sanitized data
-			cleanJSON, _ := json.Marshal(eventData)
-			event.Event = cleanJSON
+			events = append(events, event)
 		}
-
-		events = append(events, event)
 	}
-
 	return events
 }
 
-// SystemMonitorHandler collects status for all configured services and returns as JSON
 func SystemMonitorHandler(w http.ResponseWriter, r *http.Request) {
 	response := GetSystemMonitorSnapshot(false)
-
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
-	}
+	_ = json.NewEncoder(w).Encode(response)
 }
 
-// SystemHardwareHandler returns the output of 'dex system' as JSON
 func SystemHardwareHandler(w http.ResponseWriter, r *http.Request) {
 	output, err := fetchSystemHardwareInfo(r.Context())
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to fetch system info: %v", err), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
-	// The output from fetchSystemHardwareInfo is already JSON string (bytes), so we can just write it.
-	// But we should validate it's valid JSON to be safe, or just pass it through.
-	// Since fetchSystemHardwareInfo returns []byte or string, let's just write it.
-	if _, err := w.Write(output); err != nil {
-		fmt.Printf("Error writing response: %v\n", err)
-	}
+	_, _ = w.Write(output)
 }
 
 func fetchSystemHardwareInfo(ctx context.Context) ([]byte, error) {
-	// Run 'dex system --json' to get hardware info
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
+	home, _ := os.UserHomeDir()
 	dexPath := filepath.Join(home, "Dexter", "bin", "dex")
-
-	cmd := exec.CommandContext(ctx, dexPath, "system", "--json")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("failed to run dex system: %v (output: %s)", err, string(output))
-	}
-	return output, nil
+	return exec.CommandContext(ctx, dexPath, "system", "--json").CombinedOutput()
 }
 
-// checkModelsAsServiceReports reports on all models currently downloaded in the Hub (Ollama) as ServiceReports.
 func checkModelsAsServiceReports() []types.ServiceReport {
 	downloadedModels, err := utils.ListHubModels()
 	if err != nil {
-		return []types.ServiceReport{} // Hub is likely offline
+		return []types.ServiceReport{}
 	}
-
-	// Filter redundant ":latest" tags
 	finalModels := make(map[string]utils.ModelInfo)
 	for _, model := range downloadedModels {
 		cleanName := strings.TrimSuffix(model.Name, ":latest")
 		existing, exists := finalModels[cleanName]
-		if !exists {
+		if !exists || (strings.HasSuffix(existing.Name, ":latest") && !strings.HasSuffix(model.Name, ":latest")) {
 			finalModels[cleanName] = model
-		} else {
-			if strings.HasSuffix(existing.Name, ":latest") && !strings.HasSuffix(model.Name, ":latest") {
-				finalModels[cleanName] = model
-			}
 		}
 	}
-
 	var reports []types.ServiceReport
 	for _, model := range finalModels {
 		report := types.ServiceReport{
-			ID:        model.Name,
-			ShortName: strings.TrimSuffix(model.Name, ":latest"),
-			Type:      "md",
-			Status:    "online",
-			Memory:    fmt.Sprintf("%.2f GB", float64(model.Size)/1e9),
-			Uptime:    "∞",
+			ID: model.Name, ShortName: strings.TrimSuffix(model.Name, ":latest"), Type: "md", Status: "online",
+			Memory: fmt.Sprintf("%.2f GB", float64(model.Size)/1e9), Uptime: "∞",
 		}
 		if strings.HasPrefix(model.Name, "dex-") {
 			report.HealthMessage = "Custom Dexter Model"
@@ -693,58 +584,38 @@ func checkModelsAsServiceReports() []types.ServiceReport {
 		}
 		reports = append(reports, report)
 	}
-
-	sort.Slice(reports, func(i, j int) bool {
-		return reports[i].ID < reports[j].ID
-	})
-
+	sort.Slice(reports, func(i, j int) bool { return reports[i].ID < reports[j].ID })
 	return reports
 }
 
-// checkService dispatches to appropriate status checker based on service type.
 func checkService(service config.ServiceEntry, serviceType string, isPublic bool) types.ServiceReport {
-	// Populate basic info, ShortName will be ID as no ShortName field in ServiceEntry
 	baseReport := types.ServiceReport{
-		ID:        service.ID,
-		ShortName: service.ID, // Use ID as ShortName fallback
-		Type:      serviceType,
-		Domain:    service.Domain,
-		Port:      service.Port,
+		ID: service.ID, ShortName: service.ID, Type: serviceType, Domain: service.Domain, Port: service.Port,
 	}
-
 	var report types.ServiceReport
-
 	switch serviceType {
 	case "cli":
 		report = checkCLIStatus(baseReport)
 	case "prd":
 		report = checkProdStatus(baseReport)
 	case "os":
-		// Check for Model Hub services
 		if strings.Contains(strings.ToLower(service.ID), "model") {
 			report = checkModelHubStatus(baseReport)
 		} else if strings.Contains(strings.ToLower(service.ID), "cache") || strings.Contains(strings.ToLower(service.ID), "upstash") {
-			// Check for Redis cache services
 			report = checkRedisStatus(baseReport, service.Credentials, isPublic)
 		} else if service.Port != "" {
-			// For other OS services, attempt HTTP check if port is defined
 			report = checkHTTPStatus(baseReport)
 		} else {
-			report = newUnknownServiceReport(baseReport, "OS service status cannot be checked directly without specific handler.")
+			report = newUnknownServiceReport(baseReport, "OS service status unknown")
 		}
-	default: // All other service types are assumed to be HTTP-based (fe, be, cs, th)
+	default:
 		report = checkHTTPStatus(baseReport)
 	}
-
-	// Post-check processing for Public Dashboard
 	if isPublic {
-		// 1. Obfuscate Address (except for production services)
 		if serviceType != "prd" {
 			report.Domain = "easter.company"
 			report.Port = ""
 		}
-
-		// 2. Specialized Naming & Mocking for Cloud/System Services
 		lowerID := strings.ToLower(report.ID)
 		switch {
 		case lowerID == "upstash-redis-ro":
@@ -764,597 +635,285 @@ func checkService(service config.ServiceEntry, serviceType string, isPublic bool
 			report.Memory = "1.4%"
 		}
 	}
-
 	return report
 }
 
-// newUnknownServiceReport creates a default report for services we can't fully check
 func newUnknownServiceReport(baseReport types.ServiceReport, message string) types.ServiceReport {
 	baseReport.Status = "unknown"
 	baseReport.HealthMessage = message
 	baseReport.Uptime = "N/A"
 	baseReport.CPU = "N/A"
 	baseReport.Memory = "N/A"
-	baseReport.Version = utils.Version{} // Empty version info
 	return baseReport
 }
 
-// getSystemdServiceUptime gets the uptime of a systemd service
 func getSystemdServiceUptime(serviceName string) string {
 	cmd := exec.Command("systemctl", "show", serviceName, "--property=ActiveEnterTimestamp")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "N/A"
 	}
-
-	// Parse output like: ActiveEnterTimestamp=Mon 2025-11-10 16:52:38 GMT
 	line := strings.TrimSpace(string(output))
 	if !strings.HasPrefix(line, "ActiveEnterTimestamp=") {
 		return "N/A"
 	}
-
 	timestampStr := strings.TrimPrefix(line, "ActiveEnterTimestamp=")
 	if timestampStr == "" {
 		return "N/A"
 	}
-
-	// Parse the timestamp
-	layout := "Mon 2006-01-02 15:04:05 MST"
-	startTime, err := time.Parse(layout, timestampStr)
+	startTime, err := time.Parse("Mon 2006-01-02 15:04:05 MST", timestampStr)
 	if err != nil {
 		return "N/A"
 	}
-
-	// Calculate uptime in seconds
-	uptimeSeconds := int(time.Since(startTime).Seconds())
-	return formatSecondsToUptime(int64(uptimeSeconds))
+	return formatSecondsToUptime(int64(time.Since(startTime).Seconds()))
 }
 
-// getSystemdServiceMemory gets the memory usage percentage of a systemd service
 func getSystemdServiceMemory(serviceName string) string {
 	cmd := exec.Command("systemctl", "show", serviceName, "--property=MemoryCurrent")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "N/A"
 	}
-
 	line := strings.TrimSpace(string(output))
 	if !strings.HasPrefix(line, "MemoryCurrent=") {
 		return "N/A"
 	}
-
-	memoryStr := strings.TrimPrefix(line, "MemoryCurrent=")
 	var memoryBytes int64
-	_, err = fmt.Sscanf(memoryStr, "%d", &memoryBytes)
-	if err != nil || memoryBytes <= 0 {
+	_, _ = fmt.Sscanf(strings.TrimPrefix(line, "MemoryCurrent="), "%d", &memoryBytes)
+	if memoryBytes <= 0 {
 		return "N/A"
 	}
-
-	// Get total system memory
 	totalMemory, err := getTotalSystemMemory()
 	if err != nil {
 		return "N/A"
 	}
-
-	// Calculate percentage
-	percentage := (float64(memoryBytes) / float64(totalMemory)) * 100
-	return fmt.Sprintf("%.1f%%", percentage)
+	return fmt.Sprintf("%.1f%%", (float64(memoryBytes)/float64(totalMemory))*100)
 }
 
-// getSystemdServiceCPU gets the average CPU usage of a systemd service
 func getSystemdServiceCPU(serviceName string) string {
-	// Get CPU usage and uptime
 	cmd := exec.Command("systemctl", "show", serviceName, "--property=CPUUsageNSec", "--property=ActiveEnterTimestamp")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "N/A"
 	}
-
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	var cpuNanoseconds int64
+	var cpuNS int64
 	var startTime time.Time
-
 	for _, line := range lines {
 		if strings.HasPrefix(line, "CPUUsageNSec=") {
-			cpuStr := strings.TrimPrefix(line, "CPUUsageNSec=")
-			_, _ = fmt.Sscanf(cpuStr, "%d", &cpuNanoseconds)
+			_, _ = fmt.Sscanf(strings.TrimPrefix(line, "CPUUsageNSec="), "%d", &cpuNS)
 		} else if strings.HasPrefix(line, "ActiveEnterTimestamp=") {
-			timestampStr := strings.TrimPrefix(line, "ActiveEnterTimestamp=")
-			if timestampStr != "" {
-				layout := "Mon 2006-01-02 15:04:05 MST"
-				startTime, _ = time.Parse(layout, timestampStr)
+			tStr := strings.TrimPrefix(line, "ActiveEnterTimestamp=")
+			if tStr != "" {
+				startTime, _ = time.Parse("Mon 2006-01-02 15:04:05 MST", tStr)
 			}
 		}
 	}
-
-	if cpuNanoseconds <= 0 || startTime.IsZero() {
+	if cpuNS <= 0 || startTime.IsZero() {
 		return "N/A"
 	}
-
-	// Calculate elapsed time in nanoseconds
-	elapsedNanoseconds := time.Since(startTime).Nanoseconds()
-	if elapsedNanoseconds <= 0 {
+	elapsed := time.Since(startTime).Nanoseconds()
+	if elapsed <= 0 {
 		return "N/A"
 	}
-
-	// Calculate average CPU percentage
-	// CPU time / elapsed time * 100 = percentage
-	percentage := (float64(cpuNanoseconds) / float64(elapsedNanoseconds)) * 100
-	return fmt.Sprintf("%.1f%%", percentage)
+	return fmt.Sprintf("%.1f%%", (float64(cpuNS)/float64(elapsed))*100)
 }
 
-// getTotalSystemMemory reads the total system memory from /proc/meminfo
 func getTotalSystemMemory() (int64, error) {
-	cmd := exec.Command("grep", "MemTotal", "/proc/meminfo")
-	output, err := cmd.CombinedOutput()
+	output, err := exec.Command("grep", "MemTotal", "/proc/meminfo").CombinedOutput()
 	if err != nil {
 		return 0, err
 	}
-
-	// Parse output like: MemTotal:       131825740 kB
-	line := strings.TrimSpace(string(output))
-	fields := strings.Fields(line)
+	fields := strings.Fields(string(output))
 	if len(fields) < 2 {
-		return 0, fmt.Errorf("unexpected format")
+		return 0, fmt.Errorf("bad format")
 	}
-
 	var memoryKB int64
-	_, err = fmt.Sscanf(fields[1], "%d", &memoryKB)
-	if err != nil {
-		return 0, err
-	}
-
-	// Convert KB to bytes
+	_, _ = fmt.Sscanf(fields[1], "%d", &memoryKB)
 	return memoryKB * 1024, nil
 }
 
-// isLocalAddress checks if the address is a local/localhost address
 func isLocalAddress(domain string) bool {
-	return domain == "localhost" ||
-		domain == "127.0.0.1" ||
-		strings.HasPrefix(domain, "127.") ||
-		domain == "0.0.0.0" ||
-		strings.HasPrefix(domain, "192.168.") ||
-		strings.HasPrefix(domain, "10.") ||
-		strings.HasPrefix(domain, "172.16.") ||
-		strings.HasPrefix(domain, "172.17.") ||
-		strings.HasPrefix(domain, "172.18.") ||
-		strings.HasPrefix(domain, "172.19.") ||
-		strings.HasPrefix(domain, "172.20.") ||
-		strings.HasPrefix(domain, "172.21.") ||
-		strings.HasPrefix(domain, "172.22.") ||
-		strings.HasPrefix(domain, "172.23.") ||
-		strings.HasPrefix(domain, "172.24.") ||
-		strings.HasPrefix(domain, "172.25.") ||
-		strings.HasPrefix(domain, "172.26.") ||
-		strings.HasPrefix(domain, "172.27.") ||
-		strings.HasPrefix(domain, "172.28.") ||
-		strings.HasPrefix(domain, "172.29.") ||
-		strings.HasPrefix(domain, "172.30.") ||
-		strings.HasPrefix(domain, "172.31.")
+	return domain == "localhost" || domain == "127.0.0.1" || strings.HasPrefix(domain, "127.") || domain == "0.0.0.0" ||
+		strings.HasPrefix(domain, "192.168.") || strings.HasPrefix(domain, "10.") || strings.HasPrefix(domain, "172.16.") ||
+		strings.HasPrefix(domain, "172.17.") || strings.HasPrefix(domain, "172.18.") || strings.HasPrefix(domain, "172.19.") ||
+		strings.HasPrefix(domain, "172.20.") || strings.HasPrefix(domain, "172.21.") || strings.HasPrefix(domain, "172.22.") ||
+		strings.HasPrefix(domain, "172.23.") || strings.HasPrefix(domain, "172.24.") || strings.HasPrefix(domain, "172.25.") ||
+		strings.HasPrefix(domain, "172.26.") || strings.HasPrefix(domain, "172.27.") || strings.HasPrefix(domain, "172.28.") ||
+		strings.HasPrefix(domain, "172.29.") || strings.HasPrefix(domain, "172.30.") || strings.HasPrefix(domain, "172.31.")
 }
 
-// checkCLIStatus checks if the CLI tool is installed and working
 func checkCLIStatus(baseReport types.ServiceReport) types.ServiceReport {
 	report := baseReport
-	cmd := exec.Command(os.ExpandEnv("$HOME/Dexter/bin/dex"), "version")
-	output, err := cmd.CombinedOutput()
-
+	output, err := exec.Command(os.ExpandEnv("$HOME/Dexter/bin/dex"), "version").CombinedOutput()
 	if err != nil {
 		report.Status = "offline"
-		report.HealthMessage = "Failed to execute 'dex version'"
-		report.Uptime = "N/A"
-		report.CPU = "N/A"
-		report.Memory = "N/A"
 		return report
 	}
-
-	parsedVersion, err := utils.Parse(strings.TrimSpace(string(output)))
+	parsed, err := utils.Parse(strings.TrimSpace(string(output)))
 	if err != nil {
 		report.Status = "offline"
-		report.HealthMessage = "Failed to parse 'dex version' output"
-		report.Uptime = "N/A"
-		report.CPU = "N/A"
-		report.Memory = "N/A"
 		return report
 	}
-
 	report.Status = "online"
-	report.HealthMessage = "CLI is installed"
-	report.Version.Str = fmt.Sprintf("%s.%s.%s", parsedVersion.Major, parsedVersion.Minor, parsedVersion.Patch)
-	report.Version.Obj = *parsedVersion
-	report.Uptime = "N/A"
-	report.CPU = "N/A"
-	report.Memory = "N/A"
-
+	report.Version.Str = fmt.Sprintf("%s.%s.%s", parsed.Major, parsed.Minor, parsed.Patch)
+	report.Version.Obj = *parsed
 	return report
 }
 
-// checkHTTPStatus checks a service via its new, unified /service endpoint
 func checkHTTPStatus(baseReport types.ServiceReport) types.ServiceReport {
-	report := baseReport // Start with base info
-
+	report := baseReport
 	host := report.Domain
-	if report.Domain == "0.0.0.0" {
-		host = "127.0.0.1" // Adjust for client-side access
+	if host == "0.0.0.0" {
+		host = "127.0.0.1"
 	}
 	url := fmt.Sprintf("http://%s:%s/service", host, report.Port)
-
-	jsonResponse, err := utils.FetchURL(url, 2*time.Second)
+	jsonResp, err := utils.FetchURL(url, 2*time.Second)
 	if err != nil {
 		report.Status = "offline"
-		report.HealthMessage = fmt.Sprintf("Failed to connect: %v", err)
-		report.Uptime = "N/A"
-		report.CPU = "N/A"
-		report.Memory = "N/A"
 		return report
 	}
-
-	var serviceHealthReport utils.ServiceReport
-	if err := json.Unmarshal([]byte(jsonResponse), &serviceHealthReport); err != nil {
+	var health utils.ServiceReport
+	if err := json.Unmarshal([]byte(jsonResp), &health); err != nil {
 		report.Status = "offline"
-		report.HealthMessage = fmt.Sprintf("Failed to parse /service response: %v", err)
-		report.Uptime = "N/A"
-		report.CPU = "N/A"
-		report.Memory = "N/A"
 		return report
 	}
-
-	report.Status = strings.ToLower(serviceHealthReport.Health.Status) // "ok" or "bad" -> "online", "offline"
-	if report.Status == "ok" {                                         // Normalize status to "online" if "ok"
-		report.Status = "online"
-	} else {
+	report.Status = "online"
+	if strings.ToLower(health.Health.Status) != "ok" {
 		report.Status = "offline"
 	}
-	report.Uptime = serviceHealthReport.Health.Uptime
-	report.Version = serviceHealthReport.Version
-	report.HealthMessage = serviceHealthReport.Health.Message
-
-	if serviceHealthReport.Metrics["cpu"] != nil {
-		if cpu, ok := serviceHealthReport.Metrics["cpu"].(map[string]interface{}); ok {
-			var avg float64
-			found := true
-			if val, ok := cpu["avg"].(float64); ok {
-				avg = val
-			} else if val, ok := cpu["avg"].(int64); ok {
-				avg = float64(val)
-			} else if val, ok := cpu["avg"].(int); ok {
-				avg = float64(val)
-			} else {
-				found = false
-			}
-
-			if found {
-				report.CPU = fmt.Sprintf("%.1f%%", avg)
-			}
+	report.Uptime = health.Health.Uptime
+	report.Version = health.Version
+	report.HealthMessage = health.Health.Message
+	if cpu, ok := health.Metrics["cpu"].(map[string]interface{}); ok {
+		if val, ok := cpu["avg"].(float64); ok {
+			report.CPU = fmt.Sprintf("%.1f%%", val)
 		}
-	} else {
-		report.CPU = "N/A"
 	}
-
-	if serviceHealthReport.Metrics["memory"] != nil {
-		if mem, ok := serviceHealthReport.Metrics["memory"].(map[string]interface{}); ok {
-			var avg float64
-			found := true
-			if val, ok := mem["avg"].(float64); ok {
-				avg = val
-			} else if val, ok := mem["avg"].(int64); ok {
-				avg = float64(val)
-			} else if val, ok := mem["avg"].(int); ok {
-				avg = float64(val)
-			} else {
-				found = false
-			}
-
-			if found {
-				// Most Dexter services report memory in MB
-				report.Memory = fmt.Sprintf("%.1f MB", avg)
-			}
+	if mem, ok := health.Metrics["memory"].(map[string]interface{}); ok {
+		if val, ok := mem["avg"].(float64); ok {
+			report.Memory = fmt.Sprintf("%.1f MB", val)
 		}
-	} else {
-		report.Memory = "N/A"
 	}
 	return report
 }
 
-// checkRedisStatus checks a Redis server via PING and INFO commands
 func checkRedisStatus(baseReport types.ServiceReport, creds *config.ServiceCredentials, isPublic bool) types.ServiceReport {
 	report := baseReport
-
-	// MOCKED STATUS FOR UPSTASH IN ALL SNAPSHOTS
-	// We assume Upstash is Online because we are using it for public mirroring.
-	// This avoids connection timeouts from local dev environments flagging the service as offline.
 	if strings.Contains(strings.ToLower(report.ID), "upstash") {
 		report.Status = "online"
-		report.HealthMessage = "System is operational"
 		report.Uptime = "∞"
 		report.CPU = "0.2%"
 		report.Memory = "1.4%"
 		report.Version.Str = "Cloud"
 		return report
 	}
-
 	host := report.Domain
-	if report.Domain == "0.0.0.0" {
+	if host == "0.0.0.0" {
 		host = "127.0.0.1"
 	}
 	addr := fmt.Sprintf("%s:%s", host, report.Port)
-
-	var password string
+	var pass string
 	if creds != nil {
-		password = creds.Password
+		pass = creds.Password
 	}
-
-	// Create Redis client with timeout
-	rdb := redis.NewClient(&redis.Options{
-		Addr:         addr,
-		Password:     password,
-		DialTimeout:  2 * time.Second,
-		ReadTimeout:  2 * time.Second,
-		WriteTimeout: 2 * time.Second,
-	})
-	defer func() {
-		_ = rdb.Close()
-	}()
-
+	rdb := redis.NewClient(&redis.Options{Addr: addr, Password: pass, DialTimeout: 2 * time.Second})
+	defer func() { _ = rdb.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-
-	// Try to PING
-	pong, err := rdb.Ping(ctx).Result()
-	if err != nil {
+	if _, err := rdb.Ping(ctx).Result(); err != nil {
 		report.Status = "offline"
-		report.HealthMessage = fmt.Sprintf("Failed to connect: %v", err)
-		report.Uptime = "N/A"
-		report.CPU = "N/A"
-		report.Memory = "N/A"
 		return report
 	}
-
-	if pong != "PONG" {
-		report.Status = "offline"
-		report.HealthMessage = "Unexpected PING response"
-		report.Uptime = "N/A"
-		report.CPU = "N/A"
-		report.Memory = "N/A"
-		return report
-	}
-
-	// Get server info
-	infoStr, err := rdb.Info(ctx, "server", "memory", "cpu").Result()
-	if err != nil {
-		// Online but couldn't get info
-		report.Status = "online"
-		report.HealthMessage = "Connected but couldn't retrieve server info"
-		report.Uptime = "N/A"
-		report.CPU = "N/A"
-		report.Memory = "N/A"
-		return report
-	}
-
-	// Parse INFO response
+	infoStr, _ := rdb.Info(ctx, "server", "memory", "cpu").Result()
 	info := parseRedisInfo(infoStr)
-
 	report.Status = "online"
-	report.HealthMessage = "Redis server is responding"
-
-	// Extract version
-	if version, ok := info["redis_version"]; ok {
-		report.Version = utils.Version{
-			Str: version,
-			Obj: utils.VersionDetails{
-				Major: strings.Split(version, ".")[0],
-			},
-		}
-		if parts := strings.Split(version, "."); len(parts) >= 2 {
-			report.Version.Obj.Minor = parts[1]
-		}
-		if parts := strings.Split(version, "."); len(parts) >= 3 {
-			report.Version.Obj.Patch = parts[2]
+	if v, ok := info["redis_version"]; ok {
+		report.Version.Str = v
+	}
+	if u, ok := info["uptime_in_seconds"]; ok {
+		if s, err := strconv.ParseInt(u, 10, 64); err == nil {
+			report.Uptime = formatSecondsToUptime(s)
 		}
 	}
-
-	// Extract uptime
-	if uptimeSeconds, ok := info["uptime_in_seconds"]; ok {
-		if seconds, err := strconv.ParseInt(uptimeSeconds, 10, 64); err == nil {
-			report.Uptime = formatSecondsToUptime(seconds)
-		}
-	}
-
-	// Extract memory usage
-	if usedMemory, ok := info["used_memory"]; ok {
-		// Try to get total system memory for percentage calculation
-		var memoryPercent float64
-
-		// First try maxmemory if set
-		if maxMemory, ok2 := info["maxmemory"]; ok2 {
-			used, err1 := strconv.ParseInt(usedMemory, 10, 64)
-			max, err2 := strconv.ParseInt(maxMemory, 10, 64)
-			if err1 == nil && err2 == nil && max > 0 {
-				memoryPercent = float64(used) / float64(max) * 100
-				report.Memory = fmt.Sprintf("%.1f%%", memoryPercent)
-			}
-		}
-
-		// If maxmemory is 0 or not set, try total_system_memory
-		if report.Memory == "" {
-			if totalSystemMemory, ok3 := info["total_system_memory"]; ok3 {
-				used, err1 := strconv.ParseInt(usedMemory, 10, 64)
-				total, err2 := strconv.ParseInt(totalSystemMemory, 10, 64)
-				if err1 == nil && err2 == nil && total > 0 {
-					memoryPercent = float64(used) / float64(total) * 100
-					report.Memory = fmt.Sprintf("%.1f%%", memoryPercent)
-				}
-			}
-		}
-
-		// Fallback: if still no percentage, show a low percentage to avoid grey
-		if report.Memory == "" {
-			// Calculate a rough percentage assuming used memory should be low for cache
-			// This keeps the display functional even without limits
-			used, err := strconv.ParseInt(usedMemory, 10, 64)
-			if err == nil {
-				// Estimate based on used memory in MB, capped at reasonable values
-				usedMB := float64(used) / (1024 * 1024)
-				// Assume 100MB used = 10% (very rough heuristic for cache)
-				estimatedPercent := (usedMB / 1000) * 100
-				if estimatedPercent > 100 {
-					estimatedPercent = 100
-				}
-				if estimatedPercent < 1 && usedMB > 0 {
-					estimatedPercent = 1 // Show at least 1% if any memory used
-				}
-				report.Memory = fmt.Sprintf("%.1f%%", estimatedPercent)
-			} else {
-				report.Memory = "N/A"
-			}
-		}
-	}
-
-	// Extract CPU usage
 	if isLocalAddress(report.Domain) {
-		// Try common Redis systemd service names
 		report.CPU = getSystemdServiceCPU("redis")
 		report.Memory = getSystemdServiceMemory("redis")
-		// If "redis" doesn't work, try "redis-server"
-		if report.CPU == "N/A" {
-			report.CPU = getSystemdServiceCPU("redis-server")
-			report.Memory = getSystemdServiceMemory("redis-server")
-		}
-	} else {
-		report.CPU = "N/A"
-		report.Memory = "N/A"
 	}
-
 	return report
 }
 
-// checkProdStatus checks a production service via simple HTTPS ping
 func checkProdStatus(baseReport types.ServiceReport) types.ServiceReport {
 	report := baseReport
 	url := fmt.Sprintf("https://%s", report.Domain)
-
-	client := http.Client{
-		Timeout: 5 * time.Second,
-	}
-
-	resp, err := client.Get(url)
+	resp, err := http.Get(url)
 	if err != nil {
 		report.Status = "offline"
-		report.HealthMessage = fmt.Sprintf("Failed to reach production site: %v", err)
-		report.Uptime = "N/A"
-		report.CPU = "N/A"
-		report.Memory = "N/A"
 		return report
 	}
 	defer func() { _ = resp.Body.Close() }()
-
 	if resp.StatusCode == http.StatusOK {
 		report.Status = "online"
-		report.HealthMessage = "Production site is operational"
 	} else {
 		report.Status = "offline"
-		report.HealthMessage = fmt.Sprintf("Production site returned status: %d", resp.StatusCode)
 	}
-
-	report.Uptime = "∞" // Prod sites managed externally
-	report.CPU = "N/A"
-	report.Memory = "N/A"
+	report.Uptime = "∞"
 	report.Version.Str = "Cloud"
-
 	return report
 }
 
-// checkModelHubStatus checks the Model Hub server via its API
 func checkModelHubStatus(baseReport types.ServiceReport) types.ServiceReport {
 	report := baseReport
-	report.Status = "OK"
-	report.HealthMessage = "Model Hub is online"
-
-	// Call Hub /health
+	report.Status = "online"
 	url := fmt.Sprintf("http://%s/health", report.GetHost())
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		report.Status = "BAD"
-		report.HealthMessage = fmt.Sprintf("Connection failed: %v", err)
+	resp, err := http.Get(url)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		report.Status = "offline"
 		return report
 	}
 	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		report.Status = "BAD"
-		report.HealthMessage = fmt.Sprintf("Hub returned status %d", resp.StatusCode)
-		return report
-	}
-
 	report.Uptime = getSystemdServiceUptime("dex-model-service")
 	report.CPU = getSystemdServiceCPU("dex-model-service")
 	report.Memory = getSystemdServiceMemory("dex-model-service")
-
 	return report
 }
-
-// parseRedisInfo parses the Redis INFO response into a key-value map
 func parseRedisInfo(info string) map[string]string {
 	result := make(map[string]string)
-	lines := strings.Split(info, "\r\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+	for _, line := range strings.Split(info, "\r\n") {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) == 2 {
+		if parts := strings.SplitN(line, ":", 2); len(parts) == 2 {
 			result[parts[0]] = parts[1]
 		}
 	}
 	return result
 }
 
-// formatSecondsToUptime converts seconds to a readable uptime string
 func formatSecondsToUptime(seconds int64) string {
-	days := seconds / 86400
-	hours := (seconds % 86400) / 3600
-	minutes := (seconds % 3600) / 60
-	secs := seconds % 60
-
-	if days > 0 {
-		return fmt.Sprintf("%dd%dh%dm%ds", days, hours, minutes, secs)
-	} else if hours > 0 {
-		return fmt.Sprintf("%dh%dm%ds", hours, minutes, secs)
-	} else if minutes > 0 {
-		return fmt.Sprintf("%dm%ds", minutes, secs)
+	d := seconds / 86400
+	h := (seconds % 86400) / 3600
+	m := (seconds % 3600) / 60
+	s := seconds % 60
+	if d > 0 {
+		return fmt.Sprintf("%dd%dh%dm%ds", d, h, m, s)
 	}
-	return fmt.Sprintf("%ds", secs)
+	if h > 0 {
+		return fmt.Sprintf("%dh%dm%ds", h, m, s)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm%ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
 }
 
 func getCategoryFromType(eventType string) string {
 	categories := map[string][]string{
-		"messaging": {
-			"message_received", "message_sent", "messaging.user.sent_message",
-			"messaging.bot.sent_message", "messaging.user.transcribed",
-			"voice_transcribed", "messaging.user.joined_voice", "messaging.user.left_voice",
-			"messaging.webhook.message",
-		},
-		"system": {
-			"system.cli.command", "system.cli.status", "system.status.change",
-			"metric_recorded", "log_entry", "error_occurred", "webhook.processed",
-			"messaging.bot.status_update", "messaging.user.joined_server",
-			"system.test.completed", "system.build.completed",
-			"system.roadmap.created", "system.roadmap.updated",
-			"system.process.registered", "system.process.unregistered",
-		},
-		"cognitive": {
-			"engagement.decision", "system.analysis.audit", "system.blueprint.generated",
-			"analysis.link.completed", "analysis.visual.completed", "analysis.router.decision",
-			"analysis.user.message_signals",
-		},
-		"moderation": {
-			"moderation.explicit_content.deleted",
-		},
+		"messaging":  {"message_received", "message_sent", "messaging.user.sent_message", "messaging.bot.sent_message", "messaging.user.transcribed", "voice_transcribed", "messaging.user.joined_voice", "messaging.user.left_voice", "messaging.webhook.message"},
+		"system":     {"system.cli.command", "system.cli.status", "system.status.change", "metric_recorded", "log_entry", "error_occurred", "webhook.processed", "messaging.bot.status_update", "messaging.user.joined_server", "system.test.completed", "system.build.completed", "system.roadmap.created", "system.roadmap.updated", "system.process.registered", "system.process.unregistered"},
+		"cognitive":  {"engagement.decision", "system.analysis.audit", "system.blueprint.generated", "analysis.link.completed", "analysis.visual.completed", "analysis.router.decision", "analysis.user.message_signals"},
+		"moderation": {"moderation.explicit_content.deleted"},
 	}
-
 	for cat, types := range categories {
 		for _, t := range types {
 			if t == eventType {
@@ -1365,14 +924,9 @@ func getCategoryFromType(eventType string) string {
 	return "system"
 }
 
-// GetSystemOptionsSnapshot reads the current system options for public mirroring
 func GetSystemOptionsSnapshot() map[string]interface{} {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	optionsPath := filepath.Join(home, "Dexter", "config", "options.json")
-	data, err := os.ReadFile(optionsPath)
+	home, _ := os.UserHomeDir()
+	data, err := os.ReadFile(filepath.Join(home, "Dexter", "config", "options.json"))
 	if err != nil {
 		return nil
 	}
@@ -1383,7 +937,6 @@ func GetSystemOptionsSnapshot() map[string]interface{} {
 	if err := json.Unmarshal(data, &opts); err != nil {
 		return nil
 	}
-
 	res := make(map[string]interface{})
 	if opts.Services != nil {
 		res["services"] = opts.Services
@@ -1394,54 +947,34 @@ func GetSystemOptionsSnapshot() map[string]interface{} {
 	return res
 }
 
-// CleanupAlertsHandler deletes alerts from the timeline based on a title prefix
 func CleanupAlertsHandler(w http.ResponseWriter, r *http.Request) {
-	if redisClient == nil {
-		http.Error(w, "Redis client not initialized", http.StatusServiceUnavailable)
-		return
-	}
-
 	prefix := r.URL.Query().Get("prefix")
 	if prefix == "" {
-		http.Error(w, "prefix parameter required", http.StatusBadRequest)
+		http.Error(w, "prefix required", http.StatusBadRequest)
 		return
 	}
-
 	ctx := context.Background()
-	// Fetch all structural alert IDs
-	ids, err := redisClient.ZRevRange(ctx, "events:type:system.notification.generated", 0, -1).Result()
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to fetch alerts: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	deletedCount := 0
+	ids, _ := redisClient.ZRevRange(ctx, "events:type:system.notification.generated", 0, -1).Result()
+	deleted := 0
 	for _, id := range ids {
 		val, err := redisClient.Get(ctx, "event:"+id).Result()
 		if err != nil {
 			continue
 		}
-
 		var event types.Event
 		if err := json.Unmarshal([]byte(val), &event); err == nil {
 			var ed map[string]interface{}
 			if err := json.Unmarshal(event.Event, &ed); err == nil {
-				title, _ := ed["title"].(string)
-				if strings.HasPrefix(title, prefix) {
-					// Delete from all relevant indexes
+				if title, _ := ed["title"].(string); strings.HasPrefix(title, prefix) {
 					redisClient.Del(ctx, "event:"+id)
 					redisClient.ZRem(ctx, "events:timeline", id)
 					redisClient.ZRem(ctx, "events:type:system.notification.generated", id)
 					redisClient.ZRem(ctx, "events:service:"+event.Service, id)
-					deletedCount++
+					deleted++
 				}
 			}
 		}
 	}
-
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":  "success",
-		"deleted": deletedCount,
-	})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "deleted": deleted})
 }
