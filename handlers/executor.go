@@ -306,7 +306,7 @@ func ExecuteHandler(ctx context.Context, redisClient *redis.Client, event *types
 		return res.ChildIDs, res.Error
 	}
 	select {
-	case jobQueue <- &job{Context: ctx, Event: event, Config: handlerConfig}:
+	case jobQueue <- &job{Context: context.Background(), Event: event, Config: handlerConfig}:
 	default:
 		return nil, fmt.Errorf("job queue full")
 	}

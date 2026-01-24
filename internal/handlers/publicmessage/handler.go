@@ -57,6 +57,11 @@ func Handle(ctx context.Context, input types.HandlerInput, deps *handlers.Depend
 	userID, _ := input.EventData["user_id"].(string)
 	mentionedBot, _ := input.EventData["mentioned_bot"].(bool)
 
+	// Model Options
+	utilityOptions := map[string]interface{}{
+		"num_thread": runtime.NumCPU(),
+	}
+
 	// Robust test_id extraction
 	testID, _ := input.EventData["test_id"].(string)
 	if testID == "" {
@@ -399,10 +404,10 @@ Rules:
 2. If the image contains non-sexual nudity (classical art, statues, medical context), memes, cartoons, or is otherwise safe, provide a concise visual description.
 3. DO NOT flag memes or common internet GIFs as explicit unless they depict actual sexual acts.
 4. Treat screenshots of pornographic websites or links to explicit galleries as Rule 1.`
-					var err error
-					description, _, err = deps.Model.Generate("dex-vision", prompt, []string{base64Img})
-					if err != nil {
-						log.Printf("Vision model failed for %s: %v", filename, err)
+					var genErr error
+					description, _, genErr = deps.Model.GenerateWithContext(ctx, "dex-vision", prompt, []string{base64Img}, utilityOptions)
+					if genErr != nil {
+						log.Printf("Vision model failed for %s: %v", filename, genErr)
 						continue
 					}
 
@@ -489,11 +494,6 @@ Rules:
 	// Standardized Models
 	modelEngagement := "dex-engagement-model"
 	modelResponse := "dex-public-message"
-
-	// Model Options
-	utilityOptions := map[string]interface{}{
-		"num_thread": runtime.NumCPU(),
-	}
 
 	var decisionStr string
 	responseModel := modelResponse
