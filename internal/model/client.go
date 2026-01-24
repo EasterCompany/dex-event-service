@@ -34,6 +34,7 @@ func NewClient(url string, rdb *redis.Client) *Client {
 type ModelRequest struct {
 	Model     string          `json:"model"`
 	Prompt    string          `json:"prompt,omitempty"`
+	Images    []string        `json:"images,omitempty"`
 	Messages  []Message       `json:"messages,omitempty"`
 	Stream    bool            `json:"stream"`
 	Options   json.RawMessage `json:"options,omitempty"` // Pass through options opaque
@@ -313,6 +314,7 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 	reqBody := ModelRequest{
 		Model:   model,
 		Prompt:  prompt,
+		Images:  images,
 		Stream:  false,
 		Options: optsBytes,
 	}
@@ -387,6 +389,7 @@ func (c *Client) GenerateStream(model, prompt string, images []string, options m
 	reqBody := ModelRequest{
 		Model:   model,
 		Prompt:  prompt,
+		Images:  images,
 		Stream:  true,
 		Options: optsBytes,
 	}
