@@ -9,6 +9,8 @@ import (
 	"image/jpeg"
 	_ "image/png" // Register PNG decoder
 	"net/http"
+
+	_ "golang.org/x/image/webp" // Register WebP decoder
 )
 
 func DownloadImageAndConvertToJPEG(url string) (string, error) {
