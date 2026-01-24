@@ -403,20 +403,48 @@ func createChildEvent(redisClient *redis.Client, parent *types.Event, childEvent
 }
 
 func createErrorEvent(redisClient *redis.Client, parent *types.Event, handlerName, errorMsg string) ([]string, error) {
+	// 1. Create the detailed Error Log event
 	errorEventData := types.HandlerOutputEvent{
 		Type: "error_occurred",
 		Data: map[string]interface{}{
-			"error": errorMsg, "error_type": "HandlerError", "severity": "high",
-			"context": map[string]interface{}{"handler": handlerName, "parent_event": parent.ID, "parent_service": parent.Service},
+			"error":      errorMsg,
+			"error_type": "HandlerError",
+			"severity":   "high",
+			"context": map[string]interface{}{
+				"handler":        handlerName,
+				"parent_event":   parent.ID,
+				"parent_service": parent.Service,
+			},
 		},
 	}
-	childID, err := createChildEvent(redisClient, parent, errorEventData)
+	errorChildID, err := createChildEvent(redisClient, parent, errorEventData)
 	if err != nil {
 		return nil, err
 	}
-	parent.ChildIDs = []string{childID}
+
+	// 2. Create the System Notification (Alert) for the Guardian
+	alertEventData := types.HandlerOutputEvent{
+		Type: "system.notification.generated",
+		Data: map[string]interface{}{
+			"title":             fmt.Sprintf("Handler Error: %s", handlerName),
+			"priority":          "critical",
+			"category":          "error",
+			"body":              fmt.Sprintf("Critical failure in handler '%s': %s. Source Service: %s", handlerName, errorMsg, parent.Service),
+			"related_event_ids": []string{parent.ID, errorChildID},
+			"alert":             true,
+			"read":              false,
+		},
+	}
+	alertChildID, err := createChildEvent(redisClient, parent, alertEventData)
+	if err != nil {
+		log.Printf("Warning: Failed to create alert event for handler error: %v", err)
+		return []string{errorChildID}, nil
+	}
+
+	childIDs := []string{errorChildID, alertChildID}
+	parent.ChildIDs = childIDs
 	_ = updateEvent(redisClient, parent)
-	return []string{childID}, nil
+	return childIDs, nil
 }
 
 func updateEvent(redisClient *redis.Client, event *types.Event) error {
