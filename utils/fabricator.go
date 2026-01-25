@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -17,12 +19,14 @@ func CheckFabricatorPro() (bool, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	binPath, err := exec.LookPath("dex-fabricator-cli")
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return false, "", fmt.Errorf("dex-fabricator-cli not found in PATH")
+		return false, "", fmt.Errorf("failed to get home directory: %w", err)
 	}
+	binPath := filepath.Join(homeDir, "Dexter", "bin", "dex-fabricator-cli")
 
 	cmd := exec.CommandContext(ctx, binPath, "info")
+	cmd.Env = append(os.Environ(), "NODE_NO_WARNINGS=1")
 	var out bytes.Buffer
 	cmd.Stderr = &out
 	cmd.Stdout = &out
