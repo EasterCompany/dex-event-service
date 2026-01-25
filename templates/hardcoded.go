@@ -579,7 +579,7 @@ func GetTemplates() map[string]EventTemplate {
 				"detected_language": {
 					Type:        "string",
 					Required:    false,
-					Description: "Language code detected by Whisper",
+					Description: "Language code detected by Neural STT Kernel",
 				},
 				"english_translation": {
 					Type:        "string",

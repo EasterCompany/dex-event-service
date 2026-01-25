@@ -323,7 +323,7 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 			// 2. Check CLI Commands (if applicable)
 			if isCognitive && eventType == "system.cli.command" {
 				if cmd, ok := eventData["command"].(string); ok {
-					ignoredCmds := []string{"status", "logs", "version", "help", "events", "test", "system", "monitor", "cache", "event", "config", "whisper", "discord"}
+					ignoredCmds := []string{"status", "logs", "version", "help", "events", "test", "system", "monitor", "cache", "event", "config", "stt", "discord"}
 					for _, ig := range ignoredCmds {
 						if cmd == ig {
 							isCognitive = false

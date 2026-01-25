@@ -129,33 +129,33 @@ type ModelReport struct {
 
 // SystemMonitorResponse is the top-level response for the system monitor endpoint
 type SystemMonitorResponse struct {
-	Services []types.ServiceReport `json:"services"`
-	Whisper  *WhisperStatusReport  `json:"whisper,omitempty"`
-	XTTS     *XTTSStatusReport     `json:"xtts,omitempty"`
+	Services  []types.ServiceReport `json:"services"`
+	NeuralSTT *STTStatusReport      `json:"neural_stt,omitempty"`
+	NeuralTTS *TTSStatusReport      `json:"neural_tts,omitempty"`
 }
 
-// WhisperStatusReport provides status for the Whisper model environment
-type WhisperStatusReport struct {
+// STTStatusReport provides status for the Neural STT environment
+type STTStatusReport struct {
 	Status string `json:"status"` // "Ready" or "Not Initialized"
 	Path   string `json:"path"`
 }
 
-// XTTSStatusReport provides status for the XTTS model environment
-type XTTSStatusReport struct {
+// TTSStatusReport provides status for the Neural TTS environment
+type TTSStatusReport struct {
 	Status string `json:"status"` // "Ready" or "Not Initialized"
 	Path   string `json:"path"`
 }
 
-// checkWhisperStatus checks if the Whisper model has been initialized
-func checkWhisperStatus() *WhisperStatusReport {
+// checkSTTStatus checks if the STT model has been initialized
+func checkSTTStatus() *STTStatusReport {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil // Cannot determine home directory
+		return nil
 	}
-	modelDir := filepath.Join(home, "Dexter", "models", "whisper", "large-v3-turbo")
+	modelFile := filepath.Join(home, "Dexter", "models", "dex-net-stt.bin")
 
-	report := &WhisperStatusReport{Path: modelDir}
-	if _, err := os.Stat(modelDir); err == nil {
+	report := &STTStatusReport{Path: modelFile}
+	if _, err := os.Stat(modelFile); err == nil {
 		report.Status = "Ready"
 	} else {
 		report.Status = "Not Initialized"
@@ -163,17 +163,16 @@ func checkWhisperStatus() *WhisperStatusReport {
 	return report
 }
 
-// checkXTTSStatus checks if the XTTS model has been initialized
-func checkXTTSStatus() *XTTSStatusReport {
+// checkTTSStatus checks if the TTS model has been initialized
+func checkTTSStatus() *TTSStatusReport {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
 	}
-	modelDir := filepath.Join(home, "Dexter", "models", "xtts")
+	modelFile := filepath.Join(home, "Dexter", "models", "dex-net-tts.onnx")
 
-	report := &XTTSStatusReport{Path: modelDir}
-	// XTTS is ready if the directory exists and contains a config.json (or just check dir)
-	if _, err := os.Stat(filepath.Join(modelDir, "config.json")); err == nil {
+	report := &TTSStatusReport{Path: modelFile}
+	if _, err := os.Stat(modelFile); err == nil {
 		report.Status = "Ready"
 	} else {
 		report.Status = "Not Initialized"
@@ -235,11 +234,11 @@ func GetSystemMonitorSnapshot(isPublic bool) *SystemMonitorResponse {
 
 	modelReports := checkModelsAsServiceReports()
 	serviceReports = append(serviceReports, modelReports...)
-	whisperReport := checkWhisperStatus()
-	xttsReport := checkXTTSStatus()
+	sttReport := checkSTTStatus()
+	ttsReport := checkTTSStatus()
 
 	return &SystemMonitorResponse{
-		Services: serviceReports, Whisper: whisperReport, XTTS: xttsReport,
+		Services: serviceReports, NeuralSTT: sttReport, NeuralTTS: ttsReport,
 	}
 }
 
