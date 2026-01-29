@@ -224,7 +224,7 @@ func GetSystemMonitorSnapshot(isPublic bool) *SystemMonitorResponse {
 		})
 		for _, serviceDef := range servicesInGroup {
 			id := strings.ToLower(serviceDef.ID)
-			if id == "local-model-0" || id == "local-ollama-0" || id == "dex-cli" || id == "local-cache-0" || id == "easter-company-root" {
+			if id == "dex-cli" || id == "local-cache-0" || id == "easter-company-root" {
 				continue
 			}
 			report := checkService(serviceDef, group, isPublic)
@@ -605,9 +605,7 @@ func checkService(service config.ServiceEntry, serviceType string, isPublic bool
 	case "prd":
 		report = checkProdStatus(baseReport)
 	case "os":
-		if strings.Contains(strings.ToLower(service.ID), "model") {
-			report = checkModelHubStatus(baseReport)
-		} else if strings.Contains(strings.ToLower(service.ID), "cache") || strings.Contains(strings.ToLower(service.ID), "upstash") {
+		if strings.Contains(strings.ToLower(service.ID), "cache") || strings.Contains(strings.ToLower(service.ID), "upstash") {
 			report = checkRedisStatus(baseReport, service.Credentials, isPublic)
 		} else if service.Port != "" {
 			report = checkHTTPStatus(baseReport)
@@ -651,27 +649,6 @@ func newUnknownServiceReport(baseReport types.ServiceReport, message string) typ
 	baseReport.CPU = "N/A"
 	baseReport.Memory = "N/A"
 	return baseReport
-}
-
-func getSystemdServiceUptime(serviceName string) string {
-	cmd := exec.Command("systemctl", "show", serviceName, "--property=ActiveEnterTimestamp")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "N/A"
-	}
-	line := strings.TrimSpace(string(output))
-	if !strings.HasPrefix(line, "ActiveEnterTimestamp=") {
-		return "N/A"
-	}
-	timestampStr := strings.TrimPrefix(line, "ActiveEnterTimestamp=")
-	if timestampStr == "" {
-		return "N/A"
-	}
-	startTime, err := time.Parse("Mon 2006-01-02 15:04:05 MST", timestampStr)
-	if err != nil {
-		return "N/A"
-	}
-	return formatSecondsToUptime(int64(time.Since(startTime).Seconds()))
 }
 
 func getSystemdServiceMemory(serviceName string) string {
@@ -868,21 +845,6 @@ func checkProdStatus(baseReport types.ServiceReport) types.ServiceReport {
 	return report
 }
 
-func checkModelHubStatus(baseReport types.ServiceReport) types.ServiceReport {
-	report := baseReport
-	report.Status = "online"
-	url := fmt.Sprintf("http://%s/health", report.GetHost())
-	resp, err := http.Get(url)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		report.Status = "offline"
-		return report
-	}
-	defer func() { _ = resp.Body.Close() }()
-	report.Uptime = getSystemdServiceUptime("dex-model-service")
-	report.CPU = getSystemdServiceCPU("dex-model-service")
-	report.Memory = getSystemdServiceMemory("dex-model-service")
-	return report
-}
 func parseRedisInfo(info string) map[string]string {
 	result := make(map[string]string)
 	for _, line := range strings.Split(info, "\r\n") {

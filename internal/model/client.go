@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"runtime"
 	"time"
@@ -45,20 +44,11 @@ func (c *Client) SetEventCallback(callback func(eventType string, data map[strin
 	c.EventCallback = callback
 }
 
-type GenerateRequest struct {
-	Model     string                 `json:"model"`
-	Prompt    string                 `json:"prompt"`
-	Images    []string               `json:"images,omitempty"`
-	Stream    bool                   `json:"stream"`
-	Options   map[string]interface{} `json:"options,omitempty"`
-	KeepAlive interface{}            `json:"keep_alive,omitempty"`
-}
-
 type GenerateResponse struct {
 	Response           string  `json:"response"`
 	Message            Message `json:"message"` // Fallback
 	Done               bool    `json:"done"`
-	Success            bool    `json:"success"` // New: Logical success indicator
+	Success            bool    `json:"success"`
 	EvalCount          int     `json:"eval_count,omitempty"`
 	PromptEvalCount    int     `json:"prompt_eval_count,omitempty"`
 	TotalDuration      int64   `json:"total_duration,omitempty"`
@@ -74,21 +64,12 @@ type Message struct {
 	Images  []string `json:"images,omitempty"`
 }
 
-type ChatRequest struct {
-	Model     string                 `json:"model"`
-	Messages  []Message              `json:"messages"`
-	Stream    bool                   `json:"stream"`
-	Format    string                 `json:"format,omitempty"` // json or empty
-	Options   map[string]interface{} `json:"options,omitempty"`
-	KeepAlive interface{}            `json:"keep_alive,omitempty"`
-}
-
 type ChatResponse struct {
 	Model              string  `json:"model"`
 	Message            Message `json:"message"`
-	Response           string  `json:"response"` // Dedicated spoke fallback
+	Response           string  `json:"response"`
 	Done               bool    `json:"done"`
-	Success            bool    `json:"success"` // New: Logical success indicator
+	Success            bool    `json:"success"`
 	EvalCount          int     `json:"eval_count,omitempty"`
 	PromptEvalCount    int     `json:"prompt_eval_count,omitempty"`
 	TotalDuration      int64   `json:"total_duration,omitempty"`
@@ -104,7 +85,7 @@ type GenerationStats struct {
 	LoadDuration       time.Duration
 	PromptEvalDuration time.Duration
 	EvalDuration       time.Duration
-	Success            bool // New: Logical success indicator
+	Success            bool
 }
 
 func (c *Client) emit(eventType string, data map[string]interface{}) {
@@ -120,7 +101,6 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message) (Me
 }
 
 func (c *Client) ChatWithChannel(ctx context.Context, model string, messages []Message, channelID string, options map[string]interface{}) (Message, error) {
-	// Convert options to RawMessage for pass-through
 	optsBytes, _ := json.Marshal(options)
 
 	reqBody := ModelRequest{
@@ -135,7 +115,6 @@ func (c *Client) ChatWithChannel(ctx context.Context, model string, messages []M
 		return Message{}, err
 	}
 
-	// HIT THE HUB
 	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/model/run", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return Message{}, err
@@ -147,11 +126,7 @@ func (c *Client) ChatWithChannel(ctx context.Context, model string, messages []M
 	if err != nil {
 		return Message{}, err
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			log.Printf("Error closing hub response body: %v", err)
-		}
-	}()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -161,7 +136,6 @@ func (c *Client) ChatWithChannel(ctx context.Context, model string, messages []M
 	body, _ := io.ReadAll(resp.Body)
 	var response ChatResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		// Fallback: It might be a simple JSON from a custom service
 		var simpleResp map[string]string
 		if err2 := json.Unmarshal(body, &simpleResp); err2 == nil {
 			if val, ok := simpleResp["response"]; ok {
@@ -180,17 +154,12 @@ func (c *Client) ChatWithChannel(ctx context.Context, model string, messages []M
 		content = response.Response
 	}
 
-	// Safety: If still empty, log warning
-	if content == "" {
-		log.Printf("Warning: Model %s returned empty content in ChatWithOptions", model)
-	}
-
 	c.emit("system.cognitive.model_inference", map[string]interface{}{
 		"model":             model,
 		"method":            "chat",
 		"eval_count":        response.EvalCount,
 		"prompt_eval_count": response.PromptEvalCount,
-		"duration_ms":       response.TotalDuration / 1000000, // ns to ms
+		"duration_ms":       response.TotalDuration / 1000000,
 	})
 
 	return Message{Role: "assistant", Content: content}, nil
@@ -205,7 +174,6 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []Messag
 }
 
 func (c *Client) ChatStreamWithChannel(ctx context.Context, model string, messages []Message, channelID string, options map[string]interface{}, callback func(string)) (GenerationStats, error) {
-	// Convert options to RawMessage for pass-through
 	optsBytes, _ := json.Marshal(options)
 
 	reqBody := ModelRequest{
@@ -231,11 +199,7 @@ func (c *Client) ChatStreamWithChannel(ctx context.Context, model string, messag
 	if err != nil {
 		return GenerationStats{}, err
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			log.Printf("Error closing hub response body: %v", err)
-		}
-	}()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -244,7 +208,6 @@ func (c *Client) ChatStreamWithChannel(ctx context.Context, model string, messag
 
 	stats := GenerationStats{}
 	reader := bufio.NewReader(resp.Body)
-	receivedAnyContent := false
 
 	for {
 		line, err := reader.ReadBytes('\n')
@@ -259,7 +222,6 @@ func (c *Client) ChatStreamWithChannel(ctx context.Context, model string, messag
 			continue
 		}
 
-		// Try to parse as Ollama ChatResponse
 		var chunk ChatResponse
 		if err := json.Unmarshal(line, &chunk); err == nil {
 			content := chunk.Message.Content
@@ -269,7 +231,6 @@ func (c *Client) ChatStreamWithChannel(ctx context.Context, model string, messag
 
 			if content != "" {
 				callback(content)
-				receivedAnyContent = true
 			}
 
 			if chunk.Done {
@@ -289,13 +250,7 @@ func (c *Client) ChatStreamWithChannel(ctx context.Context, model string, messag
 				})
 				break
 			}
-		} else {
-			log.Printf("ChatStream: Failed to unmarshal chunk from %s: %v. Raw: %s", model, err, string(line))
 		}
-	}
-
-	if !receivedAnyContent {
-		log.Printf("Warning: Model %s returned NO content chunks in ChatStream", model)
 	}
 
 	return stats, nil
@@ -308,7 +263,6 @@ func (c *Client) Generate(model, prompt string, images []string) (string, Genera
 }
 
 func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, images []string, options map[string]interface{}) (string, GenerationStats, error) {
-	// Convert options
 	optsBytes, _ := json.Marshal(options)
 
 	reqBody := ModelRequest{
@@ -334,11 +288,7 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 	if err != nil {
 		return "", GenerationStats{}, err
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			log.Printf("Error closing hub response body: %v", err)
-		}
-	}()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", GenerationStats{}, fmt.Errorf("hub returned status: %d", resp.StatusCode)
@@ -347,7 +297,6 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 	body, _ := io.ReadAll(resp.Body)
 	var response GenerateResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		// Fallback for simple map response
 		var simpleResp map[string]string
 		if err2 := json.Unmarshal(body, &simpleResp); err2 == nil {
 			if val, ok := simpleResp["response"]; ok {
@@ -366,7 +315,7 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 		"method":            "generate",
 		"eval_count":        response.EvalCount,
 		"prompt_eval_count": response.PromptEvalCount,
-		"duration_ms":       response.TotalDuration / 1000000, // ns to ms
+		"duration_ms":       response.TotalDuration / 1000000,
 	})
 
 	stats := GenerationStats{
@@ -383,7 +332,6 @@ func (c *Client) GenerateWithContext(ctx context.Context, model, prompt string, 
 }
 
 func (c *Client) GenerateStream(model, prompt string, images []string, options map[string]interface{}, callback func(string)) (GenerationStats, error) {
-	// Convert options
 	optsBytes, _ := json.Marshal(options)
 
 	reqBody := ModelRequest{
@@ -409,11 +357,7 @@ func (c *Client) GenerateStream(model, prompt string, images []string, options m
 	if err != nil {
 		return GenerationStats{}, err
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			log.Printf("Error closing hub response body: %v", err)
-		}
-	}()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return GenerationStats{}, fmt.Errorf("hub returned status: %d", resp.StatusCode)
