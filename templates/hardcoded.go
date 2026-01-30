@@ -733,6 +733,18 @@ func GetTemplates() map[string]EventTemplate {
 			},
 		},
 
+		string(types.EventTypeCLIInteraction): {
+			Description: "A full interaction turn in the CLI (prompt, response, and commands)",
+			Format:      "CLI Interaction in {directory}: {prompt}",
+			Fields: map[string]FieldSpec{
+				"prompt":     {Type: "string", Required: true},
+				"response":   {Type: "string", Required: true},
+				"directory":  {Type: "string", Required: true},
+				"session_id": {Type: "string", Required: true},
+				"commands":   {Type: "array", Required: false, Description: "Shell commands executed during this turn"},
+			},
+		},
+
 		string(types.EventTypeSystemNotificationGenerated): {
 			Description: "An AI-generated system notification",
 			Format:      "Notification ({priority}): {title} - {body}",

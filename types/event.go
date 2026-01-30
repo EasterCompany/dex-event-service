@@ -48,8 +48,9 @@ const (
 	EventTypeSystemDiagnosticPing EventType = "system.diagnostic.ping"
 
 	// CLI Events
-	EventTypeCLICommand EventType = "system.cli.command"
-	EventTypeCLIStatus  EventType = "system.cli.status"
+	EventTypeCLICommand     EventType = "system.cli.command"
+	EventTypeCLIStatus      EventType = "system.cli.status"
+	EventTypeCLIInteraction EventType = "system.cli.interaction"
 
 	// System Notifications
 	EventTypeSystemNotificationGenerated EventType = "system.notification.generated"
