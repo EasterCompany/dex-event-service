@@ -20,11 +20,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var redisClient *redis.Client
+var RDB *redis.Client
 
 // SetRedisClient sets the Redis client for endpoints
 func SetRedisClient(client *redis.Client) {
-	redisClient = client
+	RDB = client
 }
 
 // ProcessInfo represents the data stored by a handler in Redis for the processes tab
@@ -47,7 +47,7 @@ type ProcessesSnapshot struct {
 
 // GetProcessesSnapshot captures the current state of processes from Redis
 func GetProcessesSnapshot() *ProcessesSnapshot {
-	if redisClient == nil {
+	if RDB == nil {
 		return &ProcessesSnapshot{
 			Active:  []ProcessInfo{},
 			Queue:   []ProcessInfo{},
@@ -59,10 +59,10 @@ func GetProcessesSnapshot() *ProcessesSnapshot {
 
 	// 1. Fetch Active Processes
 	activeProcesses := []ProcessInfo{}
-	iter := redisClient.Scan(ctx, 0, "process:info:*", 0).Iterator()
+	iter := RDB.Scan(ctx, 0, "process:info:*", 0).Iterator()
 	for iter.Next(ctx) {
 		key := iter.Val()
-		val, err := redisClient.Get(ctx, key).Result()
+		val, err := RDB.Get(ctx, key).Result()
 		if err == nil {
 			var pi ProcessInfo
 			if err := json.Unmarshal([]byte(val), &pi); err == nil {
@@ -73,10 +73,10 @@ func GetProcessesSnapshot() *ProcessesSnapshot {
 
 	// 2. Fetch Queue
 	queuedProcesses := []ProcessInfo{}
-	qIter := redisClient.Scan(ctx, 0, "process:queued:*", 0).Iterator()
+	qIter := RDB.Scan(ctx, 0, "process:queued:*", 0).Iterator()
 	for qIter.Next(ctx) {
 		key := qIter.Val()
-		val, err := redisClient.Get(ctx, key).Result()
+		val, err := RDB.Get(ctx, key).Result()
 		if err == nil {
 			var pi ProcessInfo
 			if err := json.Unmarshal([]byte(val), &pi); err == nil {
@@ -87,7 +87,7 @@ func GetProcessesSnapshot() *ProcessesSnapshot {
 
 	// 3. Fetch History
 	historyProcesses := []ProcessInfo{}
-	historyVals, err := redisClient.LRange(ctx, "process:history", 0, -1).Result()
+	historyVals, err := RDB.LRange(ctx, "process:history", 0, -1).Result()
 	if err == nil {
 		for _, val := range historyVals {
 			var pi ProcessInfo
@@ -106,7 +106,7 @@ func GetProcessesSnapshot() *ProcessesSnapshot {
 
 // ListProcessesHandler fetches and returns information about active event handler processes
 func ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
-	if redisClient == nil {
+	if RDB == nil {
 		http.Error(w, "Redis client not initialized", http.StatusServiceUnavailable)
 		return
 	}
@@ -244,23 +244,24 @@ func GetSystemMonitorSnapshot(isPublic bool) *SystemMonitorResponse {
 
 // DashboardSnapshot represents the full state of the dashboard for public consumption
 type DashboardSnapshot struct {
-	Monitor          *SystemMonitorResponse `json:"monitor"`
-	Processes        *ProcessesSnapshot     `json:"processes"`
-	Events           []types.Event          `json:"events"`
-	MessagingEvents  []types.Event          `json:"messaging_events"`
-	SystemEvents     []types.Event          `json:"system_events"`
-	CognitiveEvents  []types.Event          `json:"cognitive_events"`
-	ModerationEvents []types.Event          `json:"moderation_events"`
-	Alerts           []types.Event          `json:"alerts"`
-	GitHubIssues     []utils.GitHubIssue    `json:"github_issues"`
-	OpenIssueCount   int                    `json:"open_issue_count"`
-	Contacts         *ContactsResponse      `json:"contacts"`
-	Profiles         map[string]interface{} `json:"profiles"`
-	AgentStatus      map[string]interface{} `json:"agent_status"`
-	Options          map[string]interface{} `json:"options"`
-	WebView          map[string]interface{} `json:"web_view"`
-	Chores           []*chores.Chore        `json:"chores"`
-	Timestamp        int64                  `json:"timestamp"`
+	Monitor              *SystemMonitorResponse `json:"monitor"`
+	Processes            *ProcessesSnapshot     `json:"processes"`
+	Events               []types.Event          `json:"events"`
+	MessagingEvents      []types.Event          `json:"messaging_events"`
+	SystemEvents         []types.Event          `json:"system_events"`
+	CognitiveEvents      []types.Event          `json:"cognitive_events"`
+	ModerationEvents     []types.Event          `json:"moderation_events"`
+	Alerts               []types.Event          `json:"alerts"`
+	GitHubIssues         []utils.GitHubIssue    `json:"github_issues"`
+	OpenIssueCount       int                    `json:"open_issue_count"`
+	Contacts             *ContactsResponse      `json:"contacts"`
+	Profiles             map[string]interface{} `json:"profiles"`
+	AgentStatus          map[string]interface{} `json:"agent_status"`
+	Options              map[string]interface{} `json:"options"`
+	WebView              map[string]interface{} `json:"web_view"`
+	FabricatorLiveBuffer []string               `json:"fabricator_live_buffer"`
+	Chores               []*chores.Chore        `json:"chores"`
+	Timestamp            int64                  `json:"timestamp"`
 }
 
 type MemberContext struct {
@@ -355,15 +356,15 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 	profiles := make(map[string]interface{})
 
 	// 6. Agent Status
-	agentStatus := GetAgentStatusSnapshot(redisClient)
+	agentStatus := GetAgentStatusSnapshot(RDB)
 
 	// 6b. System Options
 	options := GetSystemOptionsSnapshot()
 
 	// 7. Web View State (Sanitized)
 	webView := make(map[string]interface{})
-	if redisClient != nil {
-		val, err := redisClient.Get(ctx, "state:web:view").Result()
+	if RDB != nil {
+		val, err := RDB.Get(ctx, "state:web:view").Result()
 		if err == nil {
 			if err := json.Unmarshal([]byte(val), &webView); err == nil {
 				// SANITIZATION: Remove screenshot data for public view
@@ -378,22 +379,30 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 
 	// 8. Chores
 	allChores := []*chores.Chore{}
-	if redisClient != nil {
-		choreStore := chores.NewStore(redisClient)
+	if RDB != nil {
+		choreStore := chores.NewStore(RDB)
 		if list, err := choreStore.GetAll(ctx); err == nil {
 			allChores = list
 		}
 	}
 
+	// 9. Fabricator Live Buffer
+	fabBuffer := []string{}
+	if RDB != nil {
+		if val, err := RDB.LRange(ctx, "system:fabricator:live:buffer", -50, -1).Result(); err == nil {
+			fabBuffer = val
+		}
+	}
+
 	// Contacts & Profiles Logic
-	if redisClient != nil {
-		iter := redisClient.Scan(ctx, 0, "cache:contacts:*", 0).Iterator()
+	if RDB != nil {
+		iter := RDB.Scan(ctx, 0, "cache:contacts:*", 0).Iterator()
 		for iter.Next(ctx) {
 			var cachedData struct {
 				GuildName string          `json:"guild_name"`
 				Members   []MemberContext `json:"members"`
 			}
-			data, _ := redisClient.Get(ctx, iter.Val()).Result()
+			data, _ := RDB.Get(ctx, iter.Val()).Result()
 			if err := json.Unmarshal([]byte(data), &cachedData); err == nil {
 				if cachedData.GuildName != "" {
 					contacts.GuildName = cachedData.GuildName
@@ -411,7 +420,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 					}
 					contacts.Members = append(contacts.Members, m)
 					if m.ID == owenID || m.Level == "Me" {
-						profileData, err := redisClient.Get(ctx, "user:profile:"+m.ID).Result()
+						profileData, err := RDB.Get(ctx, "user:profile:"+m.ID).Result()
 						if err == nil {
 							var p interface{}
 							if err := json.Unmarshal([]byte(profileData), &p); err == nil {
@@ -424,7 +433,7 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 		}
 
 		if _, found := profiles[owenID]; !found {
-			profileData, err := redisClient.Get(ctx, "user:profile:"+owenID).Result()
+			profileData, err := RDB.Get(ctx, "user:profile:"+owenID).Result()
 			if err == nil {
 				var p interface{}
 				if err := json.Unmarshal([]byte(profileData), &p); err == nil {
@@ -451,10 +460,10 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 			}
 		}
 		if !hasDexter {
-			pIter := redisClient.Scan(ctx, 0, "user:profile:*", 0).Iterator()
+			pIter := RDB.Scan(ctx, 0, "user:profile:*", 0).Iterator()
 			for pIter.Next(ctx) {
 				pKey := pIter.Val()
-				pData, _ := redisClient.Get(ctx, pKey).Result()
+				pData, _ := RDB.Get(ctx, pKey).Result()
 				var profile map[string]interface{}
 				if err := json.Unmarshal([]byte(pData), &profile); err == nil {
 					identity, _ := profile["identity"].(map[string]interface{})
@@ -483,21 +492,21 @@ func GetDashboardSnapshot() *DashboardSnapshot {
 		Monitor: monitor, Processes: processes, Events: allEvents, MessagingEvents: messaging,
 		SystemEvents: system, CognitiveEvents: cognitive, ModerationEvents: moderation, Alerts: alerts,
 		GitHubIssues: githubIssues, OpenIssueCount: openIssueCount, Contacts: contacts, Profiles: profiles,
-		AgentStatus: agentStatus, Options: options, WebView: webView, Chores: allChores, Timestamp: time.Now().Unix(),
+		AgentStatus: agentStatus, Options: options, WebView: webView, FabricatorLiveBuffer: fabBuffer, Chores: allChores, Timestamp: time.Now().Unix(),
 	}
 }
 
 func getSanitizedEvents(ctx context.Context, key string, count int) []types.Event {
-	if redisClient == nil {
+	if RDB == nil {
 		return []types.Event{}
 	}
-	ids, err := redisClient.ZRevRange(ctx, key, 0, int64(count-1)).Result()
+	ids, err := RDB.ZRevRange(ctx, key, 0, int64(count-1)).Result()
 	if err != nil {
 		return []types.Event{}
 	}
 	events := make([]types.Event, 0, len(ids))
 	for _, id := range ids {
-		val, err := redisClient.Get(ctx, "event:"+id).Result()
+		val, err := RDB.Get(ctx, "event:"+id).Result()
 		if err != nil {
 			continue
 		}
@@ -922,10 +931,10 @@ func CleanupAlertsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := context.Background()
-	ids, _ := redisClient.ZRevRange(ctx, "events:type:system.notification.generated", 0, -1).Result()
+	ids, _ := RDB.ZRevRange(ctx, "events:type:system.notification.generated", 0, -1).Result()
 	deleted := 0
 	for _, id := range ids {
-		val, err := redisClient.Get(ctx, "event:"+id).Result()
+		val, err := RDB.Get(ctx, "event:"+id).Result()
 		if err != nil {
 			continue
 		}
@@ -934,10 +943,10 @@ func CleanupAlertsHandler(w http.ResponseWriter, r *http.Request) {
 			var ed map[string]interface{}
 			if err := json.Unmarshal(event.Event, &ed); err == nil {
 				if title, _ := ed["title"].(string); strings.HasPrefix(title, prefix) {
-					redisClient.Del(ctx, "event:"+id)
-					redisClient.ZRem(ctx, "events:timeline", id)
-					redisClient.ZRem(ctx, "events:type:system.notification.generated", id)
-					redisClient.ZRem(ctx, "events:service:"+event.Service, id)
+					RDB.Del(ctx, "event:"+id)
+					RDB.ZRem(ctx, "events:timeline", id)
+					RDB.ZRem(ctx, "events:type:system.notification.generated", id)
+					RDB.ZRem(ctx, "events:service:"+event.Service, id)
 					deleted++
 				}
 			}

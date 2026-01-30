@@ -13,7 +13,7 @@ import (
 
 // HandleProcessRegistration registers or updates a process in Redis.
 func HandleProcessRegistration(w http.ResponseWriter, r *http.Request) {
-	if redisClient == nil {
+	if RDB == nil {
 		http.Error(w, "Redis client not initialized", http.StatusServiceUnavailable)
 		return
 	}
@@ -40,7 +40,7 @@ func HandleProcessRegistration(w http.ResponseWriter, r *http.Request) {
 	// Try to get existing process to preserve start time if updating
 	var pi ProcessInfo
 	exists := false
-	val, err := redisClient.Get(ctx, key).Result()
+	val, err := RDB.Get(ctx, key).Result()
 	if err == nil {
 		if jsonErr := json.Unmarshal([]byte(val), &pi); jsonErr == nil {
 			exists = true
@@ -59,17 +59,17 @@ func HandleProcessRegistration(w http.ResponseWriter, r *http.Request) {
 	pi.UpdatedAt = time.Now().Unix()
 
 	jsonBytes, _ := json.Marshal(pi)
-	if err := redisClient.Set(ctx, key, jsonBytes, utils.DefaultTTL).Err(); err != nil {
+	if err := RDB.Set(ctx, key, jsonBytes, utils.DefaultTTL).Err(); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to save process info: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	// Update system state
-	utils.TransitionToBusy(ctx, redisClient)
+	utils.TransitionToBusy(ctx, RDB)
 
 	// ONLY increment ref count if it's a NEW process
 	if !exists {
-		redisClient.Incr(ctx, "system:busy_ref_count")
+		RDB.Incr(ctx, "system:busy_ref_count")
 	}
 
 	w.WriteHeader(http.StatusAccepted)
@@ -77,7 +77,7 @@ func HandleProcessRegistration(w http.ResponseWriter, r *http.Request) {
 
 	// Emit registration event ONLY if new or state changed
 	if !exists || stateChanged {
-		_, _ = utils.SendEvent(ctx, redisClient, "process-manager", "system.process.registered", map[string]interface{}{
+		_, _ = utils.SendEvent(ctx, RDB, "process-manager", "system.process.registered", map[string]interface{}{
 			"process_id": req.ID,
 			"pid":        req.PID,
 			"status":     "registered",
@@ -89,7 +89,7 @@ func HandleProcessRegistration(w http.ResponseWriter, r *http.Request) {
 
 // HandleProcessUnregistration removes a process from Redis.
 func HandleProcessUnregistration(w http.ResponseWriter, r *http.Request) {
-	if redisClient == nil {
+	if RDB == nil {
 		http.Error(w, "Redis client not initialized", http.StatusServiceUnavailable)
 		return
 	}
@@ -106,7 +106,7 @@ func HandleProcessUnregistration(w http.ResponseWriter, r *http.Request) {
 	key := fmt.Sprintf("process:info:%s", id)
 
 	// Save to history before deleting
-	val, err := redisClient.Get(ctx, key).Result()
+	val, err := RDB.Get(ctx, key).Result()
 	if err == nil {
 		var pi ProcessInfo
 		if jsonErr := json.Unmarshal([]byte(val), &pi); jsonErr == nil {
@@ -114,29 +114,29 @@ func HandleProcessUnregistration(w http.ResponseWriter, r *http.Request) {
 			pi.State = "completed"
 
 			if histBytes, marshalErr := json.Marshal(pi); marshalErr == nil {
-				redisClient.LPush(ctx, "process:history", histBytes)
-				redisClient.LTrim(ctx, "process:history", 0, 19)
+				RDB.LPush(ctx, "process:history", histBytes)
+				RDB.LTrim(ctx, "process:history", 0, 19)
 			}
 		}
 	}
 
-	if err := redisClient.Del(ctx, key).Err(); err != nil {
+	if err := RDB.Del(ctx, key).Err(); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to delete process info: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	// Update system state
-	newCount, _ := redisClient.Decr(ctx, "system:busy_ref_count").Result()
+	newCount, _ := RDB.Decr(ctx, "system:busy_ref_count").Result()
 	if newCount <= 0 {
-		redisClient.Set(ctx, "system:busy_ref_count", 0, 0)
-		utils.TransitionToIdle(ctx, redisClient)
+		RDB.Set(ctx, "system:busy_ref_count", 0, 0)
+		utils.TransitionToIdle(ctx, RDB)
 	}
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("Process unregistered successfully"))
 
 	// Emit unregistration event
-	_, _ = utils.SendEvent(ctx, redisClient, "process-manager", "system.process.unregistered", map[string]interface{}{
+	_, _ = utils.SendEvent(ctx, RDB, "process-manager", "system.process.unregistered", map[string]interface{}{
 		"process_id": id,
 		"status":     "unregistered",
 		"timestamp":  time.Now().Unix(),

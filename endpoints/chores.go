@@ -10,8 +10,8 @@ import (
 )
 
 // ChoresHandler routes requests for the chores API
-func ChoresHandler(redisClient *redis.Client) http.HandlerFunc {
-	store := chores.NewStore(redisClient)
+func ChoresHandler(RDB *redis.Client) http.HandlerFunc {
+	store := chores.NewStore(RDB)
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract path after /chores

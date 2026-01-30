@@ -12,7 +12,7 @@ import (
 )
 
 // RoadmapHandler routes roadmap-related requests.
-func RoadmapHandler(redisClient *redis.Client) http.HandlerFunc {
+func RoadmapHandler(RDB *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/roadmap")
 		path = strings.TrimPrefix(path, "/")

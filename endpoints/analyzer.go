@@ -7,7 +7,7 @@ import (
 )
 
 // RunAnalyzerHandler triggers the analyzer protocols manually.
-func RunAnalyzerHandler(redisClient *redis.Client, trigger func() error) http.HandlerFunc {
+func RunAnalyzerHandler(RDB *redis.Client, trigger func() error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if trigger == nil {
 			http.Error(w, "Analyzer trigger not initialized", http.StatusServiceUnavailable)

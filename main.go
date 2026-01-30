@@ -301,6 +301,7 @@ func main() {
 		}
 		return handlers.FabricatorTrigger()
 	})).Methods("POST")
+	router.HandleFunc("/fabricator/live", endpoints.FabricatorLiveHandler).Methods("GET")
 	router.HandleFunc("/agent/courier/compressor/run", endpoints.RunCourierCompressorHandler(redisClient, func(force bool, channelID string) error {
 		if handlers.CourierTrigger == nil {
 			return fmt.Errorf("courier handler not initialized")

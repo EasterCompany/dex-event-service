@@ -93,14 +93,14 @@ func calculateProtocolStatus(ctx context.Context, rdb *redis.Client, agentActive
 }
 
 // GetAgentStatusHandler returns the status of all agents and system state.
-func GetAgentStatusHandler(redisClient *redis.Client) http.HandlerFunc {
+func GetAgentStatusHandler(RDB *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if redisClient == nil {
+		if RDB == nil {
 			http.Error(w, "Redis not connected", http.StatusServiceUnavailable)
 			return
 		}
 
-		response := buildAgentStatus(redisClient)
+		response := buildAgentStatus(RDB)
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -231,8 +231,8 @@ func buildAgentStatus(rdb *redis.Client) AgentStatusResponse {
 }
 
 // GetAgentStatusSnapshot returns current status data (Internal Use)
-func GetAgentStatusSnapshot(redisClient *redis.Client) map[string]interface{} {
-	if redisClient == nil {
+func GetAgentStatusSnapshot(RDB *redis.Client) map[string]interface{} {
+	if RDB == nil {
 		return nil
 	}
 	// Convert the typed struct to a generic map for legacy compatibility if needed,
@@ -241,7 +241,7 @@ func GetAgentStatusSnapshot(redisClient *redis.Client) map[string]interface{} {
 	// or assume the caller handles the struct if we changed the signature.
 	// However, the interface expects map[string]interface{}.
 
-	data := buildAgentStatus(redisClient)
+	data := buildAgentStatus(RDB)
 
 	// Quick marshal/unmarshal hack to convert struct to map[string]interface{}
 	// This ensures consistency without rewriting the mapping logic twice.
@@ -254,9 +254,9 @@ func GetAgentStatusSnapshot(redisClient *redis.Client) map[string]interface{} {
 
 // HandleUpdateGuardianStatus updates the guardian status.
 // Refactor: Should be HandleUpdateAgentStatus eventually, but keeping route compat.
-func HandleUpdateGuardianStatus(redisClient *redis.Client) http.HandlerFunc {
+func HandleUpdateGuardianStatus(RDB *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if redisClient == nil {
+		if RDB == nil {
 			http.Error(w, "Redis not connected", http.StatusServiceUnavailable)
 			return
 		}
@@ -279,7 +279,7 @@ func HandleUpdateGuardianStatus(redisClient *redis.Client) http.HandlerFunc {
 
 		key := fmt.Sprintf("%s:active_tier", agent)
 
-		if err := redisClient.Set(ctx, key, req.ActiveTier, utils.DefaultTTL).Err(); err != nil {
+		if err := RDB.Set(ctx, key, req.ActiveTier, utils.DefaultTTL).Err(); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to update active tier: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -290,7 +290,7 @@ func HandleUpdateGuardianStatus(redisClient *redis.Client) http.HandlerFunc {
 }
 
 // RunGuardianHandler triggers immediate execution of protocols.
-func RunGuardianHandler(redisClient *redis.Client, triggerFunc func(int) ([]interface{}, error)) http.HandlerFunc {
+func RunGuardianHandler(RDB *redis.Client, triggerFunc func(int) ([]interface{}, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tierStr := r.URL.Query().Get("tier")
 		if tierStr == "" {
@@ -327,9 +327,9 @@ func RunGuardianHandler(redisClient *redis.Client, triggerFunc func(int) ([]inte
 }
 
 // ResetAgentHandler resets all protocols for a specific agent or the entire system.
-func ResetAgentHandler(redisClient *redis.Client) http.HandlerFunc {
+func ResetAgentHandler(RDB *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if redisClient == nil {
+		if RDB == nil {
 			http.Error(w, "Redis not connected", http.StatusServiceUnavailable)
 			return
 		}
@@ -347,57 +347,57 @@ func ResetAgentHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		switch agentName {
 		case "architect":
-			redisClient.Set(ctx, "architect:last_run:alert_review", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "architect:last_run:alert_review", 0, utils.DefaultTTL)
 		case "courier":
-			redisClient.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "courier:last_run:compressor", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "system:last_cognitive_event", 0, 0)
+			RDB.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "courier:last_run:compressor", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "system:last_cognitive_event", 0, 0)
 		case "guardian":
-			redisClient.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
 		case "fabricator":
-			redisClient.Set(ctx, "fabricator:last_run:review", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "fabricator:last_run:issue", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "fabricator:last_run:construct", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "fabricator:last_run:reporter", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "fabricator:last_run:review", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "fabricator:last_run:issue", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "fabricator:last_run:construct", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "fabricator:last_run:reporter", 0, utils.DefaultTTL)
 		case "analyzer":
-			redisClient.Set(ctx, "analyzer:last_run:summary", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "analyzer:last_run:summary", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
 			// Clear per-user cooldowns for Analyzer
-			iter := redisClient.Scan(ctx, 0, "agent:Analyzer:*", 0).Iterator()
+			iter := RDB.Scan(ctx, 0, "agent:Analyzer:*", 0).Iterator()
 			for iter.Next(ctx) {
-				redisClient.Del(ctx, iter.Val())
+				RDB.Del(ctx, iter.Val())
 			}
 		case "all":
 			// Global Reset
-			redisClient.Set(ctx, "architect:last_run:alert_review", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "courier:last_run:compressor", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "fabricator:last_run:review", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "fabricator:last_run:issue", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "fabricator:last_run:construct", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "fabricator:last_run:reporter", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "analyzer:last_run:summary", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
-			redisClient.Set(ctx, "system:last_cognitive_event", 0, 0)
+			RDB.Set(ctx, "architect:last_run:alert_review", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "courier:last_run:compressor", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "fabricator:last_run:review", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "fabricator:last_run:issue", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "fabricator:last_run:construct", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "fabricator:last_run:reporter", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "analyzer:last_run:summary", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
+			RDB.Set(ctx, "system:last_cognitive_event", 0, 0)
 
-			iter := redisClient.Scan(ctx, 0, "agent:Analyzer:*", 0).Iterator()
+			iter := RDB.Scan(ctx, 0, "agent:Analyzer:*", 0).Iterator()
 			for iter.Next(ctx) {
-				redisClient.Del(ctx, iter.Val())
+				RDB.Del(ctx, iter.Val())
 			}
 		default:
 			// Fallback for direct protocol resets if still requested
 			switch agentName {
 			case "researcher":
-				redisClient.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
+				RDB.Set(ctx, "courier:last_run:researcher", 0, utils.DefaultTTL)
 			case "compressor":
-				redisClient.Set(ctx, "courier:last_run:compressor", 0, utils.DefaultTTL)
+				RDB.Set(ctx, "courier:last_run:compressor", 0, utils.DefaultTTL)
 			case "sentry":
-				redisClient.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
+				RDB.Set(ctx, "guardian:last_run:sentry", 0, utils.DefaultTTL)
 			case "summary":
-				redisClient.Set(ctx, "analyzer:last_run:summary", 0, utils.DefaultTTL)
+				RDB.Set(ctx, "analyzer:last_run:summary", 0, utils.DefaultTTL)
 			case "synthesis":
-				redisClient.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
+				RDB.Set(ctx, "analyzer:last_run:synthesis", 0, utils.DefaultTTL)
 			default:
 				http.Error(w, fmt.Sprintf("Unknown agent or protocol: %s", agentName), http.StatusBadRequest)
 				return
@@ -410,7 +410,7 @@ func ResetAgentHandler(redisClient *redis.Client) http.HandlerFunc {
 }
 
 // RunFabricatorHandler triggers immediate execution of protocols.
-func RunFabricatorHandler(redisClient *redis.Client, triggerFunc func() error) http.HandlerFunc {
+func RunFabricatorHandler(RDB *redis.Client, triggerFunc func() error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := triggerFunc(); err != nil {
 			http.Error(w, fmt.Sprintf("Fabricator run failed: %v", err), http.StatusInternalServerError)
@@ -423,34 +423,34 @@ func RunFabricatorHandler(redisClient *redis.Client, triggerFunc func() error) h
 }
 
 // HandlePauseSystem pauses all system agents.
-func HandlePauseSystem(redisClient *redis.Client) http.HandlerFunc {
+func HandlePauseSystem(RDB *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 		now := time.Now().Unix()
 
 		// 1. Verify current state is idle
-		state, _ := redisClient.Get(ctx, "system:state").Result()
+		state, _ := RDB.Get(ctx, "system:state").Result()
 		if state != "idle" {
 			http.Error(w, "System can only be paused when in 'idle' state", http.StatusForbidden)
 			return
 		}
 
 		// 2. Add current idle duration to total metrics
-		lastTransition, _ := redisClient.Get(ctx, "system:last_transition_ts").Int64()
+		lastTransition, _ := RDB.Get(ctx, "system:last_transition_ts").Int64()
 		if lastTransition > 0 {
 			idleDuration := now - lastTransition
 			if idleDuration > 0 {
-				redisClient.IncrBy(ctx, "system:metrics:total_idle_seconds", idleDuration)
+				RDB.IncrBy(ctx, "system:metrics:total_idle_seconds", idleDuration)
 			}
 		}
 
 		// 3. Set System to Paused and Reset Timer (to track pause duration)
-		redisClient.Set(ctx, "system:is_paused", "true", 0)
-		redisClient.Set(ctx, "system:state", "paused", 0)
-		redisClient.Set(ctx, "system:last_transition_ts", now, 0)
+		RDB.Set(ctx, "system:is_paused", "true", 0)
+		RDB.Set(ctx, "system:state", "paused", 0)
+		RDB.Set(ctx, "system:last_transition_ts", now, 0)
 
 		// 4. Set Cognitive Lock to PAUSED (forcibly)
-		redisClient.Set(ctx, "system:cognitive_lock", "PAUSED", 0)
+		RDB.Set(ctx, "system:cognitive_lock", "PAUSED", 0)
 
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("System paused"))
@@ -458,22 +458,22 @@ func HandlePauseSystem(redisClient *redis.Client) http.HandlerFunc {
 }
 
 // HandleResumeSystem resumes all system agents.
-func HandleResumeSystem(redisClient *redis.Client) http.HandlerFunc {
+func HandleResumeSystem(RDB *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 		now := time.Now().Unix()
 
 		// 1. Reset State to Idle and Reset Timer (start new idle period)
-		redisClient.Set(ctx, "system:state", "idle", 0)
-		redisClient.Set(ctx, "system:last_transition_ts", now, 0)
+		RDB.Set(ctx, "system:state", "idle", 0)
+		RDB.Set(ctx, "system:last_transition_ts", now, 0)
 
 		// 2. Cleanup Pause Flags
-		redisClient.Del(ctx, "system:is_paused")
+		RDB.Del(ctx, "system:is_paused")
 
 		// 3. Del Cognitive Lock if it is "PAUSED"
-		val, _ := redisClient.Get(ctx, "system:cognitive_lock").Result()
+		val, _ := RDB.Get(ctx, "system:cognitive_lock").Result()
 		if val == "PAUSED" {
-			redisClient.Del(ctx, "system:cognitive_lock")
+			RDB.Del(ctx, "system:cognitive_lock")
 		}
 
 		w.WriteHeader(http.StatusOK)

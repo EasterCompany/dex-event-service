@@ -8,7 +8,7 @@ import (
 )
 
 // RunCourierCompressorHandler triggers the courier compressor protocols manually.
-func RunCourierCompressorHandler(redisClient *redis.Client, trigger func(bool, string) error) http.HandlerFunc {
+func RunCourierCompressorHandler(RDB *redis.Client, trigger func(bool, string) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		force := r.URL.Query().Get("force") == "true"
 		channelID := r.URL.Query().Get("channel_id")

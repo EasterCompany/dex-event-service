@@ -93,7 +93,7 @@ func matchesEventFilters(eventData json.RawMessage, filters map[string]string) b
 }
 
 // EventsHandler routes requests to the appropriate handler based on method and path
-func EventsHandler(redisClient *redis.Client) http.HandlerFunc {
+func EventsHandler(RDB *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract path after /events
 		path := strings.TrimPrefix(r.URL.Path, "/events")
@@ -102,27 +102,27 @@ func EventsHandler(redisClient *redis.Client) http.HandlerFunc {
 		switch r.Method {
 		case http.MethodPost:
 			if path == "" {
-				CreateEventHandler(redisClient)(w, r)
+				CreateEventHandler(RDB)(w, r)
 			} else {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
 		case http.MethodGet:
 			if path == "" {
-				GetTimelineHandler(redisClient)(w, r)
+				GetTimelineHandler(RDB)(w, r)
 			} else {
-				GetEventByIDHandler(redisClient, path)(w, r)
+				GetEventByIDHandler(RDB, path)(w, r)
 			}
 		case http.MethodPatch:
 			if path != "" {
-				PatchEventHandler(redisClient, path)(w, r)
+				PatchEventHandler(RDB, path)(w, r)
 			} else {
 				http.Error(w, "Event ID required for PATCH", http.StatusBadRequest)
 			}
 		case http.MethodDelete:
 			if path != "" {
-				DeleteEventHandler(redisClient, path)(w, r)
+				DeleteEventHandler(RDB, path)(w, r)
 			} else {
-				BulkDeleteEventHandler(redisClient)(w, r)
+				BulkDeleteEventHandler(RDB)(w, r)
 			}
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -131,7 +131,7 @@ func EventsHandler(redisClient *redis.Client) http.HandlerFunc {
 }
 
 // BulkDeleteEventHandler deletes multiple events based on filters
-func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
+func BulkDeleteEventHandler(RDB *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 		query := r.URL.Query()
@@ -193,7 +193,7 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 		}
 
 		// Get all events from timeline
-		eventIDs, err := redisClient.ZRange(ctx, timelineKey, 0, -1).Result()
+		eventIDs, err := RDB.ZRange(ctx, timelineKey, 0, -1).Result()
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to retrieve timeline: %v", err), http.StatusInternalServerError)
 			return
@@ -203,7 +203,7 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 		for _, eventID := range eventIDs {
 			// Check type
 			eventKey := eventKeyPrefix + eventID
-			eventJSON, err := redisClient.Get(ctx, eventKey).Result()
+			eventJSON, err := RDB.Get(ctx, eventKey).Result()
 			if err != nil {
 				continue // Skip missing
 			}
@@ -227,14 +227,14 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 
 			// Optimization: If no filters, delete everything (that wasn't excluded)
 			if targetType == "" && category == "" {
-				if err := deleteEventByID(redisClient, ctx, eventID); err == nil {
+				if err := deleteEventByID(RDB, ctx, eventID); err == nil {
 					deletedCount++
 				}
 				continue
 			}
 
 			if targetTypes[eventType] {
-				if err := deleteEventByID(redisClient, ctx, eventID); err == nil {
+				if err := deleteEventByID(RDB, ctx, eventID); err == nil {
 					deletedCount++
 				}
 			}
@@ -246,7 +246,7 @@ func BulkDeleteEventHandler(redisClient *redis.Client) http.HandlerFunc {
 }
 
 // CreateEventHandler creates a new event in Redis
-func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
+func CreateEventHandler(RDB *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 
@@ -265,7 +265,7 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 
 		// Check for System Lock
 		if IsEventLocked(req) {
-			if err := QueuePendingEvent(redisClient, req); err != nil {
+			if err := QueuePendingEvent(RDB, req); err != nil {
 				http.Error(w, "System is locked and queue failed", http.StatusServiceUnavailable)
 				return
 			}
@@ -337,18 +337,18 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 			if isCognitive {
 				// Calculate and accumulate idle time before resetting the timer
 				now := time.Now().Unix()
-				oldLastEventTS, err := redisClient.Get(ctx, "system:last_cognitive_event").Int64()
+				oldLastEventTS, err := RDB.Get(ctx, "system:last_cognitive_event").Int64()
 				if err == nil && oldLastEventTS > 0 {
 					idleDuration := now - oldLastEventTS
 					if idleDuration > 0 {
-						redisClient.IncrBy(ctx, "system:metrics:total_idle_seconds", idleDuration)
+						RDB.IncrBy(ctx, "system:metrics:total_idle_seconds", idleDuration)
 					}
 				}
-				redisClient.Set(ctx, "system:last_cognitive_event", now, utils.DefaultTTL)
+				RDB.Set(ctx, "system:last_cognitive_event", now, utils.DefaultTTL)
 			}
 
 			// Always update the raw last event timestamp for low-level debugging
-			redisClient.Set(ctx, "system:last_event_ts", time.Now().Unix(), utils.DefaultTTL)
+			RDB.Set(ctx, "system:last_event_ts", time.Now().Unix(), utils.DefaultTTL)
 		}()
 
 		// TRIGGER: CLI Status -> Discord
@@ -388,10 +388,10 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 					}
 
 					if outcome != "unknown" {
-						utils.RecordProcessOutcome(ctx, redisClient, processID, outcome)
+						utils.RecordProcessOutcome(ctx, RDB, processID, outcome)
 					}
 
-					utils.ReportProcess(ctx, redisClient, dClient, processID, m)
+					utils.ReportProcess(ctx, RDB, dClient, processID, m)
 
 					// CLI statuses are usually self-completing or updated by the next event.
 					// For terminal statuses, we clear the process.
@@ -400,7 +400,7 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 						strings.Contains(lowerM, "complete") || strings.Contains(lowerM, "success") ||
 						strings.Contains(lowerM, "failed") || strings.Contains(lowerM, "error") {
 						time.Sleep(5 * time.Second) // Give user time to see the final state
-						utils.ClearProcess(ctx, redisClient, dClient, processID)
+						utils.ClearProcess(ctx, RDB, dClient, processID)
 					}
 				}(status, message)
 			}
@@ -442,7 +442,7 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 		}
 
 		// Use a Redis pipeline for atomic operations
-		pipe := redisClient.Pipeline()
+		pipe := RDB.Pipeline()
 
 		// Store event data in a hash
 		eventKey := eventKeyPrefix + eventID
@@ -534,7 +534,7 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 		isSyncMode := req.HandlerMode == "sync" // Determine sync vs async once
 
 		for _, hConfig := range handlersToExecute {
-			currentChildIDs, err := handlers.ExecuteHandler(r.Context(), redisClient, &event, &hConfig, isSyncMode)
+			currentChildIDs, err := handlers.ExecuteHandler(r.Context(), RDB, &event, &hConfig, isSyncMode)
 			if err != nil {
 				// Log error but don't fail the overall request.
 				log.Printf("Error executing handler '%s' for event %s: %v", hConfig.Name, eventID, err)
@@ -553,13 +553,13 @@ func CreateEventHandler(redisClient *redis.Client) http.HandlerFunc {
 }
 
 // GetEventByIDHandler retrieves a single event by its ID
-func GetEventByIDHandler(redisClient *redis.Client, eventID string) http.HandlerFunc {
+func GetEventByIDHandler(RDB *redis.Client, eventID string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 
 		// Get event from Redis
 		eventKey := eventKeyPrefix + eventID
-		eventJSON, err := redisClient.Get(ctx, eventKey).Result()
+		eventJSON, err := RDB.Get(ctx, eventKey).Result()
 		if err == redis.Nil {
 			http.Error(w, "Event not found", http.StatusNotFound)
 			return
@@ -583,7 +583,7 @@ func GetEventByIDHandler(redisClient *redis.Client, eventID string) http.Handler
 }
 
 // GetTimelineHandler retrieves events from the timeline with filtering
-func GetTimelineHandler(redisClient *redis.Client) http.HandlerFunc {
+func GetTimelineHandler(RDB *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 
@@ -734,14 +734,14 @@ func GetTimelineHandler(redisClient *redis.Client) http.HandlerFunc {
 		var eventIDs []string
 		if ascending {
 			// First to last (ascending by timestamp)
-			eventIDs, err = redisClient.ZRangeByScore(ctx, queryKey, &redis.ZRangeBy{
+			eventIDs, err = RDB.ZRangeByScore(ctx, queryKey, &redis.ZRangeBy{
 				Min:   fmt.Sprintf("%d", minTimestamp),
 				Max:   fmt.Sprintf("%d", maxTimestamp),
 				Count: int64(maxLength),
 			}).Result()
 		} else {
 			// Last to first (descending by timestamp)
-			eventIDs, err = redisClient.ZRevRangeByScore(ctx, queryKey, &redis.ZRangeBy{
+			eventIDs, err = RDB.ZRevRangeByScore(ctx, queryKey, &redis.ZRangeBy{
 				Min:   fmt.Sprintf("%d", minTimestamp),
 				Max:   fmt.Sprintf("%d", maxTimestamp),
 				Count: int64(maxLength),
@@ -765,7 +765,7 @@ func GetTimelineHandler(redisClient *redis.Client) http.HandlerFunc {
 		events := make([]types.Event, 0, len(eventIDs))
 		for _, eventID := range eventIDs {
 			eventKey := eventKeyPrefix + eventID
-			eventJSON, err := redisClient.Get(ctx, eventKey).Result()
+			eventJSON, err := RDB.Get(ctx, eventKey).Result()
 			if err == redis.Nil {
 				// Event was deleted or doesn't exist, skip it
 				continue
@@ -898,13 +898,13 @@ func buildDepthMap(events []types.Event) map[string]int {
 }
 
 // DeleteEventHandler deletes an event following parent-child rules
-func DeleteEventHandler(redisClient *redis.Client, eventID string) http.HandlerFunc {
+func DeleteEventHandler(RDB *redis.Client, eventID string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 
 		// Get event from Redis
 		eventKey := eventKeyPrefix + eventID
-		eventJSON, err := redisClient.Get(ctx, eventKey).Result()
+		eventJSON, err := RDB.Get(ctx, eventKey).Result()
 		if err == redis.Nil {
 			http.Error(w, "Event not found", http.StatusNotFound)
 			return
@@ -931,7 +931,7 @@ func DeleteEventHandler(redisClient *redis.Client, eventID string) http.HandlerF
 
 			// Get parent event to check if this is the last child
 			parentKey := eventKeyPrefix + event.ParentID
-			parentJSON, err := redisClient.Get(ctx, parentKey).Result()
+			parentJSON, err := RDB.Get(ctx, parentKey).Result()
 			if err == nil {
 				var parent types.Event
 				if err := json.Unmarshal([]byte(parentJSON), &parent); err == nil {
@@ -950,7 +950,7 @@ func DeleteEventHandler(redisClient *redis.Client, eventID string) http.HandlerF
 		// If this event has children, delete them all (cascade delete)
 		if len(event.ChildIDs) > 0 {
 			for _, childID := range event.ChildIDs {
-				if err := deleteEventByID(redisClient, ctx, childID); err != nil {
+				if err := deleteEventByID(RDB, ctx, childID); err != nil {
 					http.Error(w, fmt.Sprintf("Failed to delete child event %s: %v", childID, err), http.StatusInternalServerError)
 					return
 				}
@@ -958,14 +958,14 @@ func DeleteEventHandler(redisClient *redis.Client, eventID string) http.HandlerF
 		}
 
 		// Delete the event itself
-		if err := deleteEventByID(redisClient, ctx, eventID); err != nil {
+		if err := deleteEventByID(RDB, ctx, eventID); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to delete event: %v", err), http.StatusInternalServerError)
 			return
 		}
 
 		// If this was a child, update parent's child_ids list
 		if event.ParentID != "" {
-			if err := removeChildFromParent(redisClient, ctx, event.ParentID, eventID); err != nil {
+			if err := removeChildFromParent(RDB, ctx, event.ParentID, eventID); err != nil {
 				// Log error but don't fail the request - the event is already deleted
 				fmt.Printf("Warning: Failed to update parent event: %v\n", err)
 			}
@@ -976,10 +976,10 @@ func DeleteEventHandler(redisClient *redis.Client, eventID string) http.HandlerF
 }
 
 // deleteEventByID deletes an event and removes it from all timelines
-func deleteEventByID(redisClient *redis.Client, ctx context.Context, eventID string) error {
+func deleteEventByID(RDB *redis.Client, ctx context.Context, eventID string) error {
 	// Get event to find service
 	eventKey := eventKeyPrefix + eventID
-	eventJSON, err := redisClient.Get(ctx, eventKey).Result()
+	eventJSON, err := RDB.Get(ctx, eventKey).Result()
 	if err != nil {
 		return err
 	}
@@ -990,7 +990,7 @@ func deleteEventByID(redisClient *redis.Client, ctx context.Context, eventID str
 	}
 
 	// Use pipeline for atomic deletion
-	pipe := redisClient.Pipeline()
+	pipe := RDB.Pipeline()
 
 	// Delete event data
 	pipe.Del(ctx, eventKey)
@@ -1033,10 +1033,10 @@ func deleteEventByID(redisClient *redis.Client, ctx context.Context, eventID str
 }
 
 // removeChildFromParent removes a child ID from parent's child_ids array
-func removeChildFromParent(redisClient *redis.Client, ctx context.Context, parentID string, childID string) error {
+func removeChildFromParent(RDB *redis.Client, ctx context.Context, parentID string, childID string) error {
 	// Get parent event
 	parentKey := eventKeyPrefix + parentID
-	parentJSON, err := redisClient.Get(ctx, parentKey).Result()
+	parentJSON, err := RDB.Get(ctx, parentKey).Result()
 	if err != nil {
 		return err
 	}
@@ -1061,7 +1061,7 @@ func removeChildFromParent(redisClient *redis.Client, ctx context.Context, paren
 		return err
 	}
 
-	if err := redisClient.Set(ctx, parentKey, updatedJSON, utils.DefaultTTL).Err(); err != nil {
+	if err := RDB.Set(ctx, parentKey, updatedJSON, utils.DefaultTTL).Err(); err != nil {
 		return err
 	}
 
@@ -1069,13 +1069,13 @@ func removeChildFromParent(redisClient *redis.Client, ctx context.Context, paren
 }
 
 // PatchEventHandler updates specific fields in an event's JSON data
-func PatchEventHandler(redisClient *redis.Client, eventID string) http.HandlerFunc {
+func PatchEventHandler(RDB *redis.Client, eventID string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 
 		// Get event from Redis
 		eventKey := eventKeyPrefix + eventID
-		eventJSON, err := redisClient.Get(ctx, eventKey).Result()
+		eventJSON, err := RDB.Get(ctx, eventKey).Result()
 		if err == redis.Nil {
 			http.Error(w, "Event not found", http.StatusNotFound)
 			return
@@ -1127,7 +1127,7 @@ func PatchEventHandler(redisClient *redis.Client, eventID string) http.HandlerFu
 		}
 
 		// Save back to Redis
-		if err := redisClient.Set(ctx, eventKey, updatedEventJSON, utils.DefaultTTL).Err(); err != nil {
+		if err := RDB.Set(ctx, eventKey, updatedEventJSON, utils.DefaultTTL).Err(); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to save updated event: %v", err), http.StatusInternalServerError)
 			return
 		}

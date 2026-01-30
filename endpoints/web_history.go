@@ -11,13 +11,13 @@ import (
 
 // WebHistoryHandler returns the last web view requests or stores a new one
 func WebHistoryHandler(w http.ResponseWriter, r *http.Request) {
-	if redisClient == nil {
+	if RDB == nil {
 		http.Error(w, "Redis client not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	if r.Method == http.MethodGet {
-		history, err := utils.GetWebHistory(redisClient)
+		history, err := utils.GetWebHistory(RDB)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to get web history: %v", err), http.StatusInternalServerError)
 			return
@@ -42,7 +42,7 @@ func WebHistoryHandler(w http.ResponseWriter, r *http.Request) {
 			item.Timestamp = time.Now().Unix()
 		}
 
-		if err := utils.StoreWebHistoryItem(redisClient, item); err != nil {
+		if err := utils.StoreWebHistoryItem(RDB, item); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to store history: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -56,13 +56,13 @@ func WebHistoryHandler(w http.ResponseWriter, r *http.Request) {
 
 // WebViewHandler returns the cumulative state of the current web analysis
 func WebViewHandler(w http.ResponseWriter, r *http.Request) {
-	if redisClient == nil {
+	if RDB == nil {
 		http.Error(w, "Redis client not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	ctx := r.Context()
-	val, err := redisClient.Get(ctx, "state:web:view").Result()
+	val, err := RDB.Get(ctx, "state:web:view").Result()
 	if err != nil {
 		// Not an error, just empty
 		w.Header().Set("Content-Type", "application/json")

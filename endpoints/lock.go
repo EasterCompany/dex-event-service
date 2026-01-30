@@ -32,7 +32,7 @@ type LockRequest struct {
 }
 
 // SystemLockHandler toggles the event ingestion lock
-func SystemLockHandler(redisClient *redis.Client) http.HandlerFunc {
+func SystemLockHandler(RDB *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -57,7 +57,7 @@ func SystemLockHandler(redisClient *redis.Client) http.HandlerFunc {
 			if isLocked {
 				isLocked = false
 				log.Printf("System Event Lock DISABLED. Processing pending events...")
-				go processPendingEvents(redisClient)
+				go processPendingEvents(RDB)
 			}
 		}
 
@@ -95,17 +95,17 @@ func IsEventLocked(req types.CreateEventRequest) bool {
 }
 
 // QueuePendingEvent stores the blocked event in Redis
-func QueuePendingEvent(redisClient *redis.Client, req types.CreateEventRequest) error {
+func QueuePendingEvent(RDB *redis.Client, req types.CreateEventRequest) error {
 	ctx := context.Background()
 	jsonData, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
-	return redisClient.RPush(ctx, pendingQueueKey, jsonData).Err()
+	return RDB.RPush(ctx, pendingQueueKey, jsonData).Err()
 }
 
 // processPendingEvents replays queued events
-func processPendingEvents(redisClient *redis.Client) {
+func processPendingEvents(RDB *redis.Client) {
 	ctx := context.Background()
 
 	// Create a dedicated HTTP client to re-submit events to ourselves
@@ -133,7 +133,7 @@ func processPendingEvents(redisClient *redis.Client) {
 
 	for {
 		// Pop one event
-		result, err := redisClient.LPop(ctx, pendingQueueKey).Result()
+		result, err := RDB.LPop(ctx, pendingQueueKey).Result()
 		if err == redis.Nil {
 			break // Queue empty
 		}
