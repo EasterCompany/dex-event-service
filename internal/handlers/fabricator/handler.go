@@ -232,6 +232,12 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 	var runLogs strings.Builder
 	runLogs.WriteString(fmt.Sprintf("Run started at %s\n\n", time.Now().Format(time.RFC3339)))
 
+	// Audit: Run Started
+	_, _ = utils.SendEvent(ctx, h.RedisClient, "fabricator-agent", "system.audit.fabricator", map[string]interface{}{
+		"status":  "started",
+		"message": "Fabricator Waterfall Run Started",
+	})
+
 	// TIER 0: REVIEW (Alert -> Issue)
 	h.RedisClient.Set(ctx, "fabricator:active_tier", "review", utils.DefaultTTL)
 	utils.ReportProcess(ctx, h.RedisClient, h.DiscordClient, h.Config.ProcessID, "Review Protocol (Tier 0)")
@@ -240,10 +246,25 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 
 	if !done || err != nil || strings.Contains(reviewOut, "<NO_ISSUE/>") {
 		log.Printf("[%s] Waterfall aborted at Review: InferenceDone=%v, Err=%v, NoIssue=%v", HandlerName, done, err, strings.Contains(reviewOut, "<NO_ISSUE/>"))
+
+		_, _ = utils.SendEvent(ctx, h.RedisClient, "fabricator-agent", "system.audit.fabricator", map[string]interface{}{
+			"status":  "completed",
+			"tier":    "review",
+			"outcome": "no_action_needed",
+			"message": "Review completed. No issues created.",
+		})
+
 		h.finalizeRun(ctx, runLogs.String(), "Aborted at Review")
 		return
 	}
 	h.RedisClient.Set(ctx, "fabricator:last_run:review", time.Now().Unix(), 0)
+
+	_, _ = utils.SendEvent(ctx, h.RedisClient, "fabricator-agent", "system.audit.fabricator", map[string]interface{}{
+		"status":  "completed",
+		"tier":    "review",
+		"outcome": "action_required",
+		"message": "Review completed. Issues detected/created.",
+	})
 
 	// TIER 1: ISSUE (Investigation)
 	h.RedisClient.Set(ctx, "fabricator:active_tier", "issue", utils.DefaultTTL)
@@ -260,10 +281,29 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 
 	if strings.Contains(investigationReport, "<NO_ISSUE/>") {
 		h.closeIssue(targetIssue, "Dexter investigated the codebase and found this issue to be invalid or already resolved.\n\n### Investigation Summary\n"+investigationReport)
+
+		_, _ = utils.SendEvent(ctx, h.RedisClient, "fabricator-agent", "system.audit.fabricator", map[string]interface{}{
+			"status":       "completed",
+			"tier":         "issue",
+			"outcome":      "issue_closed",
+			"issue_number": targetIssue.Number,
+			"repo":         targetIssue.Repo,
+			"message":      fmt.Sprintf("Issue #%d investigated and closed (invalid/resolved).", targetIssue.Number),
+		})
+
 		h.finalizeRun(ctx, runLogs.String(), "Success (No Issue Found)")
 		return
 	}
 	h.RedisClient.Set(ctx, "fabricator:last_run:issue", time.Now().Unix(), 0)
+
+	_, _ = utils.SendEvent(ctx, h.RedisClient, "fabricator-agent", "system.audit.fabricator", map[string]interface{}{
+		"status":       "completed",
+		"tier":         "issue",
+		"outcome":      "fix_required",
+		"issue_number": targetIssue.Number,
+		"repo":         targetIssue.Repo,
+		"message":      fmt.Sprintf("Issue #%d investigated. Plan created.", targetIssue.Number),
+	})
 
 	// TIER 2: CONSTRUCT (Fix)
 	h.RedisClient.Set(ctx, "fabricator:active_tier", "construct", utils.DefaultTTL)
@@ -274,9 +314,25 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 
 	if !success || err != nil {
 		log.Printf("[%s] Construction unsuccessful. Leaving changes for next run.", HandlerName)
+
+		_, _ = utils.SendEvent(ctx, h.RedisClient, "fabricator-agent", "system.audit.fabricator", map[string]interface{}{
+			"status":       "failed",
+			"tier":         "construct",
+			"issue_number": targetIssue.Number,
+			"message":      "Construction/Verification failed.",
+		})
+
 		h.finalizeRun(ctx, runLogs.String(), "Incomplete (Build Failed)")
 		return
 	}
+
+	_, _ = utils.SendEvent(ctx, h.RedisClient, "fabricator-agent", "system.audit.fabricator", map[string]interface{}{
+		"status":       "completed",
+		"tier":         "construct",
+		"outcome":      "success",
+		"issue_number": targetIssue.Number,
+		"message":      fmt.Sprintf("Fix implemented and verified for Issue #%d.", targetIssue.Number),
+	})
 
 	// STEP 2.5: FINAL PRODUCTION BUILD (Trigger Git Add/Commit/Push)
 	log.Printf("[%s] Construction successful. Triggering production build and commit...", HandlerName)
@@ -290,6 +346,17 @@ func (h *FabricatorHandler) PerformWaterfall(ctx context.Context) {
 	buildCmd.Dir = workingDir
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		log.Printf("[%s] Production build failed: %v\nOutput: %s", HandlerName, err, string(out))
+		_, _ = utils.SendEvent(ctx, h.RedisClient, "fabricator-agent", "system.audit.fabricator", map[string]interface{}{
+			"status":  "failed",
+			"tier":    "deploy",
+			"message": "Production build/deploy failed.",
+		})
+	} else {
+		_, _ = utils.SendEvent(ctx, h.RedisClient, "fabricator-agent", "system.audit.fabricator", map[string]interface{}{
+			"status":  "completed",
+			"tier":    "deploy",
+			"message": "Fix deployed (committed/pushed).",
+		})
 	}
 
 	h.RedisClient.Set(ctx, "fabricator:last_run:construct", time.Now().Unix(), 0)
@@ -479,6 +546,12 @@ func (h *FabricatorHandler) PerformIssue(ctx context.Context, reviewOutput strin
 }
 
 func (h *FabricatorHandler) PerformConstruct(ctx context.Context, targetIssue *IssueInfo, investigationReport string) (bool, string, error) {
+	// Check for MOCK mode
+	if val, _ := h.RedisClient.Get(ctx, "fabricator:config:mock_construct").Result(); val == "true" {
+		log.Printf("[%s] Construct Protocol MOCKED by configuration.", HandlerName)
+		return true, "Simulated construction success (MOCKED).", nil
+	}
+
 	issueNum := fmt.Sprintf("%d", targetIssue.Number)
 	repo := targetIssue.Repo
 
