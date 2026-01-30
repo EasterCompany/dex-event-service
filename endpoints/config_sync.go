@@ -34,6 +34,24 @@ func ConfigSyncHandler(w http.ResponseWriter, r *http.Request) {
 		myIP = tsStatus.Self.TailscaleIPs[0]
 	}
 
+	if r.Method == http.MethodPost {
+		if file == "service-map" || file == "service-map.json" {
+			var newConfig config.ServiceMapConfig
+			if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
+				http.Error(w, fmt.Sprintf("failed to decode body: %v", err), http.StatusBadRequest)
+				return
+			}
+			if err := config.SaveServiceMap(&newConfig); err != nil {
+				http.Error(w, fmt.Sprintf("failed to save config: %v", err), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Error(w, "only service-map updates are supported via POST", http.StatusBadRequest)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 
 	switch file {

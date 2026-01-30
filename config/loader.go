@@ -71,3 +71,22 @@ func LoadServerMap() (*ServerMapConfig, error) {
 	err := loadAndUnmarshal("server-map.json", &cfg)
 	return &cfg, err
 }
+
+// SaveServiceMap saves the service-map.json file.
+func SaveServiceMap(cfg *ServiceMapConfig) error {
+	path, err := getConfigPath("service-map.json")
+	if err != nil {
+		return fmt.Errorf("could not get config path for service-map.json: %w", err)
+	}
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal service map: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("failed to write service-map.json: %w", err)
+	}
+
+	return nil
+}
