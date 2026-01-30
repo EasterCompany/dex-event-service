@@ -555,7 +555,7 @@ func (h *FabricatorHandler) PerformConstruct(ctx context.Context, targetIssue *I
 	issueNum := fmt.Sprintf("%d", targetIssue.Number)
 	repo := targetIssue.Repo
 
-	prompt := fmt.Sprintf("IMPLEMENT FIX for Issue #%s: %s in %s\n\n### INVESTIGATION REPORT:\n%s\n\nObjective: Apply the necessary changes to the codebase. You are in YOLO mode. Verify with builds/tests. REQUIREMENTS: Changes must pass `dex build --source --force --dry-run` before completion.", issueNum, targetIssue.Title, repo, investigationReport)
+	prompt := fmt.Sprintf("IMPLEMENT FIX for Issue #%s: %s in %s\n\n### INVESTIGATION REPORT:\n%s\n\nObjective: Apply the necessary changes to the codebase. You are in Unrestricted mode. Verify with builds/tests. REQUIREMENTS: Changes must pass `dex build --source --force --dry-run` before completion.", issueNum, targetIssue.Title, repo, investigationReport)
 
 	result, stats, err := h.ModelClient.GenerateWithContext(ctx, h.Config.Models["construct"], prompt, nil, nil)
 	if err != nil {
