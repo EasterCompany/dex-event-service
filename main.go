@@ -273,6 +273,7 @@ func main() {
 	router.HandleFunc("/system/options", endpoints.SystemOptionsHandler).Methods("GET", "POST")
 	router.HandleFunc("/system/lock", endpoints.SystemLockHandler(redisClient)).Methods("POST")
 	router.HandleFunc("/system/service/{action}", endpoints.SystemServiceControlHandler).Methods("POST")
+	router.HandleFunc("/system/config", endpoints.ConfigSyncHandler).Methods("GET")
 	router.HandleFunc("/processes", endpoints.ListProcessesHandler).Methods("GET")
 	router.HandleFunc("/processes", endpoints.HandleProcessRegistration).Methods("POST")
 	router.HandleFunc("/processes/{id}", endpoints.HandleProcessUnregistration).Methods("DELETE")

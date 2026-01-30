@@ -64,3 +64,10 @@ func LoadSystem() (*SystemConfig, error) {
 	err := loadAndUnmarshal("system.json", &cfg)
 	return &cfg, err
 }
+
+// LoadServerMap loads the server-map.json file.
+func LoadServerMap() (*ServerMapConfig, error) {
+	var cfg ServerMapConfig
+	err := loadAndUnmarshal("server-map.json", &cfg)
+	return &cfg, err
+}
