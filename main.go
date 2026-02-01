@@ -212,7 +212,11 @@ func main() {
 	getServiceURL := func(id, category string, defaultPort string) string {
 		for _, s := range serviceMap.Services[category] {
 			if s.ID == id {
-				return fmt.Sprintf("http://127.0.0.1:%s", s.Port)
+				host := s.Domain
+				if host == "" {
+					host = "127.0.0.1"
+				}
+				return fmt.Sprintf("http://%s:%s", host, s.Port)
 			}
 		}
 		return fmt.Sprintf("http://127.0.0.1:%s", defaultPort)
