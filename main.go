@@ -36,8 +36,6 @@ var (
 	branch    string
 	commit    string
 	buildDate string
-	buildYear string
-	buildHash string
 	arch      string
 )
 
@@ -47,8 +45,8 @@ func main() {
 		arg := os.Args[1]
 		switch arg {
 		case "version", "--version", "-v":
-			// Format version like other services: major.minor.patch.branch.commit.buildDate.arch.buildHash
-			utils.SetVersion(version, branch, commit, buildDate, buildYear, buildHash, arch)
+			// Format version like other services: major.minor.patch.branch.commit.buildDate.arch
+			utils.SetVersion(version, branch, commit, buildDate, arch)
 			fmt.Println(utils.GetVersion().Str)
 			os.Exit(0)
 		case "help", "--help", "-h":
@@ -63,7 +61,7 @@ func main() {
 			os.Exit(0)
 		case "test":
 			// Run test suite
-			utils.SetVersion(version, branch, commit, buildDate, buildYear, buildHash, arch)
+			utils.SetVersion(version, branch, commit, buildDate, arch)
 			if err := RunTestSuite(); err != nil {
 				log.Fatalf("Test suite failed: %v", err)
 			}
@@ -77,7 +75,7 @@ func main() {
 	flag.Parse()
 
 	// Set the version for the service.
-	utils.SetVersion(version, branch, commit, buildDate, buildYear, buildHash, arch)
+	utils.SetVersion(version, branch, commit, buildDate, arch)
 
 	// Declare options here so it's accessible in all scopes
 	var options *config.OptionsConfig
@@ -208,25 +206,11 @@ func main() {
 	// Resolve Service URLs
 	var discordURL, eventURL, ttsURL, webURL, modelHubURL string
 
-	// Helper to find service URL
-	getServiceURL := func(id, category string, defaultPort string) string {
-		for _, s := range serviceMap.Services[category] {
-			if s.ID == id {
-				host := s.Domain
-				if host == "" {
-					host = "127.0.0.1"
-				}
-				return fmt.Sprintf("http://%s:%s", host, s.Port)
-			}
-		}
-		return fmt.Sprintf("http://127.0.0.1:%s", defaultPort)
-	}
-
-	discordURL = getServiceURL("dex-discord-service", "th", "8081")
-	eventURL = getServiceURL("dex-event-service", "cs", "8082")
-	ttsURL = getServiceURL("dex-tts-service", "be", "8200")
-	webURL = getServiceURL("dex-web-service", "be", "8201")
-	modelHubURL = getServiceURL("dex-model-service", "co", "8400")
+	discordURL = serviceMap.GetServiceURL("dex-discord-service", "th", "8081")
+	eventURL = serviceMap.GetServiceURL("dex-event-service", "cs", "8082")
+	ttsURL = serviceMap.GetServiceURL("dex-tts-service", "be", "8200")
+	webURL = serviceMap.GetServiceURL("dex-web-service", "be", "8201")
+	modelHubURL = serviceMap.ResolveHubURL()
 
 	// Initialize dependencies
 	deps := &internalHandlers.Dependencies{

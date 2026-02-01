@@ -1,3 +1,8 @@
+# github.com/EasterCompany/dex-go-utils v0.0.0 => ../dex-go-utils
+## explicit; go 1.25.6
+github.com/EasterCompany/dex-go-utils/config
+github.com/EasterCompany/dex-go-utils/middleware
+github.com/EasterCompany/dex-go-utils/utils
 # github.com/cespare/xxhash/v2 v2.3.0
 ## explicit; go 1.11
 github.com/cespare/xxhash/v2
@@ -10,7 +15,7 @@ github.com/google/uuid
 # github.com/gorilla/mux v1.8.1
 ## explicit; go 1.20
 github.com/gorilla/mux
-# github.com/redis/go-redis/v9 v9.17.1
+# github.com/redis/go-redis/v9 v9.17.3
 ## explicit; go 1.18
 github.com/redis/go-redis/v9
 github.com/redis/go-redis/v9/auth
@@ -34,3 +39,4 @@ golang.org/x/image/riff
 golang.org/x/image/vp8
 golang.org/x/image/vp8l
 golang.org/x/image/webp
+# github.com/EasterCompany/dex-go-utils => ../dex-go-utils
