@@ -2,6 +2,7 @@
 ## explicit; go 1.25.6
 github.com/EasterCompany/dex-go-utils/config
 github.com/EasterCompany/dex-go-utils/middleware
+github.com/EasterCompany/dex-go-utils/network
 github.com/EasterCompany/dex-go-utils/utils
 # github.com/cespare/xxhash/v2 v2.3.0
 ## explicit; go 1.11

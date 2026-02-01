@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/EasterCompany/dex-go-utils/network"
 )
 
 // ServiceMapConfig represents the structure of service-map.json
@@ -26,12 +28,23 @@ type ServiceType struct {
 type ServiceEntry struct {
 	ID           string              `json:"id"`
 	ShortName    string              `json:"short_name,omitempty"`
+	Type         string              `json:"type,omitempty"`
 	Repo         string              `json:"repo"`
 	Source       string              `json:"source"`
 	Domain       string              `json:"domain,omitempty"`
 	Port         string              `json:"port,omitempty"`
 	InternalPort string              `json:"internal_port,omitempty"`
 	Credentials  *ServiceCredentials `json:"credentials,omitempty"`
+}
+
+// IsHostedLocally checks if the service's domain resolves to a local address.
+func (s *ServiceEntry) IsHostedLocally() bool {
+	return network.IsAddressLocal(s.Domain)
+}
+
+// IsBuildable returns true if the service is a local Go service that can be compiled.
+func (s *ServiceEntry) IsBuildable() bool {
+	return s.Type == "cs" || s.Type == "co"
 }
 
 // ServiceCredentials holds connection credentials for services like Redis
