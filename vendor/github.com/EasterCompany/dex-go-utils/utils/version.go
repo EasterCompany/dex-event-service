@@ -65,6 +65,9 @@ func GetVersion() VersionReport {
 	major, minor, patch, _ := ParseVersionTag(VersionStr)
 	// Standard 7-part version label: MAJOR.MINOR.PATCH.BRANCH.COMMIT.DATETIME.ARCH
 	fullStr := FormatFull(VersionStr, GitBranch, GitCommit, BuildDate, Architecture)
+	if BuildHash != "" {
+		fullStr = fmt.Sprintf("%s.%s", fullStr, BuildHash)
+	}
 
 	v := Version{
 		Major:     fmt.Sprintf("%d", major),
